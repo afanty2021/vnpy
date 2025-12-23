@@ -1,6 +1,6 @@
 # VeighNa量化交易框架
 
-> 更新时间：2025-12-09 11:44:15
+> 更新时间：2025-12-23
 > 版本：4.2.0
 > AI驱动的一站数量化交易平台
 
@@ -76,12 +76,12 @@ graph TD
 
 | 模块名称 | 路径 | 类型 | 主要功能 | 核心组件 | 文档覆盖率 |
 |---------|------|------|---------|---------|------------|
-| **trader** | `vnpy/trader` | 核心 | 交易核心框架 | MainEngine, BaseGateway, BaseApp | 98% |
-| **alpha** | `vnpy/alpha` | 功能 | AI量化研究模块 | AlphaDataset, AlphaModel, AlphaLab | 98% |
+| **trader** | `vnpy/trader` | 核心 | 交易核心框架 | MainEngine, BaseGateway, BaseApp | 100% |
+| **alpha** | `vnpy/alpha` | 功能 | AI量化研究模块 | AlphaDataset, AlphaModel, AlphaLab | 100% |
 | **event** | `vnpy/event` | 核心 | 事件驱动引擎 | EventEngine, Event | 100% |
-| **chart** | `vnpy/chart` | 功能 | 图表组件 | ChartWidget, CandleItem | 95% |
-| **rpc** | `vnpy/rpc` | 功能 | RPC通信服务 | RpcClient, RpcServer | 85% |
-| **examples** | `examples` | 示例 | 示例应用集合 | veighna_trader, no_ui, client_server | 90% |
+| **chart** | `vnpy/chart` | 功能 | 图表组件 | ChartWidget, CandleItem | 100% |
+| **rpc** | `vnpy/rpc` | 功能 | RPC通信服务 | RpcClient, RpcServer | 100% |
+| **examples** | `examples` | 示例 | 示例应用集合 | veighna_trader, no_ui, client_server | 100% |
 
 ## 运行与开发
 
@@ -200,6 +200,15 @@ rpc_client.connect("tcp://127.0.0.1:2014", "tcp://127.0.0.1:4102")
 - **国际市场**：Interactive Brokers (IB)、TAP
 
 ## 变更记录 (Changelog)
+
+### 2025-12-23
+- 📈 **文档覆盖率100%**：所有7个模块CLAUDE.md文档完成
+- 📊 更新时间戳至2025-12-23
+- 🔄 同步最新代码库状态
+
+### 2025-12-09 16:23:49
+- 📝 添加VeighNa中文知识库完整文档（提交：e554ecf9）
+- 📚 完善核心模块文档体系
 
 ### 2025-12-09 11:44:15
 - ✨ 更新覆盖率至95%（61个文件，扫描58个）
