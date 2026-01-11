@@ -1,7 +1,7 @@
 # VeighNa量化交易框架
 
-> 更新时间：2025-12-23
-> 版本：4.2.0
+> 更新时间：2026-01-11
+> 版本：4.3.0
 > AI驱动的一站数量化交易平台
 
 ## 项目愿景
@@ -81,9 +81,16 @@ graph TD
 | **event** | `vnpy/event` | 核心 | 事件驱动引擎 | EventEngine, Event | 100% |
 | **chart** | `vnpy/chart` | 功能 | 图表组件 | ChartWidget, CandleItem | 100% |
 | **rpc** | `vnpy/rpc` | 功能 | RPC通信服务 | RpcClient, RpcServer | 100% |
-| **examples** | `examples` | 示例 | 示例应用集合 | veighna_trader, no_ui, client_server | 100% |
+| **examples** | `examples` | 示例 | 示例应用集合 | veighna_trader, no_ui, simple_chart, demo_app | 100% |
 
 ## 运行与开发
+
+### 📖 启动前必读
+项目根目录提供了 `STARTUP_GUIDE.md` 启动指南，包含：
+- 环境验证命令 (`python test_quick.py`)
+- 三种配置模式（纯测试/模拟交易/实盘交易）
+- 学习路径推荐
+- 常用命令和资源链接
 
 ### 快速启动
 ```python
@@ -108,6 +115,17 @@ def main():
     main_window.show()
 
     qapp.exec()
+```
+
+### 🎯 演示应用（推荐新手）
+项目根目录提供了 `demo_app.py` 功能演示应用：
+- **零依赖**：无需交易接口或历史数据
+- **完整演示**：展示事件引擎、主引擎、图表组件、Alpha模块
+- **实时更新**：模拟实时K线数据更新
+
+运行方式：
+```bash
+python demo_app.py
 ```
 
 ### 无界面模式
@@ -145,8 +163,12 @@ rpc_client.connect("tcp://127.0.0.1:2014", "tcp://127.0.0.1:4102")
 ## 测试策略
 
 ### 测试目录结构
-- `examples/` - 示例代码和演示程序
-- `vnpy/alpha/strategy/backtesting.py` - Alpha策略回测引擎
+- **根目录测试文件**：
+  - `test_quick.py` - 快速验证所有核心功能
+  - `test_basic.py` - 基础功能测试
+  - `test_simple.py` - 简单功能演示
+- **示例应用**：`examples/` - 示例代码和演示程序
+- **回测引擎**：`vnpy/alpha/strategy/backtesting.py` - Alpha策略回测引擎
 - 测试覆盖：主要通过示例应用验证功能
 
 ### 质量工具
@@ -200,6 +222,18 @@ rpc_client.connect("tcp://127.0.0.1:2014", "tcp://127.0.0.1:4102")
 - **国际市场**：Interactive Brokers (IB)、TAP
 
 ## 变更记录 (Changelog)
+
+### 2026-01-11
+- 📈 **版本升级到4.3.0**：同步上游最新版本
+- 📚 **文档资源完善**：
+  - 新增 `STARTUP_GUIDE.md` 启动指南
+  - 新增 `demo_app.py` 功能演示应用
+  - 新增 `examples/candle_chart/simple_chart.py` 简化图表示例
+  - 新增 `test_quick.py`、`test_basic.py`、`test_simple.py` 测试文件
+- 🔧 **核心代码改进**（提交b08f9422, cb29c5cb, 5881a61b）：
+  - 重构 `ts_slope` / `ts_rsquare` / `ts_resi` 算子函数
+  - DataProxy的所有比较运算，直接返回pl.Int32（而不是Bool）
+- 📊 **更新模块索引**：examples模块新增简化图表示例
 
 ### 2025-12-23
 - 📈 **文档覆盖率100%**：所有7个模块CLAUDE.md文档完成
