@@ -2,7 +2,7 @@
 
 # Examples - 示例应用集合
 
-> 更新时间：2025-12-09 11:44:15
+> 更新时间：2026-01-18
 
 ## 模块职责
 
@@ -83,7 +83,33 @@ python run.py
 - 展示基础的客户端-服务端通信
 - 适合理解RPC服务的基本原理
 
-### 6. data_recorder - 数据记录示例
+### 6. notebook_trading - Jupyter笔记本交易示例
+**路径**: `notebook_trading/demo_notebook.ipynb`
+
+**功能描述**:
+- 展示如何在Jupyter Notebook中进行交互式交易开发
+- 集成了事件引擎、数据订阅、策略执行等完整流程
+- 适合量化研究和策略原型开发
+- 支持实时数据展示和交互式调试
+
+**关键特性**:
+- 交互式单元格执行，方便调试
+- 实时K线数据可视化
+- 策略信号回测展示
+- 完整的交易生命周期演示
+
+**运行环境**:
+- Python 3.13.9 (通过ipykernel)
+- Jupyter Notebook/Lab
+- 推荐使用conda或venv虚拟环境
+
+**使用方法**:
+```bash
+cd examples/notebook_trading
+jupyter notebook demo_notebook.ipynb
+```
+
+### 7. data_recorder - 数据记录示例
 **路径**: `data_recorder/data_recorder.py`
 
 **功能描述**:
@@ -137,11 +163,21 @@ A: 是的，支持多个客户端同时连接同一个服务端。
 - `client_server/run_server.py` - 服务端程序
 - `client_server/run_client.py` - 客户端程序
 - `candle_chart/run.py` - K线图表示例
+- `candle_chart/simple_chart.py` - 简化K线图表示例
 - `simple_rpc/test_server.py` - RPC测试服务端
 - `simple_rpc/test_client.py` - RPC测试客户端
+- `notebook_trading/demo_notebook.ipynb` - Jupyter笔记本交易示例
 - `data_recorder/data_recorder.py` - 数据记录程序
 
 ## 变更记录 (Changelog)
+
+### 2026-01-18
+- 📈 **新增notebook_trading示例**：添加Jupyter笔记本交易示例说明
+- 🔧 **demo_notebook配置更新**（提交bc499df8）：
+  - 清理单元格元数据（移除scrolled字段）
+  - 更新Python内核版本：3.7.4 -> 3.13.9
+  - 更新nbformat版本：2 -> 4
+- 📝 文档时间戳同步更新
 
 ### 2025-12-09 11:44:15
 - ✨ 创建examples模块文档

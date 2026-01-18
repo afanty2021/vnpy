@@ -1,6 +1,6 @@
 # VeighNa量化交易框架
 
-> 更新时间：2026-01-11
+> 更新时间：2026-01-18
 > 版本：4.3.0
 > AI驱动的一站数量化交易平台
 
@@ -222,6 +222,20 @@ rpc_client.connect("tcp://127.0.0.1:2014", "tcp://127.0.0.1:4102")
 - **国际市场**：Interactive Brokers (IB)、TAP
 
 ## 变更记录 (Changelog)
+
+### 2026-01-18
+- 🐛 **Bug修复**（提交fe2697a8, PR#3721）：
+  - 修复LogEngine中loguru日志记录时的KeyError问题
+  - 将logger.log()的gateway_name参数改为使用logger.bind()方法
+  - 正确绑定到loguru的extra上下文中（Issue #3715）
+- 🔧 **示例应用优化**（提交bc499df8）：
+  - demo_notebook配置更新：Python内核3.7.4->3.13.9
+  - 清理单元格元数据，更新nbformat版本
+- 📚 **文档完善**：
+  - examples模块新增notebook_trading示例说明
+  - 同步examples模块文档至2026-01-18
+- 🔄 **上游同步**（提交c1bc4c3d）：
+  - 合并upstream/master最新代码
 
 ### 2026-01-11
 - 📈 **版本升级到4.3.0**：同步上游最新版本
