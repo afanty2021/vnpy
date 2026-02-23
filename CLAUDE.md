@@ -1,8 +1,41 @@
 # VeighNa量化交易框架
 
-> 更新时间：2026-01-18
+> 更新时间：2026-02-23
 > 版本：4.3.0
 > AI驱动的一站数量化交易平台
+
+## 本地环境配置
+
+### Conda 环境
+- **环境名称**: Quant-3.11
+- **Python 版本**: 3.11
+- **安装路径**: D:\scoop\apps\miniconda\current\envs\Quant-3.11
+
+### 已安装的包
+- vnpy (核心框架)
+- vnpy_tushare (Tushare数据接口)
+- vnpy_qmt (QMT证券交易接口)
+
+### QMT 配置
+- **QMT 账号**: 40218291
+- **MiniQMT 路径**: D:/国金证券QMT交易端/userdata_mini/  (**注意：不是主目录，是userdata_mini子目录**)
+- **xtquant 模块**: 已复制到 conda 环境 site-packages
+
+### 启动命令
+```bash
+# 启动 QMT 交易客户端
+conda run -n Quant-3.11 python examples/veighna_trader/run_qmt.py
+
+# 启动演示应用
+conda run -n Quant-3.11 python demo_app.py
+```
+
+> ⚠️ **重要：MiniQMT 路径必须是 userdata_mini 子目录！**
+>
+> 错误路径：`D:/国金证券QMT交易端/` ❌
+> 正确路径：`D:/国金证券QMT交易端/userdata_mini/` ✅
+>
+> 注意：运行 QMT 接口时需要保持 MiniQMT 客户端登录状态
 
 ## 项目愿景
 
