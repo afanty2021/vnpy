@@ -41,3 +41,4 @@ _templates
 # Alpha
 lab/
 /.mypy_cache
+examples/veighna_trader/run_qmt.py
