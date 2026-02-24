@@ -466,9 +466,5 @@ pytest vnpy_china_rules/tests/test_engine.py -v
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #6274 | 2:29 PM | ⚖️ | Designed comprehensive data service and monitoring architecture for A-share trading system | ~626 |
-| #6273 | " | 🔵 | Found comprehensive A股数据服务 design document from earlier session | ~468 |
-| #6271 | " | 🟣 | Design Documents Completed for REQ-003 and REQ-004 | ~331 |
-| #6260 | 2:21 PM | 🔵 | DataSource Implementation Verified in Main Repository | ~379 |
-| #6252 | 2:15 PM | 🔵 | vnpy_riskmanager uses RuleTemplate pattern with dynamic callback registration and send_order patching | ~522 |
+| #6354 | 5:35 PM | 🔵 | vnpy_china_rules module structure identified | ~241 |
 </claude-mem-context>

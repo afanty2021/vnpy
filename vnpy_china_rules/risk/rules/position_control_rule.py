@@ -41,6 +41,24 @@ class PositionControlRule(RuleTemplate):
         self.current_positions: int = 0
         self.position_data: dict[str, PositionData] = {}
 
+        # 引用风控管理器（用于发送告警）
+        self._risk_manager = None
+
+    def set_risk_manager(self, risk_manager):
+        """设置风控管理器引用"""
+        self._risk_manager = risk_manager
+
+    def _trigger_alert(self, message: str, severity: str, data: dict = None):
+        """触发告警到监控系统"""
+        if self._risk_manager:
+            self._risk_manager._trigger_alert(
+                rule_name=self.name,
+                rule_type="position_control",
+                message=message,
+                severity=severity,
+                data=data or {}
+            )
+
     def check_allowed(self, req: OrderRequest, gateway_name: str) -> bool:
         """检查是否允许委托"""
         # 1. 检查持仓数量限制
@@ -82,9 +100,13 @@ class PositionControlRule(RuleTemplate):
         if req.direction == Direction.LONG and current_count >= self.max_holdings:
             # 检查是否在已有持仓中
             if req.vt_symbol not in self.position_data:
-                self.write_log(
-                    f"持仓数量{current_count}达到上限{self.max_holdings}，禁止新开仓"
-                )
+                msg = f"持仓数量{current_count}达到上限{self.max_holdings}，禁止新开仓"
+                self.write_log(msg)
+                self._trigger_alert(msg, "warning", {
+                    "current_count": current_count,
+                    "max_holdings": self.max_holdings,
+                    "vt_symbol": req.vt_symbol
+                })
                 return True
         return False
 
@@ -116,9 +138,13 @@ class PositionControlRule(RuleTemplate):
         position_ratio = position_value / account.balance
 
         if position_ratio > self.max_single_position_ratio:
-            self.write_log(
-                f"单股仓位比例{position_ratio:.2%}超过上限{self.max_single_position_ratio:.2%}"
-            )
+            msg = f"单股仓位比例{position_ratio:.2%}超过上限{self.max_single_position_ratio:.2%}"
+            self.write_log(msg)
+            self._trigger_alert(msg, "warning", {
+                "position_ratio": position_ratio,
+                "max_ratio": self.max_single_position_ratio,
+                "vt_symbol": req.vt_symbol
+            })
             return True
         return False
 
@@ -147,9 +173,13 @@ class PositionControlRule(RuleTemplate):
         total_ratio = total_value / account.balance
 
         if total_ratio > self.max_total_position_ratio:
-            self.write_log(
-                f"总仓位比例{total_ratio:.2%}超过上限{self.max_total_position_ratio:.2%}"
-            )
+            msg = f"总仓位比例{total_ratio:.2%}超过上限{self.max_total_position_ratio:.2%}"
+            self.write_log(msg)
+            self._trigger_alert(msg, "warning", {
+                "total_ratio": total_ratio,
+                "max_ratio": self.max_total_position_ratio,
+                "vt_symbol": req.vt_symbol
+            })
             return True
         return False
 
@@ -181,9 +211,14 @@ class PositionControlRule(RuleTemplate):
         industry_ratio = industry_value / account.balance
 
         if industry_ratio > self.max_industry_ratio:
-            self.write_log(
-                f"行业[{industry}]仓位比例{industry_ratio:.2%}超过上限{self.max_industry_ratio:.2%}"
-            )
+            msg = f"行业[{industry}]仓位比例{industry_ratio:.2%}超过上限{self.max_industry_ratio:.2%}"
+            self.write_log(msg)
+            self._trigger_alert(msg, "warning", {
+                "industry": industry,
+                "industry_ratio": industry_ratio,
+                "max_ratio": self.max_industry_ratio,
+                "vt_symbol": req.vt_symbol
+            })
             return True
         return False
 
@@ -191,6 +226,12 @@ class PositionControlRule(RuleTemplate):
         """获取股票行业"""
         # 从数据源获取
         return "科技"  # TODO: 实现从数据源获取
+
+    def get_contract(self, vt_symbol: str):
+        """获取合约信息"""
+        if hasattr(self, "risk_engine") and self.risk_engine:
+            return self.risk_engine.main_engine.get_contract(vt_symbol)
+        return None
 
     def _update_position(self, trade: TradeData) -> None:
         """更新持仓数据"""

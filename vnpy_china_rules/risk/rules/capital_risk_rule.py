@@ -42,6 +42,30 @@ class CapitalRiskRule(RuleTemplate):
         self.frozen_capital: float = 0.0
         self.last_date: datetime = datetime.now()      # 上次检查日期
 
+        # 引用风控管理器（用于发送告警）
+        self._risk_manager = None
+
+    def set_risk_manager(self, risk_manager):
+        """设置风控管理器引用"""
+        self._risk_manager = risk_manager
+
+    def get_contract(self, vt_symbol: str):
+        """获取合约信息"""
+        if hasattr(self, "risk_engine") and self.risk_engine:
+            return self.risk_engine.main_engine.get_contract(vt_symbol)
+        return None
+
+    def _trigger_alert(self, message: str, severity: str, data: dict = None):
+        """触发告警到监控系统"""
+        if self._risk_manager:
+            self._risk_manager._trigger_alert(
+                rule_name=self.name,
+                rule_type="capital_risk",
+                message=message,
+                severity=severity,
+                data=data or {}
+            )
+
     def check_allowed(self, req: OrderRequest, gateway_name: str) -> bool:
         """检查是否允许委托"""
         # 1. 检查资金使用比例
@@ -65,10 +89,13 @@ class CapitalRiskRule(RuleTemplate):
 
         # 检查是否触发日止损
         if self._check_daily_loss_limit():
-            self.write_log(
-                f"触发单日止损：当日亏损{self.daily_pnl:.2f}，"
-                f"达到上限{self.max_daily_loss_ratio:.2%}"
-            )
+            msg = f"触发单日止损：当日亏损{self.daily_pnl:.2f}，达到上限{self.max_daily_loss_ratio:.2%}"
+            self.write_log(msg)
+            self._trigger_alert(msg, "critical", {
+                "daily_pnl": self.daily_pnl,
+                "loss_ratio": abs(self.daily_pnl) / self.daily_initial_balance if self.daily_initial_balance > 0 else 0,
+                "max_ratio": self.max_daily_loss_ratio
+            })
 
         # 更新资金使用比例
         self.capital_usage_ratio = (
@@ -104,10 +131,12 @@ class CapitalRiskRule(RuleTemplate):
 
         # 检查资金使用比例
         if self.capital_usage_ratio > self.max_capital_usage_ratio:
-            self.write_log(
-                f"资金使用比例{self.capital_usage_ratio:.2%}，"
-                f"超过上限{self.max_capital_usage_ratio:.2%}"
-            )
+            msg = f"资金使用比例{self.capital_usage_ratio:.2%}，超过上限{self.max_capital_usage_ratio:.2%}"
+            self.write_log(msg)
+            self._trigger_alert(msg, "warning", {
+                "capital_usage_ratio": self.capital_usage_ratio,
+                "max_ratio": self.max_capital_usage_ratio
+            })
 
         self.put_event()
 
@@ -130,10 +159,13 @@ class CapitalRiskRule(RuleTemplate):
             new_ratio = new_used / account.balance
 
             if new_ratio > self.max_capital_usage_ratio:
-                self.write_log(
-                    f"资金使用比例{new_ratio:.2%}，"
-                    f"委托后超过上限{self.max_capital_usage_ratio:.2%}"
-                )
+                msg = f"资金使用比例{new_ratio:.2%}，委托后超过上限{self.max_capital_usage_ratio:.2%}"
+                self.write_log(msg)
+                self._trigger_alert(msg, "warning", {
+                    "new_ratio": new_ratio,
+                    "max_ratio": self.max_capital_usage_ratio,
+                    "vt_symbol": req.vt_symbol
+                })
                 return True
 
         return False
