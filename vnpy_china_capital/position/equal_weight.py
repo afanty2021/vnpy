@@ -5,7 +5,7 @@
 指数增强等需要均匀分散风险的策略。
 """
 
-from typing import Dict, List
+from typing import Any, Dict, List
 from .base import PositionSizer
 from ..objects.types import PositionAllocation
 
@@ -33,7 +33,7 @@ class EqualWeightPosition(PositionSizer):
         symbols: List[str],
         total_capital: float,
         prices: Dict[str, float],
-        **kwargs
+        **kwargs: Any
     ) -> Dict[str, int]:
         """
         等权重分配仓位

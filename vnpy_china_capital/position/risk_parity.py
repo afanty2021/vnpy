@@ -6,7 +6,7 @@
 """
 
 import numpy as np
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from .base import PositionSizer
 from ..objects.types import PositionAllocation
 
@@ -36,7 +36,7 @@ class RiskParityPosition(PositionSizer):
         total_capital: float,
         prices: Dict[str, float],
         volatilities: Optional[Dict[str, float]] = None,
-        **kwargs
+        **kwargs: Any
     ) -> Dict[str, int]:
         """
         风险平价分配

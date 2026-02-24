@@ -5,7 +5,7 @@
 市场环境好时高仓位，环境差时低仓位。
 """
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from .base import PositionSizer
 from .equal_weight import EqualWeightPosition
 from ..objects.types import PositionAllocation
@@ -82,7 +82,7 @@ class DynamicPosition(PositionSizer):
         market_volatility: Optional[float] = None,
         trend_strength: Optional[float] = None,
         volatilities: Optional[Dict[str, float]] = None,
-        **kwargs
+        **kwargs: Any
     ) -> Dict[str, int]:
         """
         动态仓位分配
