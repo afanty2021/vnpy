@@ -4,7 +4,10 @@
 生成各种分析图表用于报表展示。
 """
 
-from typing import List, Optional, Dict
+from __future__ import annotations
+
+from typing import List, Optional, Dict, Any
+
 from pathlib import Path
 import numpy as np
 
@@ -18,7 +21,7 @@ class ChartGenerator:
     生成各种分析图表用于报表展示，包括资金曲线、盈亏分布、持仓饼图等。
     """
 
-    def __init__(self, dpi: int = 300, figsize: tuple = (10, 6)):
+    def __init__(self, dpi: int = 300, figsize: tuple = (10, 6)) -> None:
         """
         初始化图表生成器
 
@@ -26,13 +29,13 @@ class ChartGenerator:
             dpi: 图像分辨率
             figsize: 图像尺寸 (宽, 高)
         """
-        self.default_dpi = dpi
-        self.default_figsize = figsize
+        self.default_dpi: int = dpi
+        self.default_figsize: tuple = figsize
 
         # 尝试导入matplotlib
-        self._matplotlib_available = False
-        self._plt = None
-        self._mdates = None
+        self._matplotlib_available: bool = False
+        self._plt: Any = None
+        self._mdates: Any = None
         self._try_import_matplotlib()
 
     def _try_import_matplotlib(self) -> None:
@@ -52,6 +55,12 @@ class ChartGenerator:
         except ImportError:
             print("警告: matplotlib库未安装，图表生成功能不可用")
             print("请使用 pip install matplotlib 安装")
+
+    def _get_plt(self) -> Any:
+        """获取matplotlib.pyplot模块（已检查可用性）"""
+        plt = self._plt
+        assert plt is not None, "matplotlib未安装或不可用"
+        return plt
 
     def generate_equity_curve(
         self,
@@ -73,8 +82,10 @@ class ChartGenerator:
         if not self._matplotlib_available:
             return False
 
+        plt = self._get_plt()
+
         try:
-            fig, ax = self._plt.subplots(figsize=self.default_figsize)
+            fig, ax = plt.subplots(figsize=self.default_figsize)
 
             if dates:
                 x_data = range(len(equity_data))
@@ -95,9 +106,9 @@ class ChartGenerator:
             ax.set_ylabel('资金', fontsize=12)
             ax.grid(True, alpha=0.3)
 
-            self._plt.tight_layout()
-            self._plt.savefig(filepath, dpi=self.default_dpi, bbox_inches='tight')
-            self._plt.close()
+            plt.tight_layout()
+            plt.savefig(filepath, dpi=self.default_dpi, bbox_inches='tight')
+            plt.close()
 
             return True
 
@@ -123,8 +134,10 @@ class ChartGenerator:
         if not self._matplotlib_available:
             return False
 
+        plt = self._get_plt()
+
         try:
-            fig, axes = self._plt.subplots(1, 2, figsize=(14, 5))
+            fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
             # 直方图
             axes[0].hist(pnl_data, bins=30, color='#4472C4', alpha=0.7, edgecolor='white')
@@ -145,9 +158,9 @@ class ChartGenerator:
             axes[1].set_ylabel('累计盈亏', fontsize=10)
             axes[1].grid(True, alpha=0.3)
 
-            self._plt.tight_layout()
-            self._plt.savefig(filepath, dpi=self.default_dpi, bbox_inches='tight')
-            self._plt.close()
+            plt.tight_layout()
+            plt.savefig(filepath, dpi=self.default_dpi, bbox_inches='tight')
+            plt.close()
 
             return True
 
@@ -173,6 +186,8 @@ class ChartGenerator:
         if not self._matplotlib_available:
             return False
 
+        plt = self._get_plt()
+
         try:
             if not industry_data:
                 return False
@@ -189,10 +204,10 @@ class ChartGenerator:
             if not values:
                 return False
 
-            fig, ax = self._plt.subplots(figsize=(10, 8))
+            fig, ax = plt.subplots(figsize=(10, 8))
 
             # 使用颜色映射
-            colors = self._plt.cm.Set3(range(len(labels)))
+            colors = plt.cm.Set3(range(len(labels)))
 
             wedges, texts, autotexts = ax.pie(
                 values,
@@ -210,9 +225,9 @@ class ChartGenerator:
 
             ax.set_title('行业分布', fontsize=14, fontweight='bold')
 
-            self._plt.tight_layout()
-            self._plt.savefig(filepath, dpi=self.default_dpi, bbox_inches='tight')
-            self._plt.close()
+            plt.tight_layout()
+            plt.savefig(filepath, dpi=self.default_dpi, bbox_inches='tight')
+            plt.close()
 
             return True
 
@@ -238,6 +253,8 @@ class ChartGenerator:
         if not self._matplotlib_available:
             return False
 
+        plt = self._get_plt()
+
         try:
             if not position_data:
                 return False
@@ -251,7 +268,7 @@ class ChartGenerator:
             market_values = [d.get('market_value', 0) for d in sorted_data]
             pnls = [d.get('pnl', 0) for d in sorted_data]
 
-            fig, axes = self._plt.subplots(1, 2, figsize=(14, 6))
+            fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
             # 市值柱状图
             colors = ['#4472C4' for _ in market_values]
@@ -274,9 +291,9 @@ class ChartGenerator:
             axes[1].set_xticklabels(symbols, rotation=45, ha='right', fontsize=8)
             axes[1].grid(True, alpha=0.3, axis='y')
 
-            self._plt.tight_layout()
-            self._plt.savefig(filepath, dpi=self.default_dpi, bbox_inches='tight')
-            self._plt.close()
+            plt.tight_layout()
+            plt.savefig(filepath, dpi=self.default_dpi, bbox_inches='tight')
+            plt.close()
 
             return True
 
@@ -304,8 +321,10 @@ class ChartGenerator:
         if not self._matplotlib_available:
             return False
 
+        plt = self._get_plt()
+
         try:
-            fig, ax = self._plt.subplots(figsize=(12, 6))
+            fig, ax = plt.subplots(figsize=(12, 6))
 
             # 根据正负设置颜色
             colors = ['#FF0000' if r >= 0 else '#00AA00' for r in returns]
@@ -329,9 +348,9 @@ class ChartGenerator:
             ax.set_ylabel('收益率(%)', fontsize=12)
             ax.grid(True, alpha=0.3, axis='y')
 
-            self._plt.tight_layout()
-            self._plt.savefig(filepath, dpi=self.default_dpi, bbox_inches='tight')
-            self._plt.close()
+            plt.tight_layout()
+            plt.savefig(filepath, dpi=self.default_dpi, bbox_inches='tight')
+            plt.close()
 
             return True
 
@@ -357,6 +376,8 @@ class ChartGenerator:
         if not self._matplotlib_available:
             return False
 
+        plt = self._get_plt()
+
         try:
             if not positions:
                 return False
@@ -371,14 +392,14 @@ class ChartGenerator:
             labels = [f"{p.symbol}\n{p.name[:4]}" for p in sorted_positions]
             sizes = [p.market_value for p in sorted_positions]
 
-            fig, ax = self._plt.subplots(figsize=(10, 10))
+            fig, ax = plt.subplots(figsize=(10, 10))
 
             wedges, texts, autotexts = ax.pie(
                 sizes,
                 labels=labels,
                 autopct='%1.1f%%',
                 startangle=90,
-                colors=self._plt.cm.Set3(range(len(labels)))
+                colors=plt.cm.Set3(range(len(labels)))
             )
 
             for autotext in autotexts:
@@ -387,9 +408,9 @@ class ChartGenerator:
 
             ax.set_title('持仓分布', fontsize=14, fontweight='bold')
 
-            self._plt.tight_layout()
-            self._plt.savefig(filepath, dpi=self.default_dpi, bbox_inches='tight')
-            self._plt.close()
+            plt.tight_layout()
+            plt.savefig(filepath, dpi=self.default_dpi, bbox_inches='tight')
+            plt.close()
 
             return True
 
@@ -415,6 +436,8 @@ class ChartGenerator:
         if not self._matplotlib_available:
             return False
 
+        plt = self._get_plt()
+
         try:
             if not returns:
                 return False
@@ -438,7 +461,7 @@ class ChartGenerator:
                 else:
                     rolling_sharpe.append(0)
 
-            fig, ax = self._plt.subplots(figsize=(12, 6))
+            fig, ax = plt.subplots(figsize=(12, 6))
 
             ax.plot(rolling_returns, rolling_sharpe, color='#4472C4', linewidth=2)
             ax.fill_between(rolling_returns, rolling_sharpe, alpha=0.3, color='#4472C4')
@@ -449,9 +472,9 @@ class ChartGenerator:
             ax.set_ylabel('夏普比率', fontsize=12)
             ax.grid(True, alpha=0.3)
 
-            self._plt.tight_layout()
-            self._plt.savefig(filepath, dpi=self.default_dpi, bbox_inches='tight')
-            self._plt.close()
+            plt.tight_layout()
+            plt.savefig(filepath, dpi=self.default_dpi, bbox_inches='tight')
+            plt.close()
 
             return True
 
@@ -477,6 +500,8 @@ class ChartGenerator:
         if not self._matplotlib_available:
             return False
 
+        plt = self._get_plt()
+
         try:
             if not equity_curve:
                 return False
@@ -491,7 +516,7 @@ class ChartGenerator:
                 drawdown = (peak - value) / peak if peak > 0 else 0
                 drawdowns.append(drawdown)
 
-            fig, ax = self._plt.subplots(figsize=(12, 6))
+            fig, ax = plt.subplots(figsize=(12, 6))
 
             ax.fill_between(range(len(drawdowns)), drawdowns, alpha=0.5, color='#FF6B6B')
             ax.plot(drawdowns, color='#FF6B6B', linewidth=1)
@@ -501,9 +526,9 @@ class ChartGenerator:
             ax.set_ylabel('回撤比例', fontsize=12)
             ax.grid(True, alpha=0.3)
 
-            self._plt.tight_layout()
-            self._plt.savefig(filepath, dpi=self.default_dpi, bbox_inches='tight')
-            self._plt.close()
+            plt.tight_layout()
+            plt.savefig(filepath, dpi=self.default_dpi, bbox_inches='tight')
+            plt.close()
 
             return True
 

@@ -4,7 +4,9 @@ PDF导出器
 将报表数据导出为PDF格式。
 """
 
-from typing import List, Optional
+from __future__ import annotations
+
+from typing import List, Optional, Any
 from datetime import date, datetime
 
 from ..core.models import ReportData, PositionAnalysis, PositionRecord
@@ -17,25 +19,25 @@ class PDFExporter:
     将报表数据导出为PDF文件，支持日报、月报、持仓分析等格式。
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化PDF导出器"""
-        self.page_size = "A4"
-        self.orientation = "portrait"
+        self.page_size: str = "A4"
+        self.orientation: str = "portrait"
 
         # 尝试导入reportlab
-        self._reportlab_available = False
-        self._pdfmetrics = None
-        self._TTFont = None
-        self._colors = None
-        self._A4 = None
-        self._cm = None
-        self._SimpleDocTemplate = None
-        self._Table = None
-        self._TableStyle = None
-        self._Paragraph = None
-        self._Spacer = None
-        self._getSampleStyleSheet = None
-        self._ParagraphStyle = None
+        self._reportlab_available: bool = False
+        self._pdfmetrics: Any = None
+        self._TTFont: Any = None
+        self._colors: Any = None
+        self._A4: Any = None
+        self._cm: Any = None
+        self._SimpleDocTemplate: Any = None
+        self._Table: Any = None
+        self._TableStyle: Any = None
+        self._Paragraph: Any = None
+        self._Spacer: Any = None
+        self._getSampleStyleSheet: Any = None
+        self._ParagraphStyle: Any = None
         self._try_import_reportlab()
 
     def _try_import_reportlab(self) -> None:
@@ -100,6 +102,24 @@ class PDFExporter:
 
         except Exception as e:
             print(f"字体注册警告: {e}")
+
+    def _check_reportlab(self) -> bool:
+        """检查reportlab是否可用"""
+        if not self._reportlab_available:
+            return False
+        # 验证所有必要的属性都已初始化
+        return (
+            self._colors is not None
+            and self._A4 is not None
+            and self._cm is not None
+            and self._SimpleDocTemplate is not None
+            and self._Table is not None
+            and self._TableStyle is not None
+            and self._Paragraph is not None
+            and self._Spacer is not None
+            and self._getSampleStyleSheet is not None
+            and self._ParagraphStyle is not None
+        )
 
     def export_daily_report(
         self,

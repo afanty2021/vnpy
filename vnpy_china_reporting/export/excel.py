@@ -4,11 +4,15 @@ Excel导出器
 将报表数据导出为Excel格式。
 """
 
-from typing import Optional, List
+from __future__ import annotations
+
+from typing import Optional, List, Any
 from pathlib import Path
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.workbook import Workbook
+from openpyxl.worksheet.worksheet import Worksheet
 from datetime import date, datetime
 
 from ..core.models import ReportData, PositionAnalysis, PositionRecord
@@ -21,7 +25,7 @@ class ExcelExporter:
     将报表数据导出为Excel文件，支持日报、月报、持仓分析等格式。
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化导出器并设置默认样式"""
         # 字体设置
         self.title_font = Font(
@@ -254,7 +258,7 @@ class ExcelExporter:
             print(f"导出持仓分析失败: {e}")
             return False
 
-    def _write_title(self, ws, row: int, text: str) -> int:
+    def _write_title(self, ws: Worksheet, row: int, text: str) -> int:
         """
         写入标题行
 
@@ -276,10 +280,10 @@ class ExcelExporter:
 
     def _write_section(
         self,
-        ws,
+        ws: Worksheet,
         row: int,
         title: str,
-        data: List[List]
+        data: List[List[Any]]
     ) -> int:
         """
         写入一个数据区块
@@ -311,7 +315,7 @@ class ExcelExporter:
 
     def _write_position_table(
         self,
-        ws,
+        ws: Worksheet,
         row: int,
         positions: List[PositionRecord]
     ) -> int:
@@ -364,8 +368,8 @@ class ExcelExporter:
                     if isinstance(value, str):
                         pnl_value = float(value)
                     else:
-                        pnl_value = value
-                    if pnl_value > 0:
+                        pnl_value = value  # type: ignore
+                    if isinstance(pnl_value, (int, float)) and pnl_value > 0:
                         cell.font = Font(color="FF0000", name="微软雅黑")  # 红色
                     elif pnl_value < 0:
                         cell.font = Font(color="00AA00", name="微软雅黑")  # 绿色
@@ -377,7 +381,7 @@ class ExcelExporter:
 
     def _write_top_holdings_table(
         self,
-        ws,
+        ws: Worksheet,
         row: int,
         top_holdings: List[dict]
     ) -> int:
@@ -425,7 +429,7 @@ class ExcelExporter:
 
     def _write_industry_table(
         self,
-        ws,
+        ws: Worksheet,
         row: int,
         industry_data: dict
     ) -> int:
@@ -472,7 +476,7 @@ class ExcelExporter:
 
     def apply_styles(
         self,
-        worksheet,
+        worksheet: Worksheet,
         styles: Optional[dict] = None
     ) -> None:
         """
