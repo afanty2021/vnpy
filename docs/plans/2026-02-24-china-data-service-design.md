@@ -1,20 +1,38 @@
 # A股数据服务设计文档
 
-> 文档版本：v1.0
+> 文档版本：v1.1
 > 创建日期：2026-02-24
+> 更新日期：2026-02-24
 > 需求编号：REQ-003
 > 优先级：P0
+>
+> **变更记录**:
+> - v1.1: 明确作为所有A股模块的唯一数据源
+> - v1.0: 初始版本
 
 ---
 
 ## 1. 设计目标
 
-为VeighNa框架构建完整的A股数据服务层，实现：
+为VeighNa框架构建**完整的A股数据服务层**，作为所有A股相关模块的**唯一数据来源**：
 
 1. **统一数据接口**：整合QMT实时数据和Tushare离线数据
-2. **多层次数据覆盖**：基础行情、股票信息、财务数据
+2. **多层次数据覆盖**：基础行情、股票信息、财务数据、龙虎榜、北向资金等
 3. **高性能存储**：MySQL + Redis缓存
 4. **增量更新**：避免全量拉取
+5. **模块解耦**：通过IDataProvider接口为其他模块提供数据
+
+### 1.1 作为唯一数据源
+
+**本模块是A股交易系统所有其他模块的数据基础**：
+
+| 消费模块 | 数据需求 | 依赖接口 |
+|---------|---------|---------|
+| vnpy_china_strategy | 基础行情、龙虎榜、北向资金 | IDataProvider, IDragonTigerProvider, INorthboundProvider |
+| vnpy_china_analysis | Level-2数据、Tick数据 | IDataProvider, ILevel2Provider |
+| vnpy_china_ml | 历史K线、财务数据 | IDataProvider |
+| vnpy_china_backtest | 历史K线数据 | IDataProvider |
+| vnpy_china_reporting | 持仓、交易数据 | IDataProvider |
 
 ---
 
@@ -394,9 +412,197 @@ class FinancialData:
     equity: float              # 股东权益
 ```
 
+### 4.3 龙虎榜数据
+
+```python
+@dataclass
+class DragonTigerData:
+    """龙虎榜数据"""
+    symbol: str                  # 股票代码
+    trade_date: date            # 交易日期
+    close_price: float          # 收盘价
+    change_pct: float           # 涨跌幅
+
+    # 买卖信息
+    institution_net_buy: float  # 机构净买入额（元）
+    broker_net_buy: float       # 营业部净买入额（元）
+
+    # 买卖占比
+    buy_ratio: float            # 买入占比
+    sell_ratio: float           # 卖出占比
+
+    # 席位信息
+    buy_brokers: list[str]      # 买入营业部列表
+    sell_brokers: list[str]     # 卖出营业部列表
+```
+
+### 4.4 北向资金数据
+
+```python
+@dataclass
+class NorthboundFlowData:
+    """北向资金流向数据"""
+    trade_date: date            # 交易日期
+    net_inflow: float           # 净流入（亿元）
+    buy_volume: float           # 买入量（亿元）
+    sell_volume: float          # 卖出量（亿元）
+
+    # 持股变化
+    holding_changes: Dict[str, float]  # 个股持股变化 {symbol: change_ratio}
+```
+
+### 4.5 板块数据
+
+```python
+@dataclass
+class SectorData:
+    """板块数据"""
+    sector_name: str            # 板块名称
+    sector_code: str            # 板块代码
+    stocks: list[str]           # 成分股列表
+
+    # 板块指标
+    index_value: float          # 板块指数
+    change_pct: float           # 涨跌幅
+    turnover: float             # 成交额
+    pe_ratio: float             # 市盈率
+```
+
 ---
 
-## 5. 增量更新机制
+## 5. 接口实现
+
+### 5.1 实现IDataProvider接口
+
+```python
+from vnpy_china_interface import IDataProvider
+
+class ChinaDataService(IDataProvider):
+    """A股数据服务 - 实现IDataProvider接口"""
+
+    def get_bar_data(
+        self,
+        symbol: str,
+        exchange: Exchange,
+        interval: Interval,
+        start: datetime,
+        end: datetime
+    ) -> list[BarData]:
+        """实现接口方法 - 获取K线数据"""
+        # 原有实现...
+        pass
+
+    def get_tick_data(
+        self,
+        symbol: str,
+        exchange: Exchange,
+        start: datetime,
+        end: datetime
+    ) -> list[TickData]:
+        """实现接口方法 - 获取Tick数据"""
+        # 原有实现...
+        pass
+
+    def get_stock_info(self, symbol: str) -> Optional[Dict]:
+        """实现接口方法 - 获取股票信息"""
+        info = self.database.load_stock_info(symbol)
+        return info.__dict__ if info else None
+
+    def get_financial_data(
+        self,
+        symbol: str,
+        report_date: str
+    ) -> Optional[Dict]:
+        """实现接口方法 - 获取财务数据"""
+        data = self.database.load_financial_data(symbol, report_date)
+        return data.__dict__ if data else None
+
+    def subscribe_quote(self, symbols: List[str]) -> bool:
+        """实现接口方法 - 订阅实时行情"""
+        return self.qmt_adapter.subscribe(symbols)
+```
+
+### 5.2 实现龙虎榜数据接口
+
+```python
+from vnpy_china_interface import IDragonTigerProvider
+
+class ChinaDataService(IDragonTigerProvider):
+    """扩展龙虎榜数据接口"""
+
+    def get_dragon_tiger_data(
+        self,
+        trade_date: date
+    ) -> List[DragonTigerData]:
+        """获取指定日期的龙虎榜数据"""
+        return self.tushare_adapter.fetch_dragon_tiger_data(trade_date)
+
+    def get_institution_rank(
+        self,
+        trade_date: date,
+        top_n: int = 10
+    ) -> List[DragonTigerData]:
+        """获取机构排名"""
+        data = self.get_dragon_tiger_data(trade_date)
+        # 按机构净买入排序
+        return sorted(data, key=lambda x: x.institution_net_buy, reverse=True)[:top_n]
+```
+
+### 5.3 实现北向资金数据接口
+
+```python
+from vnpy_china_interface import INorthboundProvider
+
+class ChinaDataService(INorthboundProvider):
+    """扩展北向资金数据接口"""
+
+    def get_northbound_flow(
+        self,
+        trade_date: date
+    ) -> Optional[NorthboundFlowData]:
+        """获取北向资金流向"""
+        return self.tushare_adapter.fetch_northbound_flow(trade_date)
+
+    def get_stock_holding_change(
+        self,
+        symbol: str,
+        days: int = 5
+    ) -> Dict[str, float]:
+        """获取个股持股变化"""
+        return self.tushare_adapter.fetch_holding_change(symbol, days)
+```
+
+### 5.4 实现板块数据接口
+
+```python
+from vnpy_china_interface import ISectorProvider
+
+class ChinaDataService(ISectorProvider):
+    """扩展板块数据接口"""
+
+    def get_sector_list(self) -> List[SectorData]:
+        """获取板块列表"""
+        return self.tushare_adapter.fetch_sector_list()
+
+    def get_sector_stocks(self, sector_code: str) -> List[str]:
+        """获取板块成分股"""
+        return self.tushare_adapter.fetch_sector_stocks(sector_code)
+
+    def get_sector_index(
+        self,
+        sector_code: str,
+        start_date: str,
+        end_date: str
+    ) -> List[BarData]:
+        """获取板块指数数据"""
+        return self.tushare_adapter.fetch_sector_index(
+            sector_code, start_date, end_date
+        )
+```
+
+---
+
+## 6. 增量更新机制
 
 ### 5.1 数据更新流程
 

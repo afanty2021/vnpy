@@ -7,6 +7,15 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #6146 | 12:43 PM | 🔵 | Complete design specification for A-share trading rules adaptation module | ~492 |
-| #6144 | " | 🔵 | Design document located for A-share trading rules implementation | ~171 |
+| #6349 | 5:22 PM | ✅ | Updated risk management design with monitoring integration interface | ~284 |
+| #6344 | 5:16 PM | 🔵 | Risk Management Design Document Exists and Comprehensive | ~370 |
+| #6334 | 4:53 PM | 🔵 | REQ-003 Implementation Plan Document Access | ~246 |
+| #6331 | 3:47 PM | 🔵 | Design review and modification summary document created | ~826 |
+| #6329 | 3:45 PM | 🔴 | Bayesian optimizer code bugs fixed in optimization design document | ~785 |
+| #6328 | " | 🔄 | Optimization design refactored to extend vnpy.trader.optimize module | ~750 |
+| #6326 | 3:44 PM | 🔄 | ML strategy implementation plan updated to reflect vnpy.alpha extension approach | ~722 |
+| #6324 | 3:43 PM | ⚖️ | ML strategy design refactored to extend vnpy.alpha module instead of reimplementing | ~750 |
+| #6322 | 3:42 PM | 🔄 | Strategy library design updated to use unified data source and standardized interfaces | ~652 |
+| #6316 | 3:39 PM | ✅ | REQ numbering correction started for market analysis design document | ~279 |
+| #6144 | 12:43 PM | 🔵 | Design document located for A-share trading rules implementation | ~171 |
 </claude-mem-context>

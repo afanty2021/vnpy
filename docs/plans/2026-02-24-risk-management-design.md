@@ -1,9 +1,14 @@
 # A股交易风险管理系统设计文档
 
-> 文档版本：v1.0
+> 文档版本：v1.1
 > 创建日期：2026-02-24
+> 更新日期：2026-02-24
 > 需求编号：REQ-002
 > 优先级：P0
+>
+> **变更记录**:
+> - v1.1: 添加与vnpy_china_monitor监控告警系统的集成接口（IRiskAlertProvider）
+> - v1.0: 初始版本
 
 ---
 
@@ -787,7 +792,51 @@ class TradingLimitRule(RuleTemplate):
 
 ## 4. 风控管理器
 
-### 4.1 RiskManager 扩展
+### 4.1 IRiskAlertProvider 接口（新增）
+
+```python
+# risk/alert_interface.py
+
+from abc import ABC, abstractmethod
+from typing import List, Callable, Dict
+from dataclasses import dataclass
+
+
+@dataclass
+class RiskAlertEvent:
+    """风控告警事件"""
+    rule_name: str           # 规则名称
+    rule_type: str           # 规则类型
+    message: str             # 触发消息
+    severity: str            # 严重程度 (info/warning/critical)
+    data: dict               # 相关数据
+
+
+class IRiskAlertProvider(ABC):
+    """风控告警提供者接口 - 被vnpy_china_monitor调用"""
+
+    @abstractmethod
+    def get_active_risk_alerts(self) -> List[RiskAlertEvent]:
+        """获取当前活跃的风控告警"""
+        pass
+
+    @abstractmethod
+    def subscribe_risk_events(self, callback: Callable[[RiskAlertEvent], None]):
+        """订阅风控事件"""
+        pass
+
+    @abstractmethod
+    def get_risk_status(self) -> dict:
+        """获取风控状态"""
+        pass
+
+    @abstractmethod
+    def get_rule_status(self, rule_name: str) -> dict:
+        """获取指定规则的状态"""
+        pass
+```
+
+### 4.2 AStockRiskManager 实现（更新版）
 
 ```python
 # risk/manager.py
@@ -795,10 +844,12 @@ class TradingLimitRule(RuleTemplate):
 from vnpy_riskmanager.engine import RiskEngine
 from vnpy_china_rules.engine import ChinaStockRulesEngine
 from vnpy_china_rules.datasource import DataSourceManager
+from typing import List, Callable, Dict, Optional
+from collections import defaultdict
 
 
-class AStockRiskManager:
-    """A股风险管理器"""
+class AStockRiskManager(IRiskAlertProvider):
+    """A股风险管理器 - 实现IRiskAlertProvider接口"""
 
     def __init__(self, main_engine, event_engine):
         self.main_engine = main_engine
@@ -809,6 +860,11 @@ class AStockRiskManager:
 
         # 初始化 A股规则引擎
         self.china_rules_engine: ChinaStockRulesEngine = None
+
+        # 新增：告警相关
+        self.risk_callbacks: List[Callable] = []
+        self.active_alerts: List[RiskAlertEvent] = []
+        self.rule_status: Dict[str, dict] = {}
 
     def initialize(self, qmt_gateway=None, tushare_token=None):
         """初始化风控系统"""
@@ -831,6 +887,9 @@ class AStockRiskManager:
         # 3. 初始化vnpy_riskmanager
         self._init_risk_manager()
 
+        # 4. 初始化规则状态跟踪
+        self._init_rule_status()
+
     def _init_risk_manager(self):
         """初始化风控引擎"""
         from vnpy_riskmanager import RiskManagerApp
@@ -841,6 +900,162 @@ class AStockRiskManager:
 
         # 注册自定义规则
         self._register_custom_rules()
+
+        # 注册规则触发回调
+        self._register_rule_callbacks()
+
+    def _init_rule_status(self):
+        """初始化规则状态跟踪"""
+        self.rule_status = {
+            "PositionControlRule": {
+                "active": False,
+                "trigger_count": 0,
+                "last_trigger": None
+            },
+            "StopProfitLossRule": {
+                "active": False,
+                "trigger_count": 0,
+                "last_trigger": None
+            },
+            "CapitalRiskRule": {
+                "active": False,
+                "trigger_count": 0,
+                "last_trigger": None
+            },
+            "TradingLimitRule": {
+                "active": False,
+                "trigger_count": 0,
+                "last_trigger": None
+            }
+        }
+
+    def _register_rule_callbacks(self):
+        """注册规则触发回调"""
+        # 为每个规则添加回调
+        if self.risk_engine:
+            for rule_name in self.risk_engine.rules.keys():
+                rule = self.risk_engine.rules[rule_name]
+                if hasattr(rule, 'add_trigger_callback'):
+                    rule.add_trigger_callback(self._on_rule_triggered)
+
+    def _on_rule_triggered(self, rule_name: str, trigger_info: dict):
+        """
+        规则触发回调
+
+        Args:
+            rule_name: 规则名称
+            trigger_info: 触发信息
+        """
+        from datetime import datetime
+
+        # 更新规则状态
+        if rule_name in self.rule_status:
+            self.rule_status[rule_name]["active"] = True
+            self.rule_status[rule_name]["trigger_count"] += 1
+            self.rule_status[rule_name]["last_trigger"] = datetime.now()
+
+        # 创建告警事件
+        event = RiskAlertEvent(
+            rule_name=rule_name,
+            rule_type=trigger_info.get("type", "unknown"),
+            message=trigger_info.get("message", f"{rule_name}触发"),
+            severity=trigger_info.get("severity", "warning"),
+            data=trigger_info
+        )
+
+        # 添加到活跃告警
+        self.active_alerts.append(event)
+
+        # 通知订阅者
+        for callback in self.risk_callbacks:
+            try:
+                callback(event)
+            except Exception as e:
+                print(f"告警回调错误: {e}")
+
+        # 通过事件引擎发送
+        from vnpy.event import Event
+        event = Event("RISK_ALERT", event)
+        self.event_engine.put(event)
+
+    # ==================== IRiskAlertProvider 接口实现 ====================
+
+    def get_active_risk_alerts(self) -> List[RiskAlertEvent]:
+        """获取当前活跃的风控告警"""
+        # 清理超过1小时的告警
+        from datetime import datetime, timedelta
+        cutoff = datetime.now() - timedelta(hours=1)
+        self.active_alerts = [
+            alert for alert in self.active_alerts
+            if alert.data.get("timestamp", datetime.now()) > cutoff
+        ]
+        return self.active_alerts
+
+    def subscribe_risk_events(self, callback: Callable[[RiskAlertEvent], None]):
+        """订阅风控事件"""
+        if callback not in self.risk_callbacks:
+            self.risk_callbacks.append(callback)
+
+    def unsubscribe_risk_events(self, callback: Callable[[RiskAlertEvent], None]):
+        """取消订阅风控事件"""
+        if callback in self.risk_callbacks:
+            self.risk_callbacks.remove(callback)
+
+    def get_risk_status(self) -> dict:
+        """获取风控状态"""
+        from vnpy.trader.object import AccountData
+
+        account: AccountData = self.main_engine.get_account()
+        positions = self.main_engine.get_all_positions()
+
+        # 计算总仓位
+        total_value = sum(
+            pos.volume * pos.price * self.main_engine.get_contract(pos.vt_symbol).size
+            for pos in positions
+            if pos.volume > 0
+        )
+
+        account_balance = account.balance if account else 0
+        total_position_ratio = total_value / account_balance if account_balance > 0 else 0
+
+        # 计算当日盈亏
+        daily_pnl = 0
+        if account and hasattr(account, 'pre_balance'):
+            daily_pnl = account.balance - account.pre_balance
+
+        return {
+            "daily_pnl": daily_pnl,
+            "daily_loss_ratio": daily_pnl / account.pre_balance if account and account.pre_balance > 0 else 0,
+            "total_position_ratio": total_position_ratio,
+            "capital_usage": (account_balance - account.available) / account_balance if account_balance > 0 else 0,
+            "active_alerts": len(self.active_alerts),
+            "rule_status": self.rule_status.copy()
+        }
+
+    def get_rule_status(self, rule_name: str) -> dict:
+        """获取指定规则的状态"""
+        return self.rule_status.get(rule_name, {})
+
+    def clear_active_alerts(self, rule_name: Optional[str] = None):
+        """
+        清除活跃告警
+
+        Args:
+            rule_name: 规则名称，None表示清除所有
+        """
+        if rule_name:
+            self.active_alerts = [
+                alert for alert in self.active_alerts
+                if alert.rule_name != rule_name
+            ]
+            if rule_name in self.rule_status:
+                self.rule_status[rule_name]["active"] = False
+        else:
+            self.active_alerts.clear()
+            for status in self.rule_status.values():
+                status["active"] = False
+
+    # ==================== 原有方法 ====================
 
     def _register_custom_rules(self):
         """注册自定义规则"""
@@ -907,19 +1122,164 @@ if __name__ == "__main__":
     main()
 ```
 
+### 5.2 与监控告警系统集成（新增）
+
+```python
+from vnpy.event import EventEngine
+from vnpy.trader.engine import MainEngine
+from vnpy_china_rules.risk.manager import AStockRiskManager
+from vnpy_china_monitor import MonitorSystem
+
+
+def main_with_monitor():
+    """与监控告警系统集成"""
+    # 创建引擎
+    event_engine = EventEngine()
+    main_engine = MainEngine(event_engine)
+
+    # 初始化风控系统
+    risk_manager = AStockRiskManager(main_engine, event_engine)
+    risk_manager.initialize(
+        qmt_gateway=main_engine.get_gateway("QMT"),
+        tushare_token="your_token"
+    )
+
+    # 初始化监控系统
+    monitor_system = MonitorSystem(event_engine, main_engine)
+
+    # 连接风控管理器到告警引擎
+    monitor_system.alert_engine.connect_risk_manager(risk_manager)
+
+    # 或者手动订阅风控事件
+    def on_risk_alert(event: RiskAlertEvent):
+        """风控告警回调"""
+        print(f"风控告警: {event.rule_name} - {event.message}")
+
+    risk_manager.subscribe_risk_events(on_risk_alert)
+
+    # 启动系统
+    monitor_system.start()
+    main_engine.start()
+
+    # 获取风控状态
+    status = risk_manager.get_risk_status()
+    print(f"风控状态: {status}")
+```
+
+### 5.3 风控规则触发告警示例
+
+```python
+# 在风控规则中触发告警
+
+class PositionControlRule(RuleTemplate):
+    """仓位控制风控规则"""
+
+    def check_allowed(self, req: OrderRequest, gateway_name: str) -> bool:
+        """检查是否允许委托"""
+        # ... 检查逻辑 ...
+
+        if total_ratio > self.max_total_position_ratio:
+            # 触发告警
+            self._trigger_alert("PositionControlRule", "总仓位超限", {
+                "type": "position",
+                "severity": "warning",
+                "symbol": req.vt_symbol,
+                "current_ratio": total_ratio,
+                "max_ratio": self.max_total_position_ratio
+            })
+
+            return False
+
+        return True
+
+    def _trigger_alert(self, rule_name: str, message: str, data: dict):
+        """触发告警"""
+        trigger_info = {
+            "message": message,
+            "type": data.get("type", "unknown"),
+            "severity": data.get("severity", "warning"),
+            **data
+        }
+
+        # 通过RiskEngine的回调机制触发
+        if hasattr(self, 'risk_engine') and hasattr(self.risk_engine, 'on_rule_triggered'):
+            self.risk_engine.on_rule_triggered(self.name, trigger_info)
+```
+
+### 5.4 监控告警系统调用示例
+
+```python
+# vnpy_china_monitor 内部调用 AStockRiskManager
+
+class RiskAlertBridge:
+    """风控告警桥接器"""
+
+    def check_risk_status(self):
+        """检查风控状态并发送告警"""
+        if not self.risk_manager:
+            return
+
+        status = self.risk_manager.get_risk_status()
+
+        # 检查日亏损
+        if status["daily_loss_ratio"] < -0.05:
+            self.alert_engine.send(
+                title="日亏损告警",
+                message=f"当日亏损{abs(status['daily_loss_ratio']):.2%}",
+                level="critical",
+                priority=70,  # AlertPriority.CRITICAL
+                source="risk",
+                alert_type="daily_loss",
+                key="daily",
+                cooldown=1800  # 30分钟冷却
+            )
+
+        # 检查总仓位
+        if status["total_position_ratio"] > 0.8:
+            self.alert_engine.send(
+                title="总仓位告警",
+                message=f"总仓位{status['total_position_ratio']:.2%}超过80%",
+                level="warning",
+                priority=50,  # AlertPriority.HIGH
+                source="risk",
+                alert_type="position",
+                key="total",
+                cooldown=600  # 10分钟冷却
+            )
+
+        # 检查活跃告警
+        active_alerts = self.risk_manager.get_active_risk_alerts()
+        for alert in active_alerts:
+            # 发送活跃的风控告警
+            self.alert_engine.send(
+                title=f"风控触发: {alert.rule_name}",
+                message=alert.message,
+                level=alert.severity,
+                priority=70 if alert.severity == "critical" else 50,
+                source="risk",
+                alert_type=alert.rule_type,
+                key=alert.rule_name,
+                cooldown=300
+            )
+```
+
 ---
 
-## 6. 实施计划
+## 6. 实施计划（更新版）
 
 | 阶段 | 任务 | 预估工时 |
 |------|------|---------|
 | 1 | 创建risk目录结构和基础文件 | 0.5人天 |
-| 2 | 实现PositionControlRule仓位控制规则 | 1.5人天 |
-| 3 | 实现StopProfitLossRule止损止盈规则 | 2人天 |
-| 4 | 实现CapitalRiskRule资金风控规则 | 1.5人天 |
-| 5 | 实现TradingLimitRule交易限制规则 | 1.5人天 |
-| 6 | 实现RiskManager管理器 | 1人天 |
-| 合计 | | **8人天** |
+| 2 | 实现IRiskAlertProvider接口 | 0.5人天 |
+| 3 | 实现PositionControlRule仓位控制规则 | 1.5人天 |
+| 4 | 实现StopProfitLossRule止损止盈规则 | 2人天 |
+| 5 | 实现CapitalRiskRule资金风控规则 | 1.5人天 |
+| 6 | 实现TradingLimitRule交易限制规则 | 1.5人天 |
+| 7 | 实现RiskManager管理器（含告警接口） | 1.5人天 |
+| 8 | 与vnpy_china_monitor集成测试 | 1人天 |
+| 合计 | | **10人天** |
+
+> 注：v1.1新增IRiskAlertProvider接口和与监控告警系统集成，工时从8人天增加到10人天
 
 ---
 
@@ -927,4 +1287,64 @@ if __name__ == "__main__":
 
 | 版本 | 日期 | 变更内容 |
 |------|------|---------|
+| v1.1 | 2026-02-24 | 添加IRiskAlertProvider接口，实现与vnpy_china_monitor监控告警系统的集成 |
+| v1.0 | 2026-02-24 | 初始版本 |
+
+---
+
+## 8. 集成接口参考
+
+### 8.1 IRiskAlertProvider接口定义
+
+```python
+class IRiskAlertProvider(ABC):
+    """风控告警提供者接口"""
+
+    @abstractmethod
+    def get_active_risk_alerts(self) -> List[RiskAlertEvent]:
+        """获取当前活跃的风控告警"""
+        pass
+
+    @abstractmethod
+    def subscribe_risk_events(self, callback: Callable[[RiskAlertEvent], None]):
+        """订阅风控事件"""
+        pass
+
+    @abstractmethod
+    def get_risk_status(self) -> dict:
+        """获取风控状态"""
+        pass
+```
+
+### 8.2 AStockRiskManager实现的方法
+
+| 方法 | 说明 | 返回值 |
+|------|------|--------|
+| `get_risk_status()` | 获取整体风控状态 | dict: daily_pnl, daily_loss_ratio, total_position_ratio等 |
+| `get_active_risk_alerts()` | 获取活跃告警列表 | List[RiskAlertEvent] |
+| `subscribe_risk_events(callback)` | 订阅风控事件 | None |
+| `get_rule_status(rule_name)` | 获取指定规则状态 | dict |
+| `clear_active_alerts(rule_name)` | 清除活跃告警 | None |
+
+### 8.3 风控告警事件结构
+
+```python
+@dataclass
+class RiskAlertEvent:
+    rule_name: str      # 规则名称 (PositionControlRule等)
+    rule_type: str      # 规则类型 (position/capital/trading等)
+    message: str        # 触发消息
+    severity: str       # 严重程度 (info/warning/critical)
+    data: dict          # 相关数据 (symbol, ratio等)
+```
+
+---
+
+`★ Insight ─────────────────────────────────────`
+**REQ-002 v1.1的关键改进：**
+1. **IRiskAlertProvider接口**：定义了标准的风控告警提供者接口，使监控告警系统可以统一调用
+2. **事件订阅机制**：支持订阅风控事件，实现松耦合的事件驱动架构
+3. **风控状态查询**：提供完整的风控状态查询接口，支持实时监控
+4. **告警生命周期管理**：支持活跃告警的跟踪和清除
+`─────────────────────────────────────────────────`
 | v1.0 | 2026-02-24 | 初始版本 |
