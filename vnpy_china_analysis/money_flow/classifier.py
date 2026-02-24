@@ -4,7 +4,7 @@
 根据成交金额对资金进行分类统计。
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 from ..objects.types import MoneyFlowLevel, MoneyFlowData
@@ -22,18 +22,53 @@ class MoneyFlowClassifier(RealtimeAnalyzer):
     - 小单：< 5万
     """
 
-    # 资金分级阈值（元）
+    # 默认阈值（元）
+    DEFAULT_THRESHOLDS = {
+        MoneyFlowLevel.SUPER_LARGE: 1_000_000,   # 100万
+        MoneyFlowLevel.LARGE: 200_000,           # 20万
+        MoneyFlowLevel.MEDIUM: 50_000,           # 5万
+    }
+
+    # 资金分级阈值（元）- 向后兼容
     SUPER_LARGE_THRESHOLD = 1000000
     LARGE_THRESHOLD = 200000
     MEDIUM_THRESHOLD = 50000
 
-    def __init__(self, cache_size: int = 2000) -> None:
+    def __init__(self, thresholds: Optional[Dict[MoneyFlowLevel, float]] = None, cache_size: int = 2000) -> None:
+        """
+        Args:
+            thresholds: 自定义阈值
+            cache_size: 缓存大小
+        """
         super().__init__(cache_size)
+        self.thresholds = thresholds or self.DEFAULT_THRESHOLDS
 
-    def classify(self, amount: float) -> MoneyFlowLevel:
-        """分类资金等级
+    def classify(self, price: float, volume: int) -> MoneyFlowLevel:
+        """分类订单
 
-        根据成交金额返回资金等级。
+        根据成交价格和数量返回资金等级。
+
+        Args:
+            price: 成交价格
+            volume: 成交数量（手）
+
+        Returns:
+            资金级别
+        """
+        # 转换为元：价格 * 数量 * 100 (每手100股)
+        amount = price * volume * 100
+
+        if amount >= self.thresholds[MoneyFlowLevel.SUPER_LARGE]:
+            return MoneyFlowLevel.SUPER_LARGE
+        elif amount >= self.thresholds[MoneyFlowLevel.LARGE]:
+            return MoneyFlowLevel.LARGE
+        elif amount >= self.thresholds[MoneyFlowLevel.MEDIUM]:
+            return MoneyFlowLevel.MEDIUM
+        else:
+            return MoneyFlowLevel.SMALL
+
+    def classify_by_amount(self, amount: float) -> MoneyFlowLevel:
+        """根据金额分类（向后兼容方法）
 
         Args:
             amount: 成交金额（元）
@@ -41,14 +76,36 @@ class MoneyFlowClassifier(RealtimeAnalyzer):
         Returns:
             资金等级枚举
         """
-        if amount >= self.SUPER_LARGE_THRESHOLD:
+        if amount >= self.thresholds[MoneyFlowLevel.SUPER_LARGE]:
             return MoneyFlowLevel.SUPER_LARGE
-        elif amount >= self.LARGE_THRESHOLD:
+        elif amount >= self.thresholds[MoneyFlowLevel.LARGE]:
             return MoneyFlowLevel.LARGE
-        elif amount >= self.MEDIUM_THRESHOLD:
+        elif amount >= self.thresholds[MoneyFlowLevel.MEDIUM]:
             return MoneyFlowLevel.MEDIUM
         else:
             return MoneyFlowLevel.SMALL
+
+    def classify_batch(self, trades: List[Dict[str, Any]]) -> Dict[MoneyFlowLevel, List[Dict[str, Any]]]:
+        """批量分类
+
+        Args:
+            trades: 交易列表，每个交易包含price和volume
+
+        Returns:
+            {级别: 交易列表}
+        """
+        result = {
+            MoneyFlowLevel.SUPER_LARGE: [],
+            MoneyFlowLevel.LARGE: [],
+            MoneyFlowLevel.MEDIUM: [],
+            MoneyFlowLevel.SMALL: [],
+        }
+
+        for trade in trades:
+            level = self.classify(trade["price"], trade["volume"])
+            result[level].append(trade)
+
+        return result
 
     def analyze(self, symbol: str, data: Dict[str, Any]) -> MoneyFlowData:
         """分析资金流向
@@ -60,12 +117,13 @@ class MoneyFlowClassifier(RealtimeAnalyzer):
         Returns:
             MoneyFlowData对象
         """
-        amount = data.get("amount", 0.0)
+        price = data.get("price", 0.0)
         volume = data.get("volume", 0)
         direction = data.get("direction", "buy")
 
-        # 根据金额分类
-        level = self.classify(amount)
+        # 根据价格和数量分类
+        level = self.classify(price, volume)
+        amount = price * volume * 100  # 转换为元
 
         # 根据方向计算流入/流出
         multiplier = 1 if direction == "buy" else -1
@@ -169,3 +227,14 @@ class MoneyFlowClassifier(RealtimeAnalyzer):
             "main_ratio": (abs(flow.super_large_inflow) + abs(flow.large_inflow)) / total * 100,
             "retail_ratio": (abs(flow.medium_inflow) + abs(flow.small_inflow)) / total * 100
         }
+
+    def get_threshold(self, level: MoneyFlowLevel) -> float:
+        """获取指定级别的阈值
+
+        Args:
+            level: 资金级别
+
+        Returns:
+            阈值（元）
+        """
+        return self.thresholds.get(level, 0.0)

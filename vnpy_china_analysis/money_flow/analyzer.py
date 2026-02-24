@@ -5,11 +5,11 @@
 """
 
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .classifier import MoneyFlowClassifier
 from .indicator import MoneyFlowIndicator
-from ..objects.types import MoneyFlowData
+from ..objects.types import MoneyFlowData, TickFlowData, MoneyFlowLevel
 
 
 class MoneyFlowAnalyzer:
@@ -19,13 +19,85 @@ class MoneyFlowAnalyzer:
     整合资金分类、指标计算等功能。
     """
 
-    def __init__(self) -> None:
-        """构造函数"""
-        self.classifier = MoneyFlowClassifier()
+    def __init__(self, thresholds: Optional[Dict[MoneyFlowLevel, float]] = None) -> None:
+        """构造函数
+
+        Args:
+            thresholds: 自定义资金分类阈值
+        """
+        self.classifier = MoneyFlowClassifier(thresholds)
         self.indicator = MoneyFlowIndicator()
+        self.flow_history: Dict[str, List[MoneyFlowData]] = {}
+
+    def analyze(
+        self,
+        symbol: str,
+        tick_flows: List[TickFlowData],
+        window_minutes: int = 5
+    ) -> MoneyFlowData:
+        """分析资金流向
+
+        Args:
+            symbol: 股票代码
+            tick_flows: 逐笔成交列表
+            window_minutes: 时间窗口（分钟）
+
+        Returns:
+            MoneyFlowData对象
+        """
+        now = datetime.now()
+        cutoff_time = now - timedelta(minutes=window_minutes)
+
+        # 筛选时间窗口内的成交
+        window_flows = [
+            t for t in tick_flows
+            if t.datetime >= cutoff_time
+        ]
+
+        # 初始化各层级资金流向
+        flows = {
+            MoneyFlowLevel.SUPER_LARGE: 0.0,
+            MoneyFlowLevel.LARGE: 0.0,
+            MoneyFlowLevel.MEDIUM: 0.0,
+            MoneyFlowLevel.SMALL: 0.0,
+        }
+
+        # 统计各层级资金
+        for flow in window_flows:
+            level = self.classifier.classify(flow.price, flow.volume)
+            amount = flow.price * flow.volume * 100
+
+            if flow.direction == "buy":
+                flows[level] += amount
+            else:
+                flows[level] -= amount
+
+        # 汇总
+        main_inflow = flows[MoneyFlowLevel.SUPER_LARGE] + flows[MoneyFlowLevel.LARGE]
+        retail_inflow = flows[MoneyFlowLevel.MEDIUM] + flows[MoneyFlowLevel.SMALL]
+        net_inflow = sum(flows.values())
+
+        money_flow = MoneyFlowData(
+            symbol=symbol,
+            datetime=now,
+            super_large_inflow=flows[MoneyFlowLevel.SUPER_LARGE],
+            large_inflow=flows[MoneyFlowLevel.LARGE],
+            medium_inflow=flows[MoneyFlowLevel.MEDIUM],
+            small_inflow=flows[MoneyFlowLevel.SMALL],
+            main_inflow=main_inflow,
+            retail_inflow=retail_inflow,
+            net_inflow=net_inflow
+        )
+
+        # 保存到历史
+        if symbol not in self.flow_history:
+            self.flow_history[symbol] = []
+        self.flow_history[symbol].append(money_flow)
+
+        return money_flow
 
     def update(self, symbol: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        """更新数据并返回分析结果
+        """更新数据并返回分析结果（向后兼容）
 
         Args:
             symbol: 股票代码
@@ -34,18 +106,31 @@ class MoneyFlowAnalyzer:
         Returns:
             分析结果字典
         """
-        # 计算资金流向
-        flow_data = self.classifier.analyze(symbol, data)
-        self.classifier.update_cache(symbol, data)
+        # 将字典数据转换为TickFlowData
+        tick_flow = TickFlowData(
+            symbol=symbol,
+            datetime=data.get("datetime", datetime.now()),
+            price=data.get("price", 0.0),
+            volume=data.get("volume", 0),
+            amount=data.get("amount", 0.0),
+            direction=data.get("direction", "buy"),
+            function_code=data.get("function_code", 1)
+        )
 
-        # 计算技术指标
-        self.indicator.calculate(symbol, data)
+        # 获取历史tick数据
+        if symbol not in self.flow_history:
+            tick_history = []
+        else:
+            # 从缓存中获取历史数据
+            tick_history = []
+
+        result = self.analyze(symbol, [tick_flow] + tick_history)
 
         return {
             "symbol": symbol,
             "datetime": datetime.now(),
-            "flow_data": flow_data,
-            "structure": self.classifier.get_flow_structure(symbol)
+            "flow_data": result,
+            "structure": self.get_flow_structure(symbol)
         }
 
     def get_flow_summary(self, symbol: str, minutes: int = 5) -> Dict[str, Any]:
@@ -58,7 +143,43 @@ class MoneyFlowAnalyzer:
         Returns:
             资金流向汇总
         """
-        flow_data = self.classifier.calculate_period_flow(symbol, minutes)
+        if symbol not in self.flow_history or not self.flow_history[symbol]:
+            return {
+                "symbol": symbol,
+                "period": f"{minutes}min",
+                "datetime": datetime.now(),
+                "super_large_inflow": 0,
+                "large_inflow": 0,
+                "medium_inflow": 0,
+                "small_inflow": 0,
+                "main_inflow": 0,
+                "retail_inflow": 0,
+                "net_inflow": 0
+            }
+
+        # 获取最近的数据
+        cutoff_time = datetime.now() - timedelta(minutes=minutes)
+        recent_flows = [
+            f for f in self.flow_history[symbol]
+            if f.datetime >= cutoff_time
+        ]
+
+        if not recent_flows:
+            recent_flows = self.flow_history[symbol][-1:]
+
+        # 汇总
+        flow_data = MoneyFlowData(
+            symbol=symbol,
+            datetime=datetime.now(),
+            super_large_inflow=sum(f.super_large_inflow for f in recent_flows),
+            large_inflow=sum(f.large_inflow for f in recent_flows),
+            medium_inflow=sum(f.medium_inflow for f in recent_flows),
+            small_inflow=sum(f.small_inflow for f in recent_flows)
+        )
+
+        flow_data.main_inflow = flow_data.super_large_inflow + flow_data.large_inflow
+        flow_data.retail_inflow = flow_data.medium_inflow + flow_data.small_inflow
+        flow_data.net_inflow = flow_data.main_inflow + flow_data.retail_inflow
 
         return {
             "symbol": symbol,
@@ -128,8 +249,8 @@ class MoneyFlowAnalyzer:
         Returns:
             主力净流入金额
         """
-        flow = self.classifier.calculate_period_flow(symbol, minutes=60)
-        return flow.main_inflow
+        summary = self.get_flow_summary(symbol, minutes=60)
+        return summary["main_inflow"]
 
     def get_net_inflow(self, symbol: str) -> float:
         """获取总净流入
@@ -140,8 +261,8 @@ class MoneyFlowAnalyzer:
         Returns:
             总净流入金额
         """
-        flow = self.classifier.calculate_period_flow(symbol, minutes=60)
-        return flow.net_inflow
+        summary = self.get_flow_summary(symbol, minutes=60)
+        return summary["net_inflow"]
 
     def clear(self, symbol: Optional[str] = None) -> None:
         """清理缓存数据
@@ -149,5 +270,10 @@ class MoneyFlowAnalyzer:
         Args:
             symbol: 股票代码，None表示清理全部
         """
+        if symbol:
+            self.flow_history.pop(symbol, None)
+        else:
+            self.flow_history.clear()
+
         self.classifier.clear_cache(symbol)
         self.indicator.clear_cache(symbol)

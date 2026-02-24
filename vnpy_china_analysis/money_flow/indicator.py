@@ -22,6 +22,18 @@ class MoneyFlowIndicator(HistoricalAnalyzer):
         super().__init__(cache_size)
         self.flow_history: Dict[str, List[MoneyFlowData]] = {}
 
+    def analyze(self, symbol: str, data: Dict[str, Any]) -> MoneyFlowData:
+        """分析资金流向（实现抽象方法）
+
+        Args:
+            symbol: 股票代码
+            data: 成交数据字典
+
+        Returns:
+            MoneyFlowData对象
+        """
+        return self.calculate(symbol, data)
+
     def calculate(self, symbol: str, data: Dict[str, Any]) -> MoneyFlowData:
         """计算资金流向
 
