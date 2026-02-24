@@ -1,0 +1,159 @@
+# vnpy_china_data - A股数据服务模块
+
+> 更新时间：2026-02-24
+> 版本：1.0.0
+
+## 模块概述
+
+vnpy_china_data是VeighNa量化交易框架的A股数据服务模块，负责整合QMT实时数据和Tushare离线数据，提供统一的数据访问接口。
+
+## 核心功能
+
+### 数据接口实现
+
+- **IDataProvider**: 基础行情数据接口
+  - K线数据（分钟线、日线）
+  - Tick数据
+  - 股票基本信息
+  - 实时行情订阅
+
+- **IDragonTigerProvider**: 龙虎榜数据接口
+  - 每日龙虎榜数据
+  - 机构排名
+
+- **INorthboundProvider**: 北向资金数据接口
+  - 北向资金流向
+  - 个股持股变化
+
+- **ISectorProvider**: 板块数据接口
+  - 板块列表
+  - 板块成分股
+  - 板块指数数据
+
+## 目录结构
+
+```
+vnpy_china_data/
+├── __init__.py                 # 模块初始化
+├── service.py                  # 数据服务主类
+├── cache.py                    # Redis缓存管理
+├── database.py                 # MySQL数据库操作层
+├── limiter.py                  # API限流器
+├── validator.py                # 数据验证器
+├── config.py                   # 配置项
+├── adapter/                    # 数据适配器
+│   ├── __init__.py
+│   ├── base.py                # 适配器基类
+│   ├── tushare_adapter.py    # Tushare数据适配器
+│   └── qmt_adapter.py         # QMT数据适配器
+└── models/                     # 数据模型
+    ├── __init__.py
+    ├── stock_info.py          # 股票信息模型
+    ├── financial_data.py      # 财务数据模型
+    ├── dragon_tiger.py        # 龙虎榜数据模型
+    ├── northbound.py          # 北向资金数据模型
+    └── sector.py              # 板块数据模型
+```
+
+## 快速开始
+
+### 基本使用
+
+```python
+from vnpy_china_data import ChinaDataService
+from vnpy.trader.constant import Exchange, Interval
+from datetime import datetime, timedelta
+
+# 获取数据服务单例
+service = ChinaDataService()
+
+# 连接数据源
+service.connect()
+
+# 获取K线数据
+end = datetime.now()
+start = end - timedelta(days=30)
+
+bars = service.get_bar_data(
+    symbol="000001",
+    exchange=Exchange.SZSE,
+    interval=Interval.DAILY,
+    start=start,
+    end=end
+)
+
+# 获取股票信息
+info = service.get_stock_info("000001")
+
+# 断开连接
+service.disconnect()
+```
+
+### 龙虎榜数据
+
+```python
+from datetime import date
+
+# 获取龙虎榜数据
+dragon_tiger_list = service.get_dragon_tiger_data(date(2026, 2, 20))
+
+# 获取机构排名
+institution_rank = service.get_institution_rank(date(2026, 2, 20), top_n=10)
+```
+
+### 北向资金数据
+
+```python
+# 获取北向资金流向
+northbound = service.get_northbound_flow(date(2026, 2, 20))
+
+if northbound:
+    print(f"北向净流入: {northbound.total_net_inflow}亿元")
+```
+
+## 配置说明
+
+### 环境变量配置
+
+```bash
+# MySQL配置
+export MYSQL_HOST=localhost
+export MYSQL_PORT=3306
+export MYSQL_USER=root
+export MYSQL_PASSWORD=your_password
+export MYSQL_DATABASE=vnpy_china
+
+# Redis配置
+export REDIS_HOST=localhost
+export REDIS_PORT=6379
+export REDIS_PASSWORD=your_password
+
+# Tushare配置
+export TUSHARE_TOKEN=your_token
+export TUSHARE_RATE_LIMIT=200
+
+# QMT配置
+export QMT_PATH=/path/to/qmt/userdata_mini
+export QMT_ACCOUNT_ID=your_account_id
+```
+
+## 数据查询优先级
+
+1. **缓存** (Redis): 最快，用于减少重复查询
+2. **数据库** (MySQL): 存储历史数据
+3. **API** (Tushare/QMT): 获取最新数据
+
+## 依赖项
+
+- vnpy (核心框架)
+- vnpy_china_interface (接口定义)
+- vnpy_china_config (配置管理)
+- tushare (可选)
+- pymysql (可选)
+- redis (可选)
+
+## 相关模块
+
+- [vnpy_china_interface](../vnpy_china_interface/) - 数据接口定义
+- [vnpy_china_config](../vnpy_china_config/) - 配置管理
+- [vnpy_china_rules](../vnpy_china_rules/) - A股交易规则

@@ -1,0 +1,429 @@
+"""
+A股数据服务主类
+
+实现IDataProvider及相关的龙虎榜、北向资金、板块数据接口。
+整合QMT实时数据和Tushare离线数据。
+"""
+
+from typing import List, Optional, Dict
+from datetime import datetime, date
+from threading import Lock
+from pathlib import Path
+
+from vnpy.trader.object import BarData, TickData
+from vnpy.trader.constant import Exchange, Interval
+
+from vnpy_china_interface import (
+    IDataProvider,
+    IDragonTigerProvider,
+    INorthboundProvider,
+    ISectorProvider,
+    DragonTigerData as InterfaceDragonTigerData,
+    NorthboundFlowData as InterfaceNorthboundFlowData,
+    SectorData as InterfaceSectorData,
+)
+from vnpy_china_config import ConfigManager, DataModuleConfig
+
+from .cache import DataQueryCache
+from .database import MySQLDatabaseLayer
+from .adapter import TushareDataAdapter, QMTDataAdapter
+from .models.dragon_tiger import DragonTigerData
+from .models.northbound import NorthboundFlowData
+from .models.sector import SectorData
+from .config import data_config
+
+
+class ChinaDataService(
+    IDataProvider,
+    IDragonTigerProvider,
+    INorthboundProvider,
+    ISectorProvider
+):
+    """A股数据服务主类
+
+    实现多个数据接口：
+    - IDataProvider: 基础行情数据
+    - IDragonTigerProvider: 龙虎榜数据
+    - INorthboundProvider: 北向资金数据
+    - ISectorProvider: 板块数据
+
+    数据查询优先级：缓存 -> 数据库 -> API
+    """
+
+    _instance: Optional["ChinaDataService"] = None
+    _lock = Lock()
+
+    def __new__(cls, *args, **kwargs):
+        """单例模式"""
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        # 避免重复初始化
+        if hasattr(self, "_initialized") and self._initialized:
+            return
+
+        # 获取配置
+        config_manager = ConfigManager()
+        self.config: DataModuleConfig = config_manager.get_config("data")
+
+        # 初始化组件
+        self.cache = DataQueryCache(
+            host=self.config.database.redis_host,
+            port=self.config.database.redis_port,
+            password=self.config.database.redis_password,
+            default_ttl=data_config.DEFAULT_CACHE_TTL
+        )
+
+        self.database = MySQLDatabaseLayer(
+            host=self.config.database.mysql_host,
+            port=self.config.database.mysql_port,
+            user=self.config.database.mysql_user,
+            password=self.config.database.mysql_password,
+            database=self.config.database.mysql_database
+        )
+
+        self.tushare_adapter = TushareDataAdapter(
+            token=self.config.tushare_token,
+            rate_limit=self.config.tushare_rate_limit
+        )
+
+        self.qmt_adapter = QMTDataAdapter(
+            qmt_path=self.config.qmt_path,
+            account_id=self.config.qmt_account_id
+        )
+
+        # 运行状态
+        self._connected = False
+        self._initialized = True
+
+    def connect(self) -> bool:
+        """连接数据源"""
+        try:
+            # 连接MySQL
+            if not self.database.connect():
+                print("警告: MySQL连接失败")
+
+            # 连接Redis
+            if not self.cache.connect():
+                print("警告: Redis连接失败")
+
+            # 连接Tushare
+            self.tushare_adapter.connect()
+
+            # 连接QMT（可选）
+            self.qmt_adapter.connect()
+
+            self._connected = True
+            return True
+
+        except Exception as e:
+            print(f"数据服务连接失败: {e}")
+            return False
+
+    def disconnect(self) -> None:
+        """断开连接"""
+        self.database.close()
+        self.cache.close()
+        self.qmt_adapter.disconnect()
+        self.tushare_adapter.disconnect()
+        self._connected = False
+
+    @property
+    def connected(self) -> bool:
+        """连接状态"""
+        return self._connected
+
+    # ========== IDataProvider 接口实现 ==========
+
+    def get_bar_data(
+        self,
+        symbol: str,
+        exchange: Exchange,
+        interval: Interval,
+        start: datetime,
+        end: datetime
+    ) -> List[BarData]:
+        """获取K线数据
+
+        查询优先级：缓存 -> 数据库 -> API
+        """
+        # 1. 尝试从缓存获取
+        cache_key = f"bar_{symbol}_{exchange.value}_{interval.value}_{start.isoformat()}_{end.isoformat()}"
+        cached_data = self.cache.get(cache_key)
+        if cached_data:
+            return self._deserialize_bars(cached_data)
+
+        # 2. 尝试从数据库获取
+        db_data = self.database.load_bar_data(symbol, exchange, interval, start, end)
+        if db_data:
+            self.cache.set(cache_key, self._serialize_bars(db_data), ttl=data_config.BAR_CACHE_TTL)
+            return db_data
+
+        # 3. 从API获取并存储
+        api_data = self._fetch_bars_from_api(symbol, exchange, interval, start, end)
+        if api_data:
+            self.database.save_bar_data(api_data)
+            self.cache.set(cache_key, self._serialize_bars(api_data), ttl=data_config.BAR_CACHE_TTL)
+        return api_data
+
+    def _fetch_bars_from_api(
+        self,
+        symbol: str,
+        exchange: Exchange,
+        interval: Interval,
+        start: datetime,
+        end: datetime
+    ) -> List[BarData]:
+        """从API获取K线数据"""
+        # 转换symbol为tushare格式
+        ts_code = self._convert_to_ts_code(symbol, exchange)
+
+        if interval in [Interval.MINUTE_1, Interval.MINUTE_5,
+                       Interval.MINUTE_15, Interval.MINUTE_30]:
+            # 分钟线：优先使用QMT
+            if self.qmt_adapter.connected:
+                return self.qmt_adapter.get_bar_data(symbol, exchange, interval, start, end)
+            else:
+                return self.tushare_adapter.get_bar_data(symbol, exchange, interval, start, end)
+        else:
+            # 日线及以上：使用Tushare
+            return self.tushare_adapter.get_bar_data(symbol, exchange, interval, start, end)
+
+    def get_tick_data(
+        self,
+        symbol: str,
+        exchange: Exchange,
+        start: datetime,
+        end: datetime
+    ) -> List[TickData]:
+        """获取Tick数据
+
+        Note: Tick数据只从QMT获取
+        """
+        if self.qmt_adapter.connected:
+            return self.qmt_adapter.get_tick_data(symbol, exchange, start, end)
+        return []
+
+    def get_stock_info(self, symbol: str) -> Optional[Dict]:
+        """获取股票基本信息"""
+        # 尝试从缓存获取
+        cache_key = f"stock_info_{symbol}"
+        cached = self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        # 从Tushare获取
+        info = self.tushare_adapter.get_stock_info(symbol)
+        if info:
+            self.cache.set(cache_key, info, ttl=data_config.INFO_CACHE_TTL)
+        return info
+
+    def get_financial_data(
+        self,
+        symbol: str,
+        report_date: str
+    ) -> Optional[Dict]:
+        """获取财务数据"""
+        # 尝试从缓存获取
+        cache_key = f"financial_{symbol}_{report_date}"
+        cached = self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        # 从Tushare获取
+        ts_code = self._convert_to_ts_code(symbol, Exchange.SZSE)
+        data = self.tushare_adapter.get_pro_bar(ts_code, report_date, report_date)
+        if not data.empty:
+            result = data.iloc[0].to_dict()
+            self.cache.set(cache_key, result, ttl=data_config.INFO_CACHE_TTL)
+            return result
+        return None
+
+    def subscribe_quote(self, symbols: List[str]) -> bool:
+        """订阅实时行情"""
+        return self.qmt_adapter.subscribe(symbols)
+
+    # ========== IDragonTigerProvider 接口实现 ==========
+
+    def get_dragon_tiger_data(
+        self,
+        trade_date: date
+    ) -> List[InterfaceDragonTigerData]:
+        """获取指定日期的龙虎榜数据"""
+        # 尝试从缓存获取
+        cache_key = f"dragon_tiger_{trade_date.isoformat()}"
+        cached = self.cache.get(cache_key)
+        if cached:
+            return [DragonTigerData.from_dict(d) for d in cached]
+
+        # 从Tushare获取
+        trade_date_str = trade_date.strftime("%Y%m%d")
+        data = self.tushare_adapter.get_dragon_tiger_data(trade_date_str)
+
+        if data:
+            # 缓存7天
+            serialized = [d.to_dict() for d in data]
+            self.cache.set(cache_key, serialized, ttl=7 * 86400)
+            return data
+        return []
+
+    def get_institution_rank(
+        self,
+        trade_date: date,
+        top_n: int = 10
+    ) -> List[InterfaceDragonTigerData]:
+        """获取机构排名"""
+        data = self.get_dragon_tiger_data(trade_date)
+        # 按机构净买入排序
+        return sorted(data, key=lambda x: x.institution_net_buy, reverse=True)[:top_n]
+
+    # ========== INorthboundProvider 接口实现 ==========
+
+    def get_northbound_flow(
+        self,
+        trade_date: date
+    ) -> Optional[InterfaceNorthboundFlowData]:
+        """获取北向资金流向"""
+        # 尝试从缓存获取
+        cache_key = f"northbound_{trade_date.isoformat()}"
+        cached = self.cache.get(cache_key)
+        if cached:
+            return NorthboundFlowData.from_dict(cached)
+
+        # 从Tushare获取
+        trade_date_str = trade_date.strftime("%Y%m%d")
+        data = self.tushare_adapter.get_northbound_flow(trade_date_str)
+
+        if data:
+            # 缓存1天
+            self.cache.set(cache_key, data.to_dict(), ttl=86400)
+            return data
+        return None
+
+    def get_stock_holding_change(
+        self,
+        symbol: str,
+        days: int = 5
+    ) -> Dict[str, float]:
+        """获取个股持股变化"""
+        # 这里简化实现，实际需要调用专门的API
+        return {}
+
+    # ========== ISectorProvider 接口实现 ==========
+
+    def get_sector_list(self) -> List[InterfaceSectorData]:
+        """获取板块列表"""
+        # 尝试从缓存获取
+        cache_key = "sector_list"
+        cached = self.cache.get(cache_key)
+        if cached:
+            return [SectorData.from_dict(d) for d in cached]
+
+        # 从Tushare获取
+        data = self.tushare_adapter.get_sector_list()
+
+        if data:
+            # 缓存1天
+            serialized = [d.to_dict() for d in data]
+            self.cache.set(cache_key, serialized, ttl=86400)
+            return data
+        return []
+
+    def get_sector_stocks(self, sector_code: str) -> List[str]:
+        """获取板块成分股"""
+        # 简化实现
+        return []
+
+    def get_sector_index(
+        self,
+        sector_code: str,
+        start_date: str,
+        end_date: str
+    ) -> List[BarData]:
+        """获取板块指数数据"""
+        # 简化实现
+        return []
+
+    # ========== 工具方法 ==========
+
+    def _convert_to_ts_code(self, symbol: str, exchange: Exchange) -> str:
+        """转换symbol为tushare格式"""
+        suffix_map = {
+            Exchange.SSE: "SH",
+            Exchange.SZSE: "SZ",
+            Exchange.BSE: "BJ"
+        }
+        suffix = suffix_map.get(exchange, "SZ")
+        return f"{symbol}.{suffix}"
+
+    def _convert_from_ts_code(self, ts_code: str) -> tuple:
+        """从tushare格式转换为(symbol, exchange)"""
+        if '.' not in ts_code:
+            return ts_code, Exchange.SZSE
+
+        symbol, suffix = ts_code.split(".")
+
+        exchange_map = {
+            "SH": Exchange.SSE,
+            "SZ": Exchange.SZSE,
+            "BJ": Exchange.BSE
+        }
+        exchange = exchange_map.get(suffix, Exchange.SZSE)
+
+        return symbol, exchange
+
+    def _serialize_bars(self, bars: List[BarData]) -> List[Dict]:
+        """序列化K线数据"""
+        return [
+            {
+                "symbol": bar.symbol,
+                "exchange": bar.exchange.value,
+                "interval": bar.interval.value,
+                "datetime": bar.datetime.isoformat(),
+                "open_price": bar.open_price,
+                "high_price": bar.high_price,
+                "low_price": bar.low_price,
+                "close_price": bar.close_price,
+                "volume": bar.volume,
+                "turnover": getattr(bar, 'turnover', 0),
+            }
+            for bar in bars
+        ]
+
+    def _deserialize_bars(self, data: List[Dict]) -> List[BarData]:
+        """反序列化K线数据"""
+        bars = []
+        for item in data:
+            try:
+                bar = BarData(
+                    symbol=item["symbol"],
+                    exchange=Exchange(item["exchange"]),
+                    interval=Interval(item["interval"]),
+                    datetime=datetime.fromisoformat(item["datetime"]),
+                    open_price=item["open_price"],
+                    high_price=item["high_price"],
+                    low_price=item["low_price"],
+                    close_price=item["close_price"],
+                    volume=item["volume"],
+                    turnover=item.get("turnover", 0)
+                )
+                bars.append(bar)
+            except Exception:
+                continue
+        return bars
+
+
+# 全局单例
+_service_instance: Optional[ChinaDataService] = None
+
+
+def get_data_service() -> ChinaDataService:
+    """获取数据服务单例"""
+    global _service_instance
+    if _service_instance is None:
+        _service_instance = ChinaDataService()
+    return _service_instance
