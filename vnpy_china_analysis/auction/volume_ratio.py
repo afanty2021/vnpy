@@ -21,6 +21,19 @@ class VolumeRatioCalculator(HistoricalAnalyzer):
         super().__init__(cache_size)
         self.avg_volume: Dict[str, float] = {}  # 股票的平均成交量
 
+    def analyze(self, symbol: str, data: Dict[str, Any]) -> float:
+        """分析量比（实现抽象方法）
+
+        Args:
+            symbol: 股票代码
+            data: 包含auction_volume的字典
+
+        Returns:
+            量比值
+        """
+        auction_volume = data.get("auction_volume", 0)
+        return self.calculate(symbol, auction_volume)
+
     def calculate(self, symbol: str, auction_volume: int, avg_volume: Optional[float] = None) -> float:
         """计算量比
 

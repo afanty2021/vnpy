@@ -21,6 +21,18 @@ class OpenPricePredictor(HistoricalAnalyzer):
         super().__init__(cache_size)
         self.prediction_history: Dict[str, list] = {}
 
+    def analyze(self, symbol: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """分析开盘价预测（实现抽象方法）
+
+        Args:
+            symbol: 股票代码
+            data: 集合竞价数据字典
+
+        Returns:
+            预测结果字典
+        """
+        return self.predict(symbol, data)
+
     def predict(self, symbol: str, auction_data: Dict[str, Any], market_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """预测开盘价
 

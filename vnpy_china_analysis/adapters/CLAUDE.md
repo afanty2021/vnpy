@@ -15,5 +15,6 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #6684 | 12:24 AM | 🔵 | Verified QMTDataAdapter class implementation for QMT data source integration | ~185 |
 | #6640 | 12:02 AM | 🟣 | Completed vnpy_china_analysis module implementation for REQ-008 | ~735 |
 </claude-mem-context>
