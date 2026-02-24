@@ -7,6 +7,9 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #6385 | 5:53 PM | ✅ | Git diff summary shows 11 files modified with 1733 insertions and 89 deletions | ~382 |
+| #6302 | 3:00 PM | 🟣 | REQ-011: 机器学习策略 design document created with feature engineering and deep learning support | ~505 |
+| #6297 | 2:59 PM | 🔵 | Backtesting Engine Review Reveals Generic Price Limits | ~460 |
 | #6281 | 2:42 PM | 🔵 | VeighNa Backtesting Engine Architecture Shows No Risk Filter Integration | ~536 |
 | #6220 | 1:59 PM | 🟣 | Phase 4 Strategy Tests Created with TDD Approach | ~375 |
 | #6219 | " | 🔵 | Found VeighNa AlphaStrategy Template for Phase 4 Reference | ~347 |
