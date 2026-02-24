@@ -42,3 +42,7 @@ _templates
 lab/
 /.mypy_cache
 examples/veighna_trader/run_qmt.py
+
+# Worktrees
+.worktrees
+worktrees
