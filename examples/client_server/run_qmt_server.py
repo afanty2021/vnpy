@@ -1,0 +1,118 @@
+# -*- coding:utf-8 -*-
+"""
+VeighNa RPC服务端 - QMT版本
+
+运行在Windows上，负责：
+1. 连接QMT接口
+2. 启动RPC服务
+3. 接收Mac客户端的请求并执行交易
+
+适用场景：
+- Mac用户需要使用QMT接口
+- 分布式部署
+- 远程交易
+
+环境要求：
+- Windows 10/11
+- QMT已安装并配置
+- VeighNa框架
+"""
+
+import sys
+from pathlib import Path
+
+# 添加项目路径
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+from vnpy.event import EventEngine
+from vnpy.trader.engine import MainEngine
+from vnpy.trader.object import TickData, BarData, OrderData, TradeData, PositionData, AccountData
+from vnpy.rpcservice import RpcServiceApp
+from vnpy_qmt import QmtGateway
+
+# RPC服务配置
+RPC_SETTING = {
+    "req_address": "tcp://0.0.0.0:2014",      # 请求地址（0.0.0.0允许外网访问）
+    "sub_address": "tcp://0.0.0.0:4102",      # 订阅地址
+}
+
+# QMT配置
+QMT_SETTING = {
+    "交易账号": "40218291",
+    "mini路径": "D:/国金证券QMT交易端/userdata_mini/",
+}
+
+
+class QmtRpcServer:
+    """QMT RPC服务端"""
+
+    def __init__(self):
+        """初始化"""
+        # 创建事件引擎
+        self.event_engine = EventEngine()
+
+        # 创建主引擎
+        self.main_engine = MainEngine(self.event_engine)
+
+        # 添加QMT网关
+        self.main_engine.add_gateway(QmtGateway)
+
+        # 添加RPC服务
+        self.rpc_service = RpcServiceApp()
+        self.main_engine.add_app(self.rpc_service)
+
+        print("=" * 60)
+        print("VeighNa RPC服务端 - QMT版本")
+        print("=" * 60)
+
+    def start(self):
+        """启动服务"""
+        # 启动RPC服务器
+        self.rpc_service.start_server(
+            req_address=RPC_SETTING["req_address"],
+            sub_address=RPC_SETTING["sub_address"]
+        )
+
+        print("\nRPC服务已启动：")
+        print(f"  请求地址: {RPC_SETTING['req_address']}")
+        print(f"  订阅地址: {RPC_SETTING['sub_address']}")
+
+        print("\n网络配置提示：")
+        print("  1. 本地测试：使用 127.0.0.1 即可")
+        print("  2. 局域网：使用实际IP地址，如 192.168.1.100")
+        print("  3. 外网访问：需要端口映射和防火墙配置")
+
+        print("\nQMT连接配置：")
+        print(f"  账号: {QMT_SETTING['交易账号']}")
+        print(f"  路径: {QMT_SETTING['mini路径']}")
+
+        print("\n" + "=" * 60)
+        print("请在VeighNa Trader界面中配置QMT连接信息")
+        print("或等待RPC客户端连接后远程配置")
+        print("=" * 60)
+
+        # 保持运行
+        import time
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\n\n正在停止服务...")
+            self.stop()
+
+    def stop(self):
+        """停止服务"""
+        self.rpc_service.stop_server()
+        self.event_engine.stop()
+        print("RPC服务已停止")
+
+
+def main():
+    """主函数"""
+    server = QmtRpcServer()
+    server.start()
+
+
+if __name__ == "__main__":
+    main()
