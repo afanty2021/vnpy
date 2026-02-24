@@ -1,7 +1,7 @@
 """
 A股监控告警模块
 
-提供系统状态监控、交易状态监控、风控告警集成和多通道通知功能
+提供系统状态监控、交易状态监控、风控告警集成、多通道通知功能和Web监控界面
 """
 
 from vnpy_china_monitor.monitor.engine import MonitorEngine, MonitorType, MonitorData
@@ -19,6 +19,13 @@ from vnpy_china_monitor.alert.channels.ui import UIChannel
 from vnpy_china_monitor.alert.channels.email import EmailChannel
 from vnpy_china_monitor.alert.channels.wechat import WechatChannel
 from vnpy_china_monitor.integration.risk_connector import RiskConnector
+
+# 导入Web监控模块
+try:
+    from vnpy_china_monitor.web import create_web_app, RpcClientWrapper, ConnectionManager
+    WEB_AVAILABLE = True
+except ImportError:
+    WEB_AVAILABLE = False
 
 # 导入事件定义
 from vnpy_china_monitor.event import (
@@ -56,3 +63,11 @@ __all__ = [
     "EVENT_ALERT_ACKNOWLEDGED",
     "EVENT_RISK_ALERT",
 ]
+
+# 如果Web模块可用，导出相关API
+if WEB_AVAILABLE:
+    __all__.extend([
+        "create_web_app",
+        "RpcClientWrapper",
+        "ConnectionManager",
+    ])
