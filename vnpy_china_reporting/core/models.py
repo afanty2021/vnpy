@@ -113,7 +113,7 @@ class PositionAnalysis:
     Attributes:
         total_positions: 总持仓数量
         total_market_value: 总市值
-        top_holding: 重点持仓列表（按市值排序的前N只股票）
+        top_holdings: 重点持仓列表（按市值排序的前N只股票）
         concentration: 集中度（前N只股票市值占比）
         industry_distribution: 行业分布统计
     """

@@ -15,7 +15,7 @@ class ReportType(Enum):
 class PositionSide(Enum):
     """持仓方向"""
     LONG = "long"         # 多头
-    SHORT = "short"       # 空头
+    SHORT = "short"    # 空头
 
 
 class RiskLevel(Enum):
