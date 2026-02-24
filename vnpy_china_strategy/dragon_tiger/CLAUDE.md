@@ -7,6 +7,7 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #6567 | 8:42 PM | 🟣 | Implemented complete vnpy_china_strategy module for REQ-005 with 41 files and 5,969 lines of code | ~325 |
 | #6562 | 8:40 PM | 🟣 | Implemented complete vnpy_china_strategy A股 trading strategy library with 11 strategies | ~791 |
 | #6556 | 8:29 PM | 🔵 | Found Syntax Error in institution.py | ~117 |
 | #6522 | 8:04 PM | 🟣 | Implemented DragonTiger Follow Strategy | ~397 |

@@ -168,6 +168,7 @@ export QMT_ACCOUNT_ID=your_account_id
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #6512 | 7:59 PM | 🔵 | Read ChinaDataService implementation (REQ-003) | ~477 |
 | #6414 | 7:00 PM | 🟣 | Implemented Redis-based caching layer for vnpy_china_data module | ~236 |
 | #6411 | " | 🟣 | Created vnpy_china_data Configuration Module | ~381 |
 | #6409 | 6:59 PM | 🟣 | Subagent implemented complete vnpy_china_data module for REQ-003 | ~258 |
