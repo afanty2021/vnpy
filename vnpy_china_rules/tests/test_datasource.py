@@ -8,8 +8,10 @@ from datetime import datetime
 from typing import Optional
 from dataclasses import dataclass
 
-from vnpy.trader.object import TickData, BarData
+from vnpy.trader.object import TickData, BarData, ContractData
 from vnpy.trader.constant import Exchange
+from vnpy.trader.engine import MainEngine
+from vnpy.event import EventEngine
 
 from vnpy_china_rules.datasource import (
     StockInfo,
@@ -18,6 +20,13 @@ from vnpy_china_rules.datasource import (
     TushareDataSource,
     DataSourceManager,
 )
+
+# 检查是否安装了tushare
+try:
+    import tushare as ts
+    TUSHARE_AVAILABLE = True
+except ImportError:
+    TUSHARE_AVAILABLE = False
 
 
 @dataclass
@@ -93,24 +102,39 @@ class TestQMTDataSource(unittest.TestCase):
 
     def setUp(self):
         """测试前准备"""
-        self.mock_gateway = Mock()
-        self.mock_gateway.gateway_name = "TEST_QMT"
-        self.datasource = QMTDataSource(self.mock_gateway)
+        # 创建真实的MainEngine（MainEngine会自动创建并启动EventEngine）
+        self.main_engine = MainEngine()
+        self.datasource = QMTDataSource(self.main_engine)
+
+    def tearDown(self):
+        """测试后清理"""
+        self.main_engine.event_engine.stop()
 
     def test_init(self):
         """测试初始化"""
-        self.assertEqual(self.datasource.gateway, self.mock_gateway)
+        self.assertEqual(self.datasource.main_engine, self.main_engine)
+
+    def test_init_with_invalid_type(self):
+        """测试使用错误的类型初始化"""
+        with self.assertRaises(TypeError):
+            QMTDataSource("not_a_main_engine")
 
     def test_get_stock_info_success(self):
         """测试成功获取股票信息"""
-        # 模拟网关返回合约数据
-        mock_contract = Mock()
-        mock_contract.symbol = "000001"
-        mock_contract.exchange = Exchange.SZSE
-        mock_contract.name = "平安银行"
+        # 模拟合约数据
+        from vnpy.trader.constant import Product
+        mock_contract = ContractData(
+            gateway_name="TEST",
+            symbol="000001",
+            exchange=Exchange.SZSE,
+            name="平安银行",
+            product=Product.EQUITY,
+            size=100,
+            pricetick=0.01
+        )
 
-        # 模拟网关get_contract方法
-        self.mock_gateway.get_contract.return_value = mock_contract
+        # 模拟main_engine.get_contract方法
+        self.main_engine.get_contract = Mock(return_value=mock_contract)
 
         # 调用方法
         result = self.datasource.get_stock_info("000001")
@@ -126,8 +150,8 @@ class TestQMTDataSource(unittest.TestCase):
 
     def test_get_stock_info_failure(self):
         """测试获取股票信息失败"""
-        # 模拟网关返回None
-        self.mock_gateway.get_contract.return_value = None
+        # 模拟main_engine.get_contract返回None
+        self.main_engine.get_contract = Mock(return_value=None)
 
         # 调用方法
         result = self.datasource.get_stock_info("000001")
@@ -138,12 +162,18 @@ class TestQMTDataSource(unittest.TestCase):
     def test_get_stock_info_st_stock(self):
         """测试ST股票识别"""
         # 模拟ST股票合约
-        mock_contract = Mock()
-        mock_contract.symbol = "000001"
-        mock_contract.exchange = Exchange.SZSE
-        mock_contract.name = "ST平安"  # 名称包含ST
+        from vnpy.trader.constant import Product
+        mock_contract = ContractData(
+            gateway_name="TEST",
+            symbol="000001",
+            exchange=Exchange.SZSE,
+            name="ST平安",  # 名称包含ST
+            product=Product.EQUITY,
+            size=100,
+            pricetick=0.01
+        )
 
-        self.mock_gateway.get_contract.return_value = mock_contract
+        self.main_engine.get_contract = Mock(return_value=mock_contract)
 
         # 调用方法
         result = self.datasource.get_stock_info("000001")
@@ -152,11 +182,57 @@ class TestQMTDataSource(unittest.TestCase):
         self.assertTrue(result.is_st)
         self.assertEqual(result.limit_ratio, 0.05)  # ST股票5%
 
+    def test_get_stock_info_sci_board(self):
+        """测试科创板识别（688xxx）"""
+        # 模拟科创板合约
+        from vnpy.trader.constant import Product
+        mock_contract = ContractData(
+            gateway_name="TEST",
+            symbol="688001",
+            exchange=Exchange.SSE,
+            name="科创板股票",
+            product=Product.EQUITY,
+            size=100,
+            pricetick=0.01
+        )
+
+        self.main_engine.get_contract = Mock(return_value=mock_contract)
+
+        # 调用方法
+        result = self.datasource.get_stock_info("688001")
+
+        # 验证科创板标识和涨跌停比例
+        self.assertEqual(result.market_type, "科创板")
+        self.assertEqual(result.limit_ratio, 0.20)  # 科创板20%
+
+    def test_get_stock_info_sme_board(self):
+        """测试创业板识别（300xxx）"""
+        # 模拟创业板合约
+        from vnpy.trader.constant import Product
+        mock_contract = ContractData(
+            gateway_name="TEST",
+            symbol="300001",
+            exchange=Exchange.SZSE,
+            name="创业板股票",
+            product=Product.EQUITY,
+            size=100,
+            pricetick=0.01
+        )
+
+        self.main_engine.get_contract = Mock(return_value=mock_contract)
+
+        # 调用方法
+        result = self.datasource.get_stock_info("300001")
+
+        # 验证创业板标识和涨跌停比例
+        self.assertEqual(result.market_type, "创业板")
+        self.assertEqual(result.limit_ratio, 0.20)  # 创业板20%
+
     def test_get_market_data_success(self):
         """测试成功获取实时行情"""
         # 创建模拟Tick数据
         mock_tick = TickData(
-            gateway_name="TEST_QMT",
+            gateway_name="TEST",
             symbol="000001",
             exchange=Exchange.SZSE,
             datetime=datetime.now(),
@@ -167,8 +243,8 @@ class TestQMTDataSource(unittest.TestCase):
             limit_down=9.00
         )
 
-        # 模拟网关返回tick数据
-        self.mock_gateway.get_tick.return_value = mock_tick
+        # 模拟main_engine.get_tick返回tick数据
+        self.main_engine.get_tick = Mock(return_value=mock_tick)
 
         # 调用方法
         result = self.datasource.get_market_data("000001")
@@ -181,8 +257,8 @@ class TestQMTDataSource(unittest.TestCase):
 
     def test_get_market_data_failure(self):
         """测试获取实时行情失败"""
-        # 模拟网关返回None
-        self.mock_gateway.get_tick.return_value = None
+        # 模拟main_engine.get_tick返回None
+        self.main_engine.get_tick = Mock(return_value=None)
 
         # 调用方法
         result = self.datasource.get_market_data("000001")
@@ -190,7 +266,28 @@ class TestQMTDataSource(unittest.TestCase):
         # 验证结果
         self.assertIsNone(result)
 
+    def test_get_stock_info_invalid_symbol(self):
+        """测试无效的股票代码"""
+        # 测试空字符串
+        result = self.datasource.get_stock_info("")
+        self.assertIsNone(result)
 
+        # 测试None
+        result = self.datasource.get_stock_info(None)
+        self.assertIsNone(result)
+
+    def test_get_market_data_invalid_symbol(self):
+        """测试无效的股票代码"""
+        # 测试空字符串
+        result = self.datasource.get_market_data("")
+        self.assertIsNone(result)
+
+        # 测试None
+        result = self.datasource.get_market_data(None)
+        self.assertIsNone(result)
+
+
+@unittest.skipIf(not TUSHARE_AVAILABLE, "tushare库未安装")
 class TestTushareDataSource(unittest.TestCase):
     """测试Tushare数据源"""
 

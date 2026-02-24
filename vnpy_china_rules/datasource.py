@@ -8,13 +8,14 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Dict
+from typing import Optional, Dict, Union
 from functools import lru_cache
 
 from loguru import logger
 
-from vnpy.trader.object import TickData, BarData
+from vnpy.trader.object import TickData, BarData, ContractData
 from vnpy.trader.constant import Exchange
+from vnpy.trader.engine import MainEngine
 
 
 try:
@@ -79,9 +80,13 @@ class DataSource(ABC):
         pass
 
     @abstractmethod
-    def get_market_data(self, symbol: str) -> Optional[TickData]:
+    def get_market_data(self, symbol: str) -> Union[TickData, BarData, None]:
         """
-        获取实时行情数据
+        获取行情数据
+
+        不同数据源可能返回不同类型的行情数据：
+        - QMTDataSource返回实时TickData
+        - TushareDataSource返回历史BarData（日线）
 
         Parameters
         ----------
@@ -90,7 +95,7 @@ class DataSource(ABC):
 
         Returns
         -------
-        Optional[TickData]
+        Union[TickData, BarData, None]
             行情数据对象，如果获取失败返回None
         """
         pass
@@ -101,19 +106,50 @@ class QMTDataSource(DataSource):
     QMT数据源
 
     从QMT网关获取实时行情数据。
+
+    涨跌停比例常量：
+    - LIMIT_RATIO_MAIN: 主板 10%
+    - LIMIT_RATIO_SME: 创业板 20%
+    - LIMIT_RATIO_SCI: 科创板 20%
+    - LIMIT_RATIO_BSE: 北交所 30%
+    - LIMIT_RATIO_ST: ST股票 5%
     """
 
-    def __init__(self, gateway) -> None:
+    # 涨跌停比例常量
+    LIMIT_RATIO_MAIN = 0.10      # 主板10%
+    LIMIT_RATIO_SME = 0.20       # 创业板20%
+    LIMIT_RATIO_SCI = 0.20       # 科创板20%
+    LIMIT_RATIO_BSE = 0.30       # 北交所30%
+    LIMIT_RATIO_ST = 0.05        # ST股票5%
+
+    def __init__(self, main_engine: MainEngine) -> None:
         """
         初始化QMT数据源
 
         Parameters
         ----------
-        gateway : BaseGateway
-            QMT网关实例
+        main_engine : MainEngine
+            VeighNa主引擎实例
+
+        Raises
+        ------
+        TypeError
+            如果传入的不是MainEngine实例
         """
-        self.gateway = gateway
-        self.gateway_name: str = gateway.gateway_name
+        if not isinstance(main_engine, MainEngine):
+            raise TypeError(
+                f"QMTDataSource需要MainEngine实例，"
+                f"收到: {type(main_engine).__name__}"
+            )
+
+        self.main_engine = main_engine
+        # 获取第一个网关名称作为数据源标识
+        if main_engine.gateways:
+            self.gateway_name: str = list(main_engine.gateways.keys())[0]
+        else:
+            self.gateway_name = "QMT"
+
+        logger.info(f"QMT数据源初始化成功，使用网关: {self.gateway_name}")
 
     def get_stock_info(self, symbol: str) -> Optional[StockInfo]:
         """
@@ -129,17 +165,22 @@ class QMTDataSource(DataSource):
         Optional[StockInfo]
             股票信息对象，如果获取失败返回None
         """
+        # 参数验证
+        if not symbol or not isinstance(symbol, str):
+            logger.warning(f"无效的股票代码: {symbol}")
+            return None
+
         try:
-            # 从网关获取合约信息
-            contract = self.gateway.get_contract(symbol)
+            # 从主引擎获取合约信息
+            contract: Optional[ContractData] = self.main_engine.get_contract(symbol)
 
             if contract is None:
-                logger.warning(f"QMT数据源未找到股票{symbol}的合约信息")
+                logger.info(f"QMT数据源未找到股票{symbol}的合约信息")
                 return None
 
             # 解析市场类型和涨跌停比例
             exchange: Exchange = contract.exchange
-            market_type, limit_ratio = self._parse_market_info(exchange)
+            market_type, limit_ratio = self._parse_market_info(exchange, contract.symbol)
 
             # 判断是否为ST股票
             name: str = contract.name
@@ -147,7 +188,7 @@ class QMTDataSource(DataSource):
 
             # ST股票涨跌停比例为5%
             if is_st:
-                limit_ratio = 0.05
+                limit_ratio = self.LIMIT_RATIO_ST
 
             stock_info = StockInfo(
                 symbol=contract.symbol,
@@ -180,12 +221,17 @@ class QMTDataSource(DataSource):
         Optional[TickData]
             行情数据对象，如果获取失败返回None
         """
+        # 参数验证
+        if not symbol or not isinstance(symbol, str):
+            logger.warning(f"无效的股票代码: {symbol}")
+            return None
+
         try:
-            # 从网关获取最新tick数据
-            tick = self.gateway.get_tick(symbol)
+            # 从主引擎获取最新tick数据
+            tick = self.main_engine.get_tick(symbol)
 
             if tick is None:
-                logger.warning(f"QMT数据源未找到股票{symbol}的行情数据")
+                logger.info(f"QMT数据源未找到股票{symbol}的行情数据")
                 return None
 
             logger.debug(f"QMT数据源获取股票{symbol}行情成功")
@@ -195,14 +241,16 @@ class QMTDataSource(DataSource):
             logger.error(f"QMT数据源获取股票{symbol}行情失败: {e}")
             return None
 
-    def _parse_market_info(self, exchange: Exchange) -> tuple[str, float]:
+    def _parse_market_info(self, exchange: Exchange, symbol: str) -> tuple[str, float]:
         """
-        根据交易所解析市场类型和涨跌停比例
+        根据交易所和股票代码解析市场类型和涨跌停比例
 
         Parameters
         ----------
         exchange : Exchange
             交易所枚举
+        symbol : str
+            股票代码
 
         Returns
         -------
@@ -211,20 +259,22 @@ class QMTDataSource(DataSource):
         """
         if exchange == Exchange.SSE:
             # 上海证券交易所
-            # 主板10%，科创板20%
-            # 这里需要根据股票代码判断，暂时默认主板
-            return "主板", 0.10
+            # 688xxx为科创板，其他为主板
+            if symbol.startswith('688'):
+                return "科创板", self.LIMIT_RATIO_SCI
+            return "主板", self.LIMIT_RATIO_MAIN
         elif exchange == Exchange.SZSE:
             # 深圳证券交易所
-            # 主板10%，创业板20%
-            # 这里需要根据股票代码判断，暂时默认主板
-            return "主板", 0.10
+            # 300xxx为创业板，其他为主板
+            if symbol.startswith('300'):
+                return "创业板", self.LIMIT_RATIO_SME
+            return "主板", self.LIMIT_RATIO_MAIN
         elif exchange == Exchange.BSE:
             # 北京证券交易所
-            return "北交所", 0.30
+            return "北交所", self.LIMIT_RATIO_BSE
         else:
-            # 默认主板10%
-            return "主板", 0.10
+            # 默认主板
+            return "主板", self.LIMIT_RATIO_MAIN
 
     def _is_st_stock(self, name: str) -> bool:
         """
@@ -256,7 +306,19 @@ class TushareDataSource(DataSource):
     Tushare数据源
 
     使用Tushare API获取离线补充数据。
+
+    涨跌停比例常量：
+    - LIMIT_RATIO_MAIN: 主板 10%
+    - LIMIT_RATIO_SME: 创业板 20%
+    - LIMIT_RATIO_SCI: 科创板 20%
+    - LIMIT_RATIO_BSE: 北交所 30%
     """
+
+    # 涨跌停比例常量
+    LIMIT_RATIO_MAIN = 0.10      # 主板10%
+    LIMIT_RATIO_SME = 0.20       # 创业板20%
+    LIMIT_RATIO_SCI = 0.20       # 科创板20%
+    LIMIT_RATIO_BSE = 0.30       # 北交所30%
 
     def __init__(self, token: str) -> None:
         """
@@ -297,6 +359,11 @@ class TushareDataSource(DataSource):
         Optional[StockInfo]
             股票信息对象，如果获取失败返回None
         """
+        # 参数验证
+        if not symbol or not isinstance(symbol, str):
+            logger.warning(f"无效的股票代码: {symbol}")
+            return None
+
         try:
             # 将股票代码转换为Tushare格式 (000001 -> 000001.SZ)
             ts_symbol = self._convert_to_tushare_symbol(symbol)
@@ -308,7 +375,7 @@ class TushareDataSource(DataSource):
             )
 
             if df is None or df.empty:
-                logger.warning(f"Tushare数据源未找到股票{symbol}的基本信息")
+                logger.info(f"Tushare数据源未找到股票{symbol}的基本信息")
                 return None
 
             # 解析数据
@@ -343,6 +410,9 @@ class TushareDataSource(DataSource):
         """
         从Tushare获取历史行情（返回最新的日线数据）
 
+        注意：此方法返回BarData（K线数据）而非TickData，
+        这与QMTDataSource的返回类型不同。
+
         Parameters
         ----------
         symbol : str
@@ -353,6 +423,11 @@ class TushareDataSource(DataSource):
         Optional[BarData]
             K线数据对象，如果获取失败返回None
         """
+        # 参数验证
+        if not symbol or not isinstance(symbol, str):
+            logger.warning(f"无效的股票代码: {symbol}")
+            return None
+
         try:
             # 将股票代码转换为Tushare格式
             ts_symbol = self._convert_to_tushare_symbol(symbol)
@@ -364,7 +439,7 @@ class TushareDataSource(DataSource):
             )
 
             if df is None or df.empty:
-                logger.warning(f"Tushare数据源未找到股票{symbol}的历史数据")
+                logger.info(f"Tushare数据源未找到股票{symbol}的历史数据")
                 return None
 
             # 解析数据
@@ -476,13 +551,13 @@ class TushareDataSource(DataSource):
         market_upper = market.upper()
 
         if '科创' in market:
-            return "科创板", 0.20
+            return "科创板", self.LIMIT_RATIO_SCI
         elif '创业' in market:
-            return "创业板", 0.20
+            return "创业板", self.LIMIT_RATIO_SME
         elif '北交' in market:
-            return "北交所", 0.30
+            return "北交所", self.LIMIT_RATIO_BSE
         else:
-            return "主板", 0.10
+            return "主板", self.LIMIT_RATIO_MAIN
 
 
 class DataSourceManager:
@@ -541,6 +616,11 @@ class DataSourceManager:
         Optional[StockInfo]
             股票信息对象，如果所有数据源都失败返回None
         """
+        # 参数验证
+        if not symbol or not isinstance(symbol, str):
+            logger.warning(f"无效的股票代码: {symbol}")
+            return None
+
         # 如果没有注册任何数据源，直接返回None
         if not self.sources:
             logger.warning("未注册任何数据源")
@@ -569,11 +649,12 @@ class DataSourceManager:
         logger.warning(f"所有数据源都未能获取股票{symbol}的信息")
         return None
 
-    def get_market_data(self, symbol: str) -> Optional[TickData]:
+    def get_market_data(self, symbol: str) -> Union[TickData, BarData, None]:
         """
-        获取实时行情
+        获取行情数据
 
         优先从主数据源获取，失败则降级到其他数据源。
+        注意：不同数据源可能返回不同类型的数据。
 
         Parameters
         ----------
@@ -582,9 +663,14 @@ class DataSourceManager:
 
         Returns
         -------
-        Optional[TickData]
+        Union[TickData, BarData, None]
             行情数据对象，如果所有数据源都失败返回None
         """
+        # 参数验证
+        if not symbol or not isinstance(symbol, str):
+            logger.warning(f"无效的股票代码: {symbol}")
+            return None
+
         # 如果没有注册任何数据源，直接返回None
         if not self.sources:
             logger.warning("未注册任何数据源")
