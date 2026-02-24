@@ -6,9 +6,9 @@
 
 from abc import ABC, abstractmethod
 from datetime import date, datetime
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 
-from ..core.models import ReportData, TradeRecord, PositionRecord, AccountData
+from ..core.models import ReportData, TradeRecord, PositionRecord, AccountData, PositionSide
 from ..core.enums import ReportType
 
 
@@ -20,20 +20,20 @@ class BaseReportGenerator(ABC):
     所有报表生成器应继承此类，实现统一的接口。
     """
 
-    def __init__(self, main_engine=None):
+    def __init__(self, main_engine: Optional[Any] = None) -> None:
         """
         初始化报表生成器
 
         Args:
             main_engine: 主引擎实例，用于获取交易数据
         """
-        self.main_engine = main_engine
-        self.data_cache: Dict = {}
+        self.main_engine: Optional[Any] = main_engine
+        self.data_cache: Dict[str, Any] = {}
 
     @abstractmethod
-    def generate(self, report_date: date) -> ReportData:
+    def generate_daily(self, report_date: date) -> ReportData:
         """
-        生成报表数据
+        生成日报数据
 
         Args:
             report_date: 报表日期
@@ -117,7 +117,7 @@ class BaseReportGenerator(ABC):
                 result.append(PositionRecord(
                     symbol=pos.symbol,
                     name=getattr(pos, 'name', ''),
-                    side=pos.side if hasattr(pos, 'side') else 'long',
+                    side=pos.side if hasattr(pos, 'side') else PositionSide.LONG,
                     volume=pos.volume,
                     avg_cost=pos.avg_price,
                     current_price=pos.price,

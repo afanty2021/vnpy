@@ -6,7 +6,7 @@
 
 from datetime import date
 from calendar import monthrange
-from typing import List, Dict
+from typing import List, Dict, Optional, Any
 
 from .base import BaseReportGenerator
 from .daily import DailyReportGenerator
@@ -21,7 +21,7 @@ class MonthlyReportGenerator(BaseReportGenerator):
     生成月度交易报表，包含整月交易记录、月度统计和分析。
     """
 
-    def __init__(self, main_engine=None):
+    def __init__(self, main_engine: Optional[Any] = None) -> None:
         """
         初始化月报生成器
 
@@ -32,7 +32,7 @@ class MonthlyReportGenerator(BaseReportGenerator):
         self.report_type = ReportType.MONTHLY
         self.daily_generator = DailyReportGenerator(main_engine)
 
-    def generate(self, year: int, month: int) -> ReportData:
+    def generate_monthly(self, year: int, month: int) -> ReportData:
         """
         生成月报数据
 
@@ -84,7 +84,19 @@ class MonthlyReportGenerator(BaseReportGenerator):
         Returns:
             月报数据
         """
-        return self.generate(report_date.year, report_date.month)
+        return self.generate_monthly(report_date.year, report_date.month)
+
+    def generate_daily(self, report_date: date) -> ReportData:
+        """
+        实现基类的日报生成接口
+
+        Args:
+            report_date: 报表日期
+
+        Returns:
+            日报数据（实际返回当日报表，但使用月报生成器的数据源）
+        """
+        return self.daily_generator.generate_daily(report_date)
 
     def get_trading_days(self, year: int, month: int) -> List[date]:
         """

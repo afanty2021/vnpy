@@ -12,7 +12,7 @@ from vnpy_china_reporting.core.enums import ReportType, PositionSide
 class MockReportGenerator(BaseReportGenerator):
     """模拟报表生成器，用于测试基类"""
 
-    def generate(self, report_date: date):
+    def generate_daily(self, report_date: date):
         """实现抽象方法"""
         from vnpy_china_reporting.core.models import ReportData
         return ReportData(

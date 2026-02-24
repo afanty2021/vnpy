@@ -5,7 +5,7 @@
 """
 
 from datetime import date, timedelta
-from typing import List, Dict
+from typing import List, Dict, Optional, Any
 
 from .base import BaseReportGenerator
 from ..core.models import ReportData, TradeRecord, AccountData
@@ -19,7 +19,7 @@ class DailyReportGenerator(BaseReportGenerator):
     生成每日交易报表，包含当日交易记录、持仓状况和盈亏情况。
     """
 
-    def __init__(self, main_engine=None):
+    def __init__(self, main_engine: Optional[Any] = None) -> None:
         """
         初始化日报生成器
 
@@ -29,7 +29,7 @@ class DailyReportGenerator(BaseReportGenerator):
         super().__init__(main_engine)
         self.report_type = ReportType.DAILY
 
-    def generate(self, report_date: date) -> ReportData:
+    def generate_daily(self, report_date: date) -> ReportData:
         """
         生成日报数据
 

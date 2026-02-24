@@ -28,7 +28,7 @@ def test_generate_daily_report():
     generator = DailyReportGenerator()
     report_date = date(2025, 1, 15)
 
-    report = generator.generate(report_date)
+    report = generator.generate_daily(report_date)
 
     assert report.report_type == ReportType.DAILY
     assert report.start_date == report_date
@@ -43,7 +43,7 @@ def test_generate_daily_report_today():
     generator = DailyReportGenerator()
     today = date.today()
 
-    report = generator.generate(today)
+    report = generator.generate_daily(today)
 
     assert report.start_date == today
     assert report.end_date == today
@@ -65,7 +65,7 @@ def test_get_summary():
     generator = DailyReportGenerator()
     report_date = date(2025, 1, 15)
 
-    report = generator.generate(report_date)
+    report = generator.generate_daily(report_date)
     summary = generator.get_summary(report)
 
     assert "报表日期" in summary
@@ -122,7 +122,7 @@ def test_daily_pnl_calculation():
         commission = 0.0
 
     generator_with_data = DailyReportGenerator(main_engine=MockMainEngine())
-    report = generator_with_data.generate(date(2025, 1, 15))
+    report = generator_with_data.generate_daily(date(2025, 1, 15))
 
     # 验证数据
     assert report.report_type == ReportType.DAILY
@@ -132,7 +132,7 @@ def test_daily_pnl_calculation():
 def test_empty_daily_report():
     """测试空日报"""
     generator = DailyReportGenerator()
-    report = generator.generate(date(2025, 1, 1))
+    report = generator.generate_daily(date(2025, 1, 1))
 
     assert report.daily_pnl == 0.0
     assert report.daily_pnl_ratio == 0.0
@@ -142,7 +142,7 @@ def test_empty_daily_report():
 def test_position_ratio_calculation():
     """测试持仓比例计算"""
     generator = DailyReportGenerator()
-    report = generator.generate(date(2025, 1, 15))
+    report = generator.generate_daily(date(2025, 1, 15))
 
     # 验证市值和比例
     assert report.account.market_value >= 0

@@ -29,7 +29,7 @@ def test_generate_monthly_report():
     year = 2025
     month = 1
 
-    report = generator.generate(year, month)
+    report = generator.generate_monthly(year, month)
 
     assert report.report_type == ReportType.MONTHLY
     assert report.start_date == date(2025, 1, 1)
@@ -43,7 +43,7 @@ def test_generate_monthly_report_february():
     year = 2024  # 闰年
     month = 2
 
-    report = generator.generate(year, month)
+    report = generator.generate_monthly(year, month)
 
     assert report.report_type == ReportType.MONTHLY
     assert report.end_date == date(2024, 2, 29)
@@ -55,7 +55,7 @@ def test_generate_monthly_report_non_leap_year():
     year = 2025  # 非闰年
     month = 2
 
-    report = generator.generate(year, month)
+    report = generator.generate_monthly(year, month)
 
     assert report.report_type == ReportType.MONTHLY
     assert report.end_date == date(2025, 2, 28)
@@ -104,7 +104,7 @@ def test_get_trading_days_february():
 def test_get_monthly_summary():
     """测试获取月报摘要"""
     generator = MonthlyReportGenerator()
-    report = generator.generate(2025, 1)
+    report = generator.generate_monthly(2025, 1)
 
     summary = generator.get_monthly_summary(report)
 
@@ -133,7 +133,7 @@ def test_get_monthly_stats():
 def test_empty_monthly_report():
     """测试空月报"""
     generator = MonthlyReportGenerator()
-    report = generator.generate(2025, 1)
+    report = generator.generate_monthly(2025, 1)
 
     assert report.daily_pnl == 0.0
     assert report.daily_pnl_ratio == 0.0
@@ -146,5 +146,5 @@ def test_monthly_report_daily_generator_integration():
 
     # 验证内部日报生成器
     assert generator.daily_generator is not None
-    daily_report = generator.daily_generator.generate(date(2025, 1, 15))
+    daily_report = generator.daily_generator.generate_daily(date(2025, 1, 15))
     assert daily_report.report_type == ReportType.DAILY

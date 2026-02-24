@@ -5,7 +5,7 @@
 """
 
 from datetime import date
-from typing import List, Dict
+from typing import List, Dict, Optional, Any
 
 from .base import BaseReportGenerator
 from .monthly import MonthlyReportGenerator
@@ -20,7 +20,7 @@ class YearlyReportGenerator(BaseReportGenerator):
     生成年度交易报表，包含全年交易记录、年度统计和分析。
     """
 
-    def __init__(self, main_engine=None):
+    def __init__(self, main_engine: Optional[Any] = None) -> None:
         """
         初始化年报生成器
 
@@ -31,7 +31,7 @@ class YearlyReportGenerator(BaseReportGenerator):
         self.report_type = ReportType.YEARLY
         self.monthly_generator = MonthlyReportGenerator(main_engine)
 
-    def generate(self, year: int) -> ReportData:
+    def generate_yearly(self, year: int) -> ReportData:
         """
         生成年报数据
 
@@ -81,7 +81,19 @@ class YearlyReportGenerator(BaseReportGenerator):
         Returns:
             年报数据
         """
-        return self.generate(report_date.year)
+        return self.generate_yearly(report_date.year)
+
+    def generate_daily(self, report_date: date) -> ReportData:
+        """
+        实现基类的日报生成接口
+
+        Args:
+            report_date: 报表日期
+
+        Returns:
+            日报数据（实际返回当日报表，但使用年报生成器的数据源）
+        """
+        return self.monthly_generator.daily_generator.generate_daily(report_date)
 
     def get_yearly_summary(self, report: ReportData) -> Dict:
         """
@@ -158,7 +170,7 @@ class YearlyReportGenerator(BaseReportGenerator):
         monthly_breakdown = {}
 
         for month in range(1, 13):
-            month_report = self.monthly_generator.generate(year, month)
+            month_report = self.monthly_generator.generate_monthly(year, month)
             month_key = f"{year}年{month:02d}月"
 
             monthly_breakdown[month_key] = {

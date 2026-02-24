@@ -28,7 +28,7 @@ def test_generate_yearly_report():
     generator = YearlyReportGenerator()
     year = 2025
 
-    report = generator.generate(year)
+    report = generator.generate_yearly(year)
 
     assert report.report_type == ReportType.YEARLY
     assert report.start_date == date(2025, 1, 1)
@@ -41,7 +41,7 @@ def test_generate_yearly_report_2024():
     generator = YearlyReportGenerator()
     year = 2024
 
-    report = generator.generate(year)
+    report = generator.generate_yearly(year)
 
     assert report.report_type == ReportType.YEARLY
     assert report.start_date == date(2024, 1, 1)
@@ -63,7 +63,7 @@ def test_generate_by_date():
 def test_get_yearly_summary():
     """测试获取年报摘要"""
     generator = YearlyReportGenerator()
-    report = generator.generate(2025)
+    report = generator.generate_yearly(2025)
 
     summary = generator.get_yearly_summary(report)
 
@@ -110,7 +110,7 @@ def test_get_monthly_breakdown():
 def test_empty_yearly_report():
     """测试空年报"""
     generator = YearlyReportGenerator()
-    report = generator.generate(2025)
+    report = generator.generate_yearly(2025)
 
     assert report.daily_pnl == 0.0
     assert report.daily_pnl_ratio == 0.0
@@ -123,7 +123,7 @@ def test_yearly_report_monthly_generator_integration():
 
     # 验证内部月报生成器
     assert generator.monthly_generator is not None
-    monthly_report = generator.monthly_generator.generate(2025, 1)
+    monthly_report = generator.monthly_generator.generate_monthly(2025, 1)
     assert monthly_report.report_type == ReportType.MONTHLY
 
 
