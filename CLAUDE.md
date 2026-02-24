@@ -9,7 +9,8 @@
 ### Conda 环境
 - **环境名称**: Quant-3.11
 - **Python 版本**: 3.11
-- **安装路径**: D:\scoop\apps\miniconda\current\envs\Quant-3.11
+- **安装路径**: D:\scoop\apps\miniconda\current\envs\Quant-3.11(windows);
+- /opt/homebrew/caskroom/miniconda/base(mac os)
 
 ### 已安装的包
 - vnpy (核心框架)
