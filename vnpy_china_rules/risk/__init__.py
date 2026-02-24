@@ -8,10 +8,17 @@ A股风险管理模块
 - TradingLimitRule: 交易限制规则
 """
 
-from vnpy_china_rules.risk.manager import AStockRiskManager
+from vnpy_china_rules.risk.manager import AStockRiskManager, create_risk_manager
+from vnpy_china_rules.risk.rules import (
+    PositionControlRule,
+    StopProfitLossRule,
+    CapitalRiskRule,
+    TradingLimitRule,
+)
 
 __all__ = [
     "AStockRiskManager",
+    "create_risk_manager",
     "PositionControlRule",
     "StopProfitLossRule",
     "CapitalRiskRule",
