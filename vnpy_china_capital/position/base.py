@@ -28,7 +28,7 @@ class PositionSizer(ABC):
         symbols: List[str],
         total_capital: float,
         prices: Dict[str, float],
-        **kwargs: float
+        **kwargs: Any
     ) -> Dict[str, int]:
         """
         计算各股票的目标仓位
