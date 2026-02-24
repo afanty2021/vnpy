@@ -12,6 +12,28 @@ from vnpy_china_rules.datasource import (
     DataSourceManager,
 )
 
+from vnpy_china_rules.engine import (
+    RuleResult,
+    PositionRecord,
+    ChinaStockRulesEngine,
+    T1RulesEngine,
+    PriceLimitRulesEngine,
+    TimeRulesEngine,
+    UnitRulesEngine,
+    IpoRulesEngine,
+)
+
+from vnpy_china_rules.filter import (
+    ChinaStockRiskFilter,
+    create_risk_filter,
+)
+
+from vnpy_china_rules.strategy import (
+    ChinaStockStrategy,
+    TradingRuleMixin,
+    create_strategy_base,
+)
+
 
 __all__ = [
     # 数据源
@@ -20,6 +42,22 @@ __all__ = [
     "QMTDataSource",
     "TushareDataSource",
     "DataSourceManager",
+    # 规则引擎
+    "RuleResult",
+    "PositionRecord",
+    "ChinaStockRulesEngine",
+    "T1RulesEngine",
+    "PriceLimitRulesEngine",
+    "TimeRulesEngine",
+    "UnitRulesEngine",
+    "IpoRulesEngine",
+    # 风控过滤器
+    "ChinaStockRiskFilter",
+    "create_risk_filter",
+    # 策略基类
+    "ChinaStockStrategy",
+    "TradingRuleMixin",
+    "create_strategy_base",
 ]
 
 
