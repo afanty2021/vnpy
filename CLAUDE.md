@@ -17,7 +17,7 @@
 - vnpy_qmt (QMT证券交易接口)
 
 ### QMT 配置
-- **QMT 账号**: 40218291
+- **QMT 账号**: ******
 - **MiniQMT 路径**: D:/国金证券QMT交易端/userdata_mini/  (**注意：不是主目录，是userdata_mini子目录**)
 - **xtquant 模块**: 已复制到 conda 环境 site-packages
 
