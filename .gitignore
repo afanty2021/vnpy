@@ -27,6 +27,8 @@ dist
 # Logs and Data
 logs/
 data/
+*.log
+web_monitor.log
 
 # Visual Studio intermediate files
 *.exp
