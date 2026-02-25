@@ -15,5 +15,7 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #6835 | 9:42 AM | ✅ | Stashed changes restored to master branch: 3 files modified (docs/CLAUDE.md, docs/plans/CLAUDE.md, vnpy_china_monitor/CLAUDE.md) | ~332 |
+| #6740 | 6:06 AM | 🔵 | REQ-012 web monitoring requirement found in 4 documents | ~241 |
 | #6735 | 6:04 AM | ✅ | Master branch has two unstaged modified files: docs/CLAUDE.md and docs/plans/CLAUDE.md | ~235 |
 </claude-mem-context>
