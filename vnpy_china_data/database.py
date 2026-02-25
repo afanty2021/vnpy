@@ -4,10 +4,15 @@ MySQL数据库操作层
 提供K线数据、股票信息、财务数据等的持久化存储和查询功能。
 """
 
-from typing import List, Optional, Any, Dict
+from typing import List, Optional, Any, Dict, TYPE_CHECKING
 from datetime import datetime
 from contextlib import contextmanager
 from threading import Lock
+
+from vnpy.trader.logger import logger
+
+if TYPE_CHECKING:
+    from vnpy_china_capital.objects.capital_flow import CapitalFlowData
 
 try:
     import pymysql
@@ -174,10 +179,10 @@ class MySQLDatabaseLayer:
                 return True
 
         except (OperationalError, DatabaseError) as e:
-            print(f"保存K线数据失败: {e}")
+            logger.error(f"保存K线数据失败: {e}", exc_info=True)
             return False
         except Exception as e:
-            print(f"保存K线数据异常: {e}")
+            logger.error(f"保存K线数据异常: {e}", exc_info=True)
             return False
         finally:
             if 'cursor' in locals():
@@ -253,10 +258,10 @@ class MySQLDatabaseLayer:
                 return bars
 
         except (OperationalError, DatabaseError) as e:
-            print(f"加载K线数据失败: {e}")
+            logger.error(f"加载K线数据失败: {e}", exc_info=True)
             return []
         except Exception as e:
-            print(f"加载K线数据异常: {e}")
+            logger.error(f"加载K线数据异常: {e}", exc_info=True)
             return []
 
     def get_latest_date(
@@ -348,7 +353,7 @@ class MySQLDatabaseLayer:
                 return True
 
         except Exception as e:
-            print(f"保存股票信息失败: {e}")
+            logger.error(f"保存股票信息失败: {e}", exc_info=True)
             return False
 
     def load_stock_info(self, symbol: str) -> Optional[Dict[str, Any]]:
@@ -380,7 +385,7 @@ class MySQLDatabaseLayer:
                 return dict(result) if result else None
 
         except Exception as e:
-            print(f"加载股票信息失败: {e}")
+            logger.error(f"加载股票信息失败: {e}", exc_info=True)
             return None
 
     # ========== 财务数据操作 ==========
@@ -435,5 +440,222 @@ class MySQLDatabaseLayer:
                 return True
 
         except Exception as e:
-            print(f"保存财务数据失败: {e}")
+            logger.error(f"保存财务数据失败: {e}", exc_info=True)
             return False
+
+    # ========== 资金流水操作 ==========
+
+    def create_capital_flow_table(self) -> bool:
+        """创建资金流水表
+
+        Returns:
+            是否创建成功
+        """
+        if not self._ensure_connection():
+            return False
+
+        try:
+            with self._lock:
+                cursor = self._connection.cursor()
+
+                sql = """
+                CREATE TABLE IF NOT EXISTS db_capital_flow (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    flow_id VARCHAR(128) NOT NULL,
+                    gateway_name VARCHAR(32) NOT NULL,
+                    trade_id VARCHAR(64) NOT NULL,
+                    symbol VARCHAR(32) NOT NULL,
+                    exchange VARCHAR(16) NOT NULL,
+                    direction VARCHAR(8),
+                    offset VARCHAR(8),
+                    price DECIMAL(15, 4),
+                    volume DECIMAL(15, 4),
+                    amount DECIMAL(20, 4),
+                    balance DECIMAL(20, 4),
+                    available DECIMAL(20, 4),
+                    trade_time DATETIME(3) NOT NULL,
+                    created_at DATETIME(3),
+                    flow_type VARCHAR(16),
+                    description TEXT,
+
+                    UNIQUE KEY uk_flow_id (flow_id),
+                    KEY idx_symbol_time (symbol, trade_time),
+                    KEY idx_trade_time (trade_time),
+                    KEY idx_type_time (flow_type, trade_time)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+                """
+
+                cursor.execute(sql)
+                self._connection.commit()
+                cursor.close()
+                return True
+
+        except (OperationalError, DatabaseError) as e:
+            logger.error(f"创建资金流水表失败: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"创建资金流水表异常: {e}", exc_info=True)
+            return False
+
+    def _execute_sql(
+        self,
+        sql: str,
+        params: Optional[tuple] = None,
+        fetch_all: bool = False,
+        many: bool = False
+    ) -> Optional[Any]:
+        """执行SQL语句的内部方法
+
+        Args:
+            sql: SQL语句
+            params: 参数（可以是tuple或list）
+            fetch_all: 是否获取所有结果
+            many: 是否执行批量操作
+
+        Returns:
+            执行结果
+        """
+        if not self._ensure_connection():
+            return None
+
+        try:
+            with self._lock:
+                cursor = self._connection.cursor(DictCursor if fetch_all else None)
+
+                if many and isinstance(params, list):
+                    cursor.executemany(sql, params)
+                    result = cursor.rowcount
+                elif params:
+                    cursor.execute(sql, params)
+                else:
+                    cursor.execute(sql)
+
+                if not many:
+                    if fetch_all:
+                        result = cursor.fetchall()
+                    elif sql.strip().upper().startswith("SELECT"):
+                        result = cursor.fetchone()
+                    else:
+                        result = cursor.rowcount
+
+                self._connection.commit()
+                cursor.close()
+                return result if result is not None else [] if fetch_all else True
+
+        except (OperationalError, DatabaseError) as e:
+            logger.error(f"执行SQL失败: {e}", exc_info=True)
+            return None
+        except Exception as e:
+            logger.error(f"执行SQL异常: {e}", exc_info=True)
+            return None
+
+    def save_capital_flow(self, flow: "CapitalFlowData") -> bool:
+        """保存资金流水
+
+        Args:
+            flow: CapitalFlowData对象
+
+        Returns:
+            是否保存成功
+        """
+        if not self._ensure_connection():
+            return False
+
+        try:
+            with self._lock:
+                cursor = self._connection.cursor()
+
+                sql = """
+                INSERT INTO db_capital_flow
+                (flow_id, gateway_name, trade_id, symbol, exchange, direction, offset,
+                 price, volume, amount, balance, available, trade_time, created_at,
+                 flow_type, description)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    amount = VALUES(amount),
+                    balance = VALUES(balance),
+                    available = VALUES(available)
+                """
+
+                # 获取枚举值，处理None情况
+                direction_value = flow.direction.value if hasattr(flow, 'direction') and flow.direction else None
+                offset_value = flow.offset.value if hasattr(flow, 'offset') and flow.offset else None
+
+                params = (
+                    flow.flow_id,
+                    flow.gateway_name,
+                    flow.trade_id,
+                    flow.symbol,
+                    flow.exchange,
+                    direction_value,
+                    offset_value,
+                    float(flow.price) if flow.price is not None else None,
+                    float(flow.volume) if flow.volume is not None else None,
+                    float(flow.amount) if flow.amount is not None else None,
+                    float(flow.balance) if flow.balance is not None else None,
+                    float(flow.available) if flow.available is not None else None,
+                    flow.trade_time,
+                    flow.created_at,
+                    flow.flow_type,
+                    flow.description
+                )
+
+                cursor.execute(sql, params)
+                self._connection.commit()
+                cursor.close()
+                return True
+
+        except (OperationalError, DatabaseError) as e:
+            logger.error(f"保存资金流水失败: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"保存资金流水异常: {e}", exc_info=True)
+            return False
+
+    def query_capital_flow(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        symbol: Optional[str] = None,
+        flow_type: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """查询资金流水
+
+        Args:
+            start_date: 开始日期 (YYYY-MM-DD)
+            end_date: 结束日期 (YYYY-MM-DD)
+            symbol: 股票代码
+            flow_type: 流水类型
+
+        Returns:
+            资金流水字典列表
+        """
+        conditions = []
+        params = []
+
+        if start_date:
+            conditions.append("trade_time >= %s")
+            params.append(start_date)
+
+        if end_date:
+            conditions.append("trade_time <= %s")
+            params.append(end_date)
+
+        if symbol:
+            conditions.append("symbol = %s")
+            params.append(symbol)
+
+        if flow_type:
+            conditions.append("flow_type = %s")
+            params.append(flow_type)
+
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+        sql = f"""
+        SELECT * FROM db_capital_flow
+        WHERE {where_clause}
+        ORDER BY trade_time DESC
+        """
+
+        results = self._execute_sql(sql, tuple(params) if params else None, fetch_all=True)
+        return results if results else []
