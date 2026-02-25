@@ -63,6 +63,7 @@ class ChinaDataGuiEngine(BaseEngine):
         """
         if not self.data_service:
             # 返回mock数据用于演示
+            self.main_engine.write_log("警告：数据服务未初始化，使用mock数据。请配置Tushare token获取真实数据。", "ChinaDataApp")
             return self._get_mock_dragon_tiger_data(trade_date or date.today())
 
         if trade_date is None:
@@ -71,8 +72,13 @@ class ChinaDataGuiEngine(BaseEngine):
         try:
             self.main_engine.write_log(f"查询龙虎榜数据：{trade_date}", "ChinaDataApp")
             data = self.data_service.get_dragon_tiger_data(trade_date)
+
+            if not data:
+                self.main_engine.write_log("未查询到龙虎榜数据，可能是：1)非交易日 2)Tushare token未配置 3)网络问题。使用mock数据。", "ChinaDataApp")
+                return self._get_mock_dragon_tiger_data(trade_date)
+
             self.main_engine.write_log(f"查询完成，共{len(data)}条记录", "ChinaDataApp")
-            return data if data else self._get_mock_dragon_tiger_data(trade_date)
+            return data
         except Exception as e:
             self.main_engine.write_log(f"查询龙虎榜数据失败：{e}，使用mock数据", "ChinaDataApp")
             return self._get_mock_dragon_tiger_data(trade_date)
@@ -88,6 +94,7 @@ class ChinaDataGuiEngine(BaseEngine):
         """
         if not self.data_service:
             # 返回mock数据用于演示
+            self.main_engine.write_log("警告：数据服务未初始化，使用mock数据。请配置Tushare token获取真实数据。", "ChinaDataApp")
             return self._get_mock_northbound_flow(trade_date or date.today())
 
         if trade_date is None:
@@ -99,7 +106,7 @@ class ChinaDataGuiEngine(BaseEngine):
             if data:
                 self.main_engine.write_log(f"查询完成，净流入：{data.total_net_inflow:.2f}亿元", "ChinaDataApp")
             else:
-                self.main_engine.write_log("未查询到北向资金数据，使用mock数据", "ChinaDataApp")
+                self.main_engine.write_log("未查询到北向资金数据，可能是：1)非交易日 2)Tushare token未配置 3)网络问题。使用mock数据。", "ChinaDataApp")
                 return self._get_mock_northbound_flow(trade_date)
             return data
         except Exception as e:
@@ -154,17 +161,23 @@ class ChinaDataGuiEngine(BaseEngine):
 
     def _get_mock_northbound_flow(self, trade_date: date) -> Any:
         """获取mock北向资金数据用于演示"""
-        class NorthboundFlow:
-            def __init__(self, trade_date, total_net_inflow, buy_volume, sell_volume):
-                self.trade_date = trade_date
-                self.total_net_inflow = total_net_inflow
-                self.buy_volume = buy_volume
-                self.sell_volume = sell_volume
-                self.hk_exchg_net_buy = total_net_inflow * 0.5
-                self.sh_exchg_net_buy = total_net_inflow * 0.3
-                self.sz_exchg_net_buy = total_net_inflow * 0.2
+        from vnpy_china_data.models.northbound import NorthboundFlowData
 
-        return NorthboundFlow(trade_date, 15.0, 500.0, 485.0)
+        # 创建mock数据：沪股通净流入10亿，深股通净流入5亿
+        sh_buy = 300.0  # 300亿
+        sh_sell = 290.0  # 290亿
+        sz_buy = 250.0  # 250亿
+        sz_sell = 245.0  # 245亿
+
+        return NorthboundFlowData(
+            trade_date=trade_date,
+            sh_net_inflow=sh_buy - sh_sell,  # 10亿
+            sh_buy_volume=sh_buy,
+            sh_sell_volume=sh_sell,
+            sz_net_inflow=sz_buy - sz_sell,  # 5亿
+            sz_buy_volume=sz_buy,
+            sz_sell_volume=sz_sell,
+        )
 
 
 __all__ = ["ChinaDataGuiEngine"]

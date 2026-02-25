@@ -26,10 +26,11 @@ from vnpy_china_config import ConfigManager, DataModuleConfig
 
 from .cache import DataQueryCache
 from .database import MySQLDatabaseLayer
-from .adapter import TushareDataAdapter, QMTDataAdapter
+from .adapter import TushareDataAdapter, QMTDataAdapter, RpcQmtDataAdapter
 from .models.dragon_tiger import DragonTigerData
 from .models.northbound import NorthboundFlowData
 from .models.sector import SectorData
+from .models.money_flow import MoneyFlowData
 from .config import data_config
 
 
@@ -68,22 +69,23 @@ class ChinaDataService(
 
         # 获取配置
         config_manager = ConfigManager()
-        self.config: DataModuleConfig = config_manager.get_config("data")
+        self.config: DataModuleConfig = config_manager.load_module_config("data", DataModuleConfig)
+        self.global_config = config_manager.load_global_config()
 
         # 初始化组件
         self.cache = DataQueryCache(
-            host=self.config.database.redis_host,
-            port=self.config.database.redis_port,
-            password=self.config.database.redis_password,
+            host=self.global_config.database.redis_host,
+            port=self.global_config.database.redis_port,
+            password=self.global_config.database.redis_password,
             default_ttl=data_config.DEFAULT_CACHE_TTL
         )
 
         self.database = MySQLDatabaseLayer(
-            host=self.config.database.mysql_host,
-            port=self.config.database.mysql_port,
-            user=self.config.database.mysql_user,
-            password=self.config.database.mysql_password,
-            database=self.config.database.mysql_database
+            host=self.global_config.database.mysql_host,
+            port=self.global_config.database.mysql_port,
+            user=self.global_config.database.mysql_user,
+            password=self.global_config.database.mysql_password,
+            database=self.global_config.database.mysql_database
         )
 
         self.tushare_adapter = TushareDataAdapter(
@@ -91,10 +93,19 @@ class ChinaDataService(
             rate_limit=self.config.tushare_rate_limit
         )
 
-        self.qmt_adapter = QMTDataAdapter(
-            qmt_path=self.config.qmt_path,
-            account_id=self.config.qmt_account_id
-        )
+        # 根据配置选择QMT适配器类型
+        if self.config.qmt_use_rpc:
+            # 使用RPC模式（Mac/Linux客户端）
+            self.qmt_adapter = RpcQmtDataAdapter(
+                req_address=self.config.qmt_rpc_req_address,
+                sub_address=self.config.qmt_rpc_sub_address
+            )
+        else:
+            # 使用直接模式（Windows本地）
+            self.qmt_adapter = QMTDataAdapter(
+                qmt_path=str(self.config.qmt_path),
+                account_id=self.config.qmt_account_id
+            )
 
         # 运行状态
         self._connected = False
@@ -347,6 +358,81 @@ class ChinaDataService(
         """获取板块指数数据"""
         # 简化实现
         return []
+
+    # ========== 资金流向数据 ==========
+
+    def get_moneyflow(
+        self,
+        symbol: str = "",
+        exchange: Exchange = Exchange.SZSE,
+        trade_date: date = None,
+        start_date: date = None,
+        end_date: date = None
+    ) -> List[MoneyFlowData]:
+        """获取个股资金流向数据
+
+        Args:
+            symbol: 股票代码
+            exchange: 交易所
+            trade_date: 交易日期
+            start_date: 开始日期
+            end_date: 结束日期
+
+        Returns:
+            资金流向数据列表
+        """
+        # 转换为Tushare格式
+        ts_code = self._convert_to_ts_code(symbol, exchange) if symbol else ""
+
+        # 格式化日期参数
+        trade_date_str = trade_date.strftime("%Y%m%d") if trade_date else ""
+        start_date_str = start_date.strftime("%Y%m%d") if start_date else ""
+        end_date_str = end_date.strftime("%Y%m%d") if end_date else ""
+
+        # 尝试从缓存获取
+        cache_key = f"moneyflow_{ts_code}_{trade_date_str}_{start_date_str}_{end_date_str}"
+        cached = self.cache.get(cache_key)
+        if cached:
+            return [MoneyFlowData(**d) for d in cached]
+
+        # 从Tushare获取
+        data = self.tushare_adapter.get_moneyflow(
+            ts_code=ts_code,
+            trade_date=trade_date_str,
+            start_date=start_date_str,
+            end_date=end_date_str
+        )
+
+        if data:
+            # 缓存1天
+            serialized = [
+                {
+                    "symbol": d.symbol,
+                    "name": d.name,
+                    "trade_date": d.trade_date.isoformat(),
+                    "close_price": d.close_price,
+                    "change_pct": d.change_pct,
+                    "super_large_buy": d.super_large_buy,
+                    "super_large_sell": d.super_large_sell,
+                    "large_buy": d.large_buy,
+                    "large_sell": d.large_sell,
+                    "medium_buy": d.medium_buy,
+                    "medium_sell": d.medium_sell,
+                    "small_buy": d.small_buy,
+                    "small_sell": d.small_sell,
+                    "super_large_buy_amount": d.super_large_buy_amount,
+                    "super_large_sell_amount": d.super_large_sell_amount,
+                    "large_buy_amount": d.large_buy_amount,
+                    "large_sell_amount": d.large_sell_amount,
+                    "medium_buy_amount": d.medium_buy_amount,
+                    "medium_sell_amount": d.medium_sell_amount,
+                    "small_buy_amount": d.small_buy_amount,
+                    "small_sell_amount": d.small_sell_amount,
+                }
+                for d in data
+            ]
+            self.cache.set(cache_key, serialized, ttl=86400)
+        return data
 
     # ========== 工具方法 ==========
 

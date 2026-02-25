@@ -17,6 +17,7 @@ from ..limiter import TushareRateLimiter
 from ..models.dragon_tiger import DragonTigerData
 from ..models.northbound import NorthboundFlowData
 from ..models.sector import SectorData
+from ..models.money_flow import MoneyFlowData
 from .base import BaseDataAdapter
 
 
@@ -334,6 +335,95 @@ class TushareDataAdapter(BaseDataAdapter):
         )
 
         return data
+
+    # ========== 个股资金流向数据 ==========
+
+    def get_moneyflow(
+        self,
+        ts_code: str = "",
+        trade_date: str = "",
+        start_date: str = "",
+        end_date: str = ""
+    ) -> List[MoneyFlowData]:
+        """获取个股资金流向数据
+
+        Args:
+            ts_code: 股票代码（格式：000001.SZ）
+            trade_date: 交易日期（格式：20240201）
+            start_date: 开始日期（格式：20240101）
+            end_date: 结束日期（格式：20240131）
+
+        Returns:
+            资金流向数据列表
+
+        Note:
+            如果不指定ts_code，返回所有股票的资金流向数据
+            如果不指定日期，默认返回最近一个交易日的数据
+        """
+        # 构建API参数
+        params = {}
+        if ts_code:
+            params["ts_code"] = ts_code
+        if trade_date:
+            params["trade_date"] = trade_date
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        df = self._call_api("moneyflow", **params)
+
+        if df.empty:
+            return []
+
+        results = []
+        for _, row in df.iterrows():
+            try:
+                # 解析交易日期
+                trade_dt = datetime.strptime(str(row["trade_date"]), "%Y%m%d").date()
+
+                # 解析股票代码和名称
+                symbol_code = row.get("ts_code", "")
+                symbol = symbol_code.split(".")[0] if symbol_code else ""
+                name = row.get("name", "")
+
+                moneyflow = MoneyFlowData(
+                    symbol=symbol,
+                    name=name,
+                    trade_date=trade_dt,
+                    close_price=float(row.get("close", 0)) if "close" in row else 0.0,
+                    change_pct=float(row.get("pct_chg", 0)) if "pct_chg" in row else 0.0,
+                    # 超大单（手）- 使用 elg (extra large)
+                    super_large_buy=int(row.get("buy_elg_vol", 0)),
+                    super_large_sell=int(row.get("sell_elg_vol", 0)),
+                    # 大单（手）- 使用 lg (large)
+                    large_buy=int(row.get("buy_lg_vol", 0)),
+                    large_sell=int(row.get("sell_lg_vol", 0)),
+                    # 中单（手）- 使用 md (medium)
+                    medium_buy=int(row.get("buy_md_vol", 0)),
+                    medium_sell=int(row.get("sell_md_vol", 0)),
+                    # 小单（手）- 使用 sm (small)
+                    small_buy=int(row.get("buy_sm_vol", 0)),
+                    small_sell=int(row.get("sell_sm_vol", 0)),
+                    # 超大单金额（元）
+                    super_large_buy_amount=float(row.get("buy_elg_amount", 0)),
+                    super_large_sell_amount=float(row.get("sell_elg_amount", 0)),
+                    # 大单金额（元）
+                    large_buy_amount=float(row.get("buy_lg_amount", 0)),
+                    large_sell_amount=float(row.get("sell_lg_amount", 0)),
+                    # 中单金额（元）
+                    medium_buy_amount=float(row.get("buy_md_amount", 0)),
+                    medium_sell_amount=float(row.get("sell_md_amount", 0)),
+                    # 小单金额（元）
+                    small_buy_amount=float(row.get("buy_sm_amount", 0)),
+                    small_sell_amount=float(row.get("sell_sm_amount", 0)),
+                )
+                results.append(moneyflow)
+            except Exception as e:
+                print(f"解析资金流向数据失败: {e}")
+                continue
+
+        return results
 
     # ========== 板块数据 ==========
 
