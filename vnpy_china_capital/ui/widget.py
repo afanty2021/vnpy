@@ -4,11 +4,15 @@ A股资金管理UI组件
 """
 from typing import Any, Optional, List
 from datetime import datetime, date
+import logging
 
 from vnpy.trader.ui.qt import QtCore, QtGui, QtWidgets
 from vnpy.trader.object import PositionData, TradeData, ContractData
 from vnpy.trader.constant import Direction
 from vnpy.trader.locale import _
+
+
+logger = logging.getLogger(__name__)
 
 
 class ChinaCapitalWidget(QtWidgets.QWidget):
@@ -30,8 +34,8 @@ class ChinaCapitalWidget(QtWidgets.QWidget):
         self.gui_engine: Optional[Any] = None
         try:
             self.gui_engine = main_engine.get_engine("ChinaCapitalApp")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"获取GUI引擎失败: {e}")
 
         # 持仓流水记录缓存 {symbol: [{buy_time, volume, available}]}
         self.position_records: dict = {}
@@ -147,6 +151,13 @@ class ChinaCapitalWidget(QtWidgets.QWidget):
         refresh_btn = QtWidgets.QPushButton(_("刷新"))
         refresh_btn.clicked.connect(self.refresh_cash_flow_data)
         toolbar.addWidget(refresh_btn)
+
+        # 导入按钮
+        import_btn = QtWidgets.QPushButton(_("导入历史数据"))
+        import_btn.clicked.connect(self.show_import_dialog)
+        toolbar.addWidget(import_btn)
+
+        toolbar.addStretch()
         layout.addLayout(toolbar)
 
         return widget
@@ -251,7 +262,9 @@ class ChinaCapitalWidget(QtWidgets.QWidget):
             self.t1_table.setItem(row, 4, sold_item)
 
             # 可卖数量（A股T+1：昨日买入可卖，今日买入不可卖）
-            sellable = "0" if today.strftime("%Y%m%d") == datetime.now().strftime("%Y%m%d") else str(data["volume"])
+            # TODO: 需要记录买入日期，这里暂时假设所有持仓都是之前买入的
+            # T+1规则：当日买入的股票次日才能卖出
+            sellable = str(data["volume"])  # 暂时假设都可卖
             sellable_item = QtWidgets.QTableWidgetItem(sellable)
             # 今日买入显示灰色
             if sellable == "0":
@@ -259,54 +272,71 @@ class ChinaCapitalWidget(QtWidgets.QWidget):
             self.t1_table.setItem(row, 5, sellable_item)
 
         self.t1_table.resizeColumnsToContents()
-        self.show_status(_(f"T+1持仓流水已更新，共{len(position_summary)}条记录"))
+        self.show_status(_("T+1持仓流水已更新，共{}条记录").format(len(position_summary)))
 
     def refresh_cash_flow_data(self) -> None:
         """刷新资金流水"""
-        # 模拟数据
-        mock_flows = [
-            {"time": "09:30:00", "type": "转入", "amount": 100000.00, "desc": "初始资金", "balance": 100000.00},
-            {"time": "10:15:00", "type": "买入", "amount": -15000.00, "desc": "买入平安银行", "balance": 85000.00},
-            {"time": "14:20:00", "type": "卖出", "amount": 20000.00, "desc": "卖出贵州茅台", "balance": 105000.00},
-        ]
+        flows = []
 
-        self.cash_flow_table.setRowCount(len(mock_flows))
+        if self.gui_engine:
+            flows = self.gui_engine.get_capital_flows()
+        else:
+            # 使用mock数据作为fallback
+            flows = self._get_mock_flows()
 
-        for row, flow in enumerate(mock_flows):
+        # 更新表格
+        self.cash_flow_table.setRowCount(len(flows))
+
+        for row, flow in enumerate(flows):
             # 时间
-            time_item = QtWidgets.QTableWidgetItem(flow["time"])
+            time_item = QtWidgets.QTableWidgetItem(
+                flow["trade_time"].strftime("%H:%M:%S") if isinstance(flow["trade_time"], datetime)
+                else str(flow.get("trade_time", "")).split(" ")[1] if " " in str(flow.get("trade_time", "")) else flow.get("trade_time", "")
+            )
             self.cash_flow_table.setItem(row, 0, time_item)
 
             # 类型
-            type_item = QtWidgets.QTableWidgetItem(flow["type"])
+            type_item = QtWidgets.QTableWidgetItem(flow.get("flow_type", "trade"))
             # 根据类型设置颜色
-            if flow["type"] == "买入":
-                type_item.setForeground(QtGui.QColor("green"))  # 付出绿色
-            elif flow["type"] == "卖出":
-                type_item.setForeground(QtGui.QColor("red"))     # 收入红色
-            elif flow["type"] == "转入":
+            flow_type = flow.get("flow_type", "")
+            if flow_type == "买入":
+                type_item.setForeground(QtGui.QColor("green"))
+            elif flow_type == "卖出":
+                type_item.setForeground(QtGui.QColor("red"))
+            elif flow_type == "转入":
                 type_item.setForeground(QtGui.QColor("red"))
             self.cash_flow_table.setItem(row, 1, type_item)
 
             # 金额
-            amount_text = f"{flow['amount']:,.2f}"
+            amount = flow.get("amount", 0)
+            amount_text = f"{amount:,.2f}"
             amount_item = QtWidgets.QTableWidgetItem(amount_text)
-            if flow["amount"] > 0:
+            if amount > 0:
                 amount_item.setForeground(QtGui.QColor("red"))
             else:
                 amount_item.setForeground(QtGui.QColor("green"))
             self.cash_flow_table.setItem(row, 2, amount_item)
 
             # 说明
-            desc_item = QtWidgets.QTableWidgetItem(flow["desc"])
+            desc_item = QtWidgets.QTableWidgetItem(flow.get("description", ""))
             self.cash_flow_table.setItem(row, 3, desc_item)
 
             # 余额
-            balance_text = f"{flow['balance']:,.2f}"
+            balance = flow.get("balance", 0)
+            balance_text = f"{balance:,.2f}"
             balance_item = QtWidgets.QTableWidgetItem(balance_text)
             self.cash_flow_table.setItem(row, 4, balance_item)
 
         self.cash_flow_table.resizeColumnsToContents()
+        self.show_status(_("资金流水已更新，共{}条记录").format(len(flows)))
+
+    def _get_mock_flows(self) -> List[dict]:
+        """获取mock数据作为fallback"""
+        return [
+            {"trade_time": "09:30:00", "flow_type": "转入", "amount": 100000.00, "description": "初始资金", "balance": 100000.00},
+            {"trade_time": "10:15:00", "flow_type": "买入", "amount": -15000.00, "description": "买入平安银行", "balance": 85000.00},
+            {"trade_time": "14:20:00", "flow_type": "卖出", "amount": 20000.00, "description": "卖出贵州茅台", "balance": 105000.00},
+        ]
 
     def refresh_risk_data(self) -> None:
         """刷新风险数据"""
@@ -336,7 +366,7 @@ class ChinaCapitalWidget(QtWidgets.QWidget):
         )
 
         # 单票最大占比
-        if position_values:
+        if position_values and total_asset > 0:
             max_ratio = max(position_values.values()) / total_asset * 100
             self.max_single_ratio_label.setText(f"{max_ratio:.1f}%")
             # 超过30%显示红色警告
@@ -353,6 +383,135 @@ class ChinaCapitalWidget(QtWidgets.QWidget):
     def show_status(self, msg: str) -> None:
         """显示状态信息"""
         self.status_label.setText(msg)
+
+    def show_import_dialog(self) -> None:
+        """显示历史数据导入对话框"""
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle(_("导入历史资金流水"))
+        dialog.setMinimumWidth(600)
+
+        layout = QtWidgets.QVBoxLayout()
+        dialog.setLayout(layout)
+
+        # 说明
+        desc = QtWidgets.QLabel(
+            _("支持导入CSV格式的历史资金流水数据\n"
+              "CSV格式要求：flow_id,gateway_name,trade_id,symbol,exchange,direction,offset,price,volume,amount,balance,available,trade_time,flow_type,description\n"
+              "• flow_id: 流水唯一标识\n"
+              "• trade_time格式: YYYY-MM-DD HH:MM:SS")
+        )
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        # 文件选择
+        file_layout = QtWidgets.QHBoxLayout()
+        file_path = QtWidgets.QLineEdit()
+        file_path.setPlaceholderText(_("选择CSV文件..."))
+        file_layout.addWidget(file_path)
+
+        browse_btn = QtWidgets.QPushButton(_("浏览"))
+        browse_btn.clicked.connect(lambda: self._select_import_file(file_path))
+        file_layout.addWidget(browse_btn)
+        layout.addLayout(file_layout)
+
+        # 进度显示
+        self.import_progress_label = QtWidgets.QLabel(_("准备导入..."))
+        layout.addWidget(self.import_progress_label)
+
+        # 按钮
+        btn_layout = QtWidgets.QHBoxLayout()
+        import_btn = QtWidgets.QPushButton(_("开始导入"))
+        import_btn.clicked.connect(lambda: self._start_import(file_path.text(), dialog))
+        btn_layout.addWidget(import_btn)
+
+        close_btn = QtWidgets.QPushButton(_("关闭"))
+        close_btn.clicked.connect(dialog.close)
+        btn_layout.addWidget(close_btn)
+
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        # 结果显示
+        self.import_result_label = QtWidgets.QLabel("")
+        layout.addWidget(self.import_result_label)
+
+        dialog.exec_()
+
+    def _select_import_file(self, line_edit: QtWidgets.QLineEdit) -> None:
+        """选择导入文件"""
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            _("选择CSV文件"),
+            "",
+            "CSV Files (*.csv);;All Files (*)"
+        )
+        if file_path:
+            line_edit.setText(file_path)
+
+    def _start_import(self, file_path: str, dialog: QtWidgets.QDialog) -> None:
+        """开始导入历史数据"""
+        if not file_path:
+            self.import_result_label.setText(_("请先选择文件"))
+            return
+
+        self.import_progress_label.setText(_("正在导入..."))
+
+        try:
+            import csv
+            flows = []
+            with open(file_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    # 解析数据
+                    from vnpy.trader.constant import Direction, Offset
+
+                    try:
+                        flow = {
+                            "flow_id": row["flow_id"],
+                            "gateway_name": row.get("gateway_name", ""),
+                            "trade_id": row["trade_id"],
+                            "symbol": row["symbol"],
+                            "exchange": row["exchange"],
+                            "direction": Direction[row["direction"]] if row.get("direction") else None,
+                            "offset": Offset[row["offset"]] if row.get("offset") else None,
+                            "price": float(row["price"]),
+                            "volume": float(row["volume"]),
+                            "amount": float(row["amount"]),
+                            "balance": float(row["balance"]),
+                            "available": float(row["available"]),
+                            "trade_time": datetime.strptime(row["trade_time"], "%Y-%m-%d %H:%M:%S"),
+                            "created_at": datetime.now(),
+                            "flow_type": row.get("flow_type", "trade"),
+                            "description": row.get("description", "")
+                        }
+                        flows.append(flow)
+                    except Exception as e:
+                        self.import_result_label.setText(f"数据解析错误: {e}")
+                        return
+
+            # 导入数据
+            if self.gui_engine:
+                result = self.gui_engine.import_historical_data(flows)
+
+                success_count = result["success_count"]
+                error_count = result["error_count"]
+
+                msg = f"导入完成！成功: {success_count}, 失败: {error_count}"
+                self.import_progress_label.setText(msg)
+
+                if error_count > 0:
+                    errors = result.get("errors", [])
+                    msg += f"\n错误: {errors[:3]}"  # 显示前3个错误
+
+                self.import_result_label.setText(msg)
+
+                # 刷新显示
+                self.refresh_cash_flow_data()
+            else:
+                self.import_result_label.setText(_("错误：GUI引擎未初始化"))
+
+        except Exception as e:
+            self.import_result_label.setText(f"导入失败: {e}")
 
 
 __all__ = ["ChinaCapitalWidget"]
