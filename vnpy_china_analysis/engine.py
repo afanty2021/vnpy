@@ -4,10 +4,11 @@ A股分析引擎
 """
 
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, date
 from vnpy.event import Event, EventEngine
 from vnpy.trader.engine import BaseEngine
 from vnpy.trader.object import TickData, BarData
+from vnpy.trader.constant import Exchange
 
 # 导入分析器
 from .level2.analyzer import Level2Analyzer
@@ -15,6 +16,13 @@ from .money_flow.analyzer import MoneyFlowAnalyzer
 from .technical.analyzer import TechnicalAnalyzer
 from .auction.analyzer import AuctionAnalyzer
 from .objects.types import TickFlowData
+
+# 导入数据服务（用于获取历史资金流向数据）
+try:
+    from vnpy_china_data import get_data_service
+    CHINA_DATA_AVAILABLE = True
+except ImportError:
+    CHINA_DATA_AVAILABLE = False
 
 
 class ChinaAnalysisEngine(BaseEngine):
@@ -119,6 +127,97 @@ class ChinaAnalysisEngine(BaseEngine):
         if not self.auction_analyzer:
             return {}
         return self.auction_analyzer.get_comprehensive_analysis(symbol, auction_data, market_data)
+
+    def get_historical_money_flow(
+        self,
+        symbol: str,
+        exchange: Exchange = Exchange.SZSE,
+        trade_date: date = None,
+        start_date: date = None,
+        end_date: date = None
+    ) -> List[Dict[str, Any]]:
+        """获取历史资金流向数据（从Tushare）
+
+        Args:
+            symbol: 股票代码
+            exchange: 交易所
+            trade_date: 单个交易日期
+            start_date: 开始日期（与end_date配合使用）
+            end_date: 结束日期（与start_date配合使用）
+
+        Returns:
+            资金流向数据列表
+        """
+        if not CHINA_DATA_AVAILABLE:
+            self.write_log("警告: vnpy_china_data 模块不可用，无法获取历史资金流向数据")
+            return []
+
+        try:
+            from vnpy_china_data.models import MoneyFlowData
+
+            # 获取数据服务
+            service = get_data_service()
+
+            # 确保服务已连接
+            if not service.connected:
+                service.connect()
+
+            # 获取资金流向数据
+            moneyflow_list = service.get_moneyflow(
+                symbol=symbol,
+                exchange=exchange,
+                trade_date=trade_date,
+                start_date=start_date,
+                end_date=end_date
+            )
+
+            # 转换为字典格式供UI使用
+            result = []
+            for mf in moneyflow_list:
+                result.append({
+                    "symbol": mf.symbol,
+                    "name": mf.name,
+                    "trade_date": mf.trade_date.isoformat(),
+                    "close_price": mf.close_price,
+                    "change_pct": mf.change_pct,
+                    # 超大单
+                    "super_large_buy": mf.super_large_buy,
+                    "super_large_sell": mf.super_large_sell,
+                    "super_large_net": mf.super_large_net,
+                    "super_large_buy_amount": mf.super_large_buy_amount,
+                    "super_large_sell_amount": mf.super_large_sell_amount,
+                    "super_large_net_amount": mf.super_large_net_amount,
+                    # 大单
+                    "large_buy": mf.large_buy,
+                    "large_sell": mf.large_sell,
+                    "large_net": mf.large_net,
+                    "large_buy_amount": mf.large_buy_amount,
+                    "large_sell_amount": mf.large_sell_amount,
+                    "large_net_amount": mf.large_net_amount,
+                    # 中单
+                    "medium_buy": mf.medium_buy,
+                    "medium_sell": mf.medium_sell,
+                    "medium_net": mf.medium_net,
+                    "medium_buy_amount": mf.medium_buy_amount,
+                    "medium_sell_amount": mf.medium_sell_amount,
+                    "medium_net_amount": mf.medium_net_amount,
+                    # 小单
+                    "small_buy": mf.small_buy,
+                    "small_sell": mf.small_sell,
+                    "small_net": mf.small_net,
+                    "small_buy_amount": mf.small_buy_amount,
+                    "small_sell_amount": mf.small_sell_amount,
+                    "small_net_amount": mf.small_net_amount,
+                    # 汇总
+                    "main_net_amount": mf.main_net_amount,
+                    "total_net_amount": mf.total_net_amount,
+                })
+
+            return result
+
+        except Exception as e:
+            self.write_log(f"获取历史资金流向数据失败: {e}")
+            return []
 
     def update_money_flow(self, symbol: str, tick_flows: List[TickFlowData]) -> Optional[Dict[str, Any]]:
         """更新资金流向数据

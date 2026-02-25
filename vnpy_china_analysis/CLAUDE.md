@@ -7,5 +7,6 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #7160 | 8:00 PM | 🔴 | vnpy_china_analysis engine import paths corrected | ~172 |
 | #7114 | 4:18 PM | 🟣 | ChinaAnalysisApp created for vnpy_china_analysis GUI integration | ~189 |
 </claude-mem-context>

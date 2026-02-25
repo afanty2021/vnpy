@@ -4,12 +4,13 @@ A股分析UI组件
 """
 
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from vnpy.trader.ui.qt import QtCore, QtGui, QtWidgets
 from vnpy.trader.ui.widget import BaseMonitor
 from vnpy.trader.object import TickData, BarData
 from vnpy.trader.utility import get_icon_path
 from vnpy.trader.locale import _
+from vnpy.trader.constant import Exchange
 
 # 尝试导入pandas用于数据导出
 try:
@@ -315,13 +316,20 @@ class MoneyFlowWidget(BaseAnalysisWidget):
             _("资金流向分析追踪市场资金动向：\n"
               "• 主力资金：大单资金净流入流出\n"
               "• 散户资金：小单资金净流入流出\n"
-              "• 资金分类：超大单、大单、中单、小单"))
+              "• 资金分类：超大单、大单、中单、小单\n"
+              "• 支持实时分析和历史数据查询"))
         desc.setWordWrap(True)
         layout.addWidget(desc)
 
         # 功能按钮区
         btn_layout = QtWidgets.QHBoxLayout()
         layout.addLayout(btn_layout)
+
+        # 数据源选择
+        self.data_mode_combo = QtWidgets.QComboBox()
+        self.data_mode_combo.addItems([_("实时数据"), _("历史数据")])
+        self.data_mode_combo.currentTextChanged.connect(self.on_data_mode_changed)
+        btn_layout.addWidget(self.data_mode_combo)
 
         refresh_btn = QtWidgets.QPushButton(_("刷新数据"))
         refresh_btn.clicked.connect(self.refresh_data)
@@ -331,13 +339,23 @@ class MoneyFlowWidget(BaseAnalysisWidget):
         export_btn.clicked.connect(self.export_data)
         btn_layout.addWidget(export_btn)
 
-        # 时间范围选择
+        # 时间范围选择（实时数据用）
         time_label = QtWidgets.QLabel(_("时间范围："))
         btn_layout.addWidget(time_label)
 
         self.time_combo = QtWidgets.QComboBox()
         self.time_combo.addItems([_("5分钟"), _("30分钟"), _("60分钟"), _("当日")])
         btn_layout.addWidget(self.time_combo)
+
+        # 历史日期选择（历史数据用）
+        date_label = QtWidgets.QLabel(_("历史日期："))
+        btn_layout.addWidget(date_label)
+
+        self.date_edit = QtWidgets.QDateEdit()
+        self.date_edit.setDate(datetime.now().date())
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setEnabled(False)  # 默认禁用，选择历史数据模式时启用
+        btn_layout.addWidget(self.date_edit)
 
         # 统计信息区
         stats_layout = QtWidgets.QHBoxLayout()
@@ -373,6 +391,17 @@ class MoneyFlowWidget(BaseAnalysisWidget):
         self.status_label = QtWidgets.QLabel(_("就绪"))
         layout.addWidget(self.status_label)
 
+    def on_data_mode_changed(self, mode: str) -> None:
+        """数据源模式改变事件"""
+        if mode == _("历史数据"):
+            # 启用日期选择，禁用时间范围
+            self.date_edit.setEnabled(True)
+            self.time_combo.setEnabled(False)
+        else:
+            # 禁用日期选择，启用时间范围
+            self.date_edit.setEnabled(False)
+            self.time_combo.setEnabled(True)
+
     def refresh_data(self) -> None:
         """刷新数据"""
         symbols = self.get_symbol_list()
@@ -380,9 +409,56 @@ class MoneyFlowWidget(BaseAnalysisWidget):
             self.status_label.setText(_("无可用合约"))
             return
 
-        self.update_table(symbols)
-        self.update_summary(symbols)
-        self.status_label.setText(_("已刷新") + f" ({len(symbols)} " + _("个合约") + ")")
+        # 检查数据源模式
+        data_mode = self.data_mode_combo.currentText()
+
+        if data_mode == _("历史数据"):
+            # 获取历史资金流向数据
+            self.refresh_historical_data(symbols)
+        else:
+            # 获取实时资金流向数据
+            self.update_table(symbols)
+            self.update_summary(symbols)
+            self.status_label.setText(_("已刷新") + f" ({len(symbols)} " + _("个合约") + ")")
+
+    def refresh_historical_data(self, symbols: List[str]) -> None:
+        """刷新历史资金流向数据"""
+        # 获取选中的日期
+        selected_date = self.date_edit.date().toPyDate()
+
+        # 显示加载状态
+        self.status_label.setText(_("正在获取历史数据..."))
+
+        # 遍历所有股票
+        all_data = []
+        for symbol in symbols:
+            # 确定交易所
+            if symbol.startswith("6") or symbol.startswith("51"):
+                exchange = Exchange.SSE
+            else:
+                exchange = Exchange.SZSE
+
+            # 获取历史资金流向数据
+            try:
+                data_list = self.analysis_engine.get_historical_money_flow(
+                    symbol=symbol,
+                    exchange=exchange,
+                    trade_date=selected_date
+                )
+
+                if data_list:
+                    all_data.extend(data_list)
+            except Exception as e:
+                self.write_log(f"获取 {symbol} 历史资金流向数据失败: {e}")
+                continue
+
+        # 更新表格
+        if all_data:
+            self.update_historical_table(all_data)
+            self.update_historical_summary(all_data)
+            self.status_label.setText(_("历史数据已加载") + f" ({len(all_data)} " + _("条记录") + ")")
+        else:
+            self.status_label.setText(_("无历史数据"))
 
     def update_table(self, symbols: List[str]) -> None:
         """更新表格数据
@@ -433,6 +509,57 @@ class MoneyFlowWidget(BaseAnalysisWidget):
                 summary = analysis["summary_60min"]
                 total_main_inflow += summary.get("main_inflow", 0)
                 total_net_inflow += summary.get("net_inflow", 0)
+
+        self.main_inflow_label.setText(_("主力净流入：") + self.format_amount(total_main_inflow))
+        self.main_inflow_label.setStyleSheet(
+            f"font-size: 14px; font-weight: bold; color: {self.get_inflow_color(total_main_inflow)};"
+        )
+        self.net_inflow_label.setText(_("总净流入：") + self.format_amount(total_net_inflow))
+
+    def update_historical_table(self, data_list: List[Dict[str, Any]]) -> None:
+        """更新历史资金流向表格
+
+        Args:
+            data_list: 历史资金流向数据列表
+        """
+        self.table.setRowCount(len(data_list))
+
+        for row, data in enumerate(data_list):
+            # 填充数据
+            self.setItemText(row, 0, data.get("symbol", ""))
+
+            # 主力净流入（着色）
+            main_inflow = data.get("main_net_amount", 0) / 10000  # 转换为万元
+            self.setItemText(row, 1, self.format_amount(main_inflow), color=self.get_inflow_color(main_inflow))
+
+            # 超大单
+            super_large = data.get("super_large_net_amount", 0) / 10000  # 转换为万元
+            self.setItemText(row, 2, self.format_amount(super_large))
+
+            # 大单
+            large = data.get("large_net_amount", 0) / 10000  # 转换为万元
+            self.setItemText(row, 3, self.format_amount(large))
+
+            # 中单
+            medium = data.get("medium_net_amount", 0) / 10000  # 转换为万元
+            self.setItemText(row, 4, self.format_amount(medium))
+
+            # 小单
+            small = data.get("small_net_amount", 0) / 10000  # 转换为万元
+            self.setItemText(row, 5, self.format_amount(small))
+
+            # 总净流入（着色）
+            net_inflow = data.get("total_net_amount", 0) / 10000  # 转换为万元
+            self.setItemText(row, 6, self.format_amount(net_inflow), color=self.get_inflow_color(net_inflow))
+
+    def update_historical_summary(self, data_list: List[Dict[str, Any]]) -> None:
+        """更新历史数据汇总信息
+
+        Args:
+            data_list: 历史资金流向数据列表
+        """
+        total_main_inflow = sum(d.get("main_net_amount", 0) for d in data_list) / 10000  # 转换为万元
+        total_net_inflow = sum(d.get("total_net_amount", 0) for d in data_list) / 10000  # 转换为万元
 
         self.main_inflow_label.setText(_("主力净流入：") + self.format_amount(total_main_inflow))
         self.main_inflow_label.setStyleSheet(
