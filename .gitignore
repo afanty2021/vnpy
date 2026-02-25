@@ -22,6 +22,11 @@ dist
 
 # VeighNa
 .vntrader
+.vntrader_china/
+
+# Logs and Data
+logs/
+data/
 
 # Visual Studio intermediate files
 *.exp
