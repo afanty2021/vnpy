@@ -1,0 +1,127 @@
+"""
+A股数据服务GUI引擎
+管理A股数据服务的GUI功能
+"""
+
+from typing import Dict, Any, Optional, List
+from datetime import date, datetime
+from vnpy.event import EventEngine, Event
+from vnpy.trader.engine import BaseEngine
+
+
+class ChinaDataGuiEngine(BaseEngine):
+    """A股数据服务GUI引擎
+
+    提供A股数据服务的GUI管理功能：
+    - 龙虎榜数据查询
+    - 北向资金数据查询
+    - 板块数据查询
+    - 数据服务状态监控
+    """
+
+    engine_name: str = "ChinaDataApp"
+
+    def __init__(self, main_engine: Any, event_engine: EventEngine) -> None:
+        """初始化引擎"""
+        super().__init__(main_engine, event_engine, self.engine_name)
+
+        # 数据服务引用
+        self.data_service: Optional[Any] = None
+
+        # 直接在__init__中初始化数据服务
+        self._init_data_service()
+
+    def _init_data_service(self) -> None:
+        """初始化数据服务"""
+        try:
+            from .service import ChinaDataService, get_data_service
+            # 获取或创建数据服务单例
+            self.data_service = get_data_service()
+            # 尝试连接数据服务
+            if self.data_service.connect():
+                self.main_engine.write_log("A股数据服务连接成功", "ChinaDataApp")
+            else:
+                self.main_engine.write_log("警告：数据服务连接失败，部分功能可能不可用", "ChinaDataApp")
+        except ImportError:
+            self.main_engine.write_log("警告：无法导入数据服务", "ChinaDataApp")
+        except Exception as e:
+            self.main_engine.write_log(f"数据服务初始化异常：{e}", "ChinaDataApp")
+
+    def init(self) -> None:
+        """引擎初始化（由VeighNa框架调用）"""
+        # 数据服务已在__init__中初始化
+        pass
+
+    def query_dragon_tiger(self, trade_date: Optional[date] = None) -> List[Any]:
+        """查询龙虎榜数据
+
+        Args:
+            trade_date: 交易日期，默认为当天
+
+        Returns:
+            龙虎榜数据列表
+        """
+        if not self.data_service:
+            self.main_engine.write_log("错误：数据服务未初始化", "ChinaDataApp")
+            return []
+
+        if trade_date is None:
+            trade_date = date.today()
+
+        try:
+            self.main_engine.write_log(f"查询龙虎榜数据：{trade_date}", "ChinaDataApp")
+            data = self.data_service.get_dragon_tiger_data(trade_date)
+            self.main_engine.write_log(f"查询完成，共{len(data)}条记录", "ChinaDataApp")
+            return data
+        except Exception as e:
+            self.main_engine.write_log(f"查询龙虎榜数据失败：{e}", "ChinaDataApp")
+            return []
+
+    def query_northbound_flow(self, trade_date: Optional[date] = None) -> Optional[Any]:
+        """查询北向资金流向
+
+        Args:
+            trade_date: 交易日期，默认为当天
+
+        Returns:
+            北向资金流向数据
+        """
+        if not self.data_service:
+            self.main_engine.write_log("错误：数据服务未初始化", "ChinaDataApp")
+            return None
+
+        if trade_date is None:
+            trade_date = date.today()
+
+        try:
+            self.main_engine.write_log(f"查询北向资金流向：{trade_date}", "ChinaDataApp")
+            data = self.data_service.get_northbound_flow(trade_date)
+            if data:
+                self.main_engine.write_log(f"查询完成，净流入：{data.total_net_inflow:.2f}亿元", "ChinaDataApp")
+            else:
+                self.main_engine.write_log("未查询到北向资金数据", "ChinaDataApp")
+            return data
+        except Exception as e:
+            self.main_engine.write_log(f"查询北向资金流向失败：{e}", "ChinaDataApp")
+            return None
+
+    def get_data_service_status(self) -> Dict[str, Any]:
+        """获取数据服务状态
+
+        Returns:
+            服务状态信息
+        """
+        status = {
+            "service_loaded": self.data_service is not None,
+            "connected": False,
+            "service_type": "unknown"
+        }
+
+        if self.data_service:
+            status["connected"] = self.data_service.connected
+            status["service_type"] = type(self.data_service).__name__
+
+        return status
+
+
+__all__ = ["ChinaDataGuiEngine"]

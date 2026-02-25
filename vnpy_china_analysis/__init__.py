@@ -77,6 +77,10 @@ from .objects import (
     AnalysisSignal,
 )
 
+# GUI应用
+from .app import ChinaAnalysisApp
+from .engine import ChinaAnalysisEngine
+
 __version__ = "1.0.0"
 
 __all__ = [
@@ -122,4 +126,7 @@ __all__ = [
     "SectorIndexData",
     "AuctionData",
     "AnalysisSignal",
+    # GUI应用
+    "ChinaAnalysisApp",
+    "ChinaAnalysisEngine",
 ]

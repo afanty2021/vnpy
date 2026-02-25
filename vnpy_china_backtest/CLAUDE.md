@@ -290,5 +290,11 @@ print(f"成本费率: {metrics.cost_rate:.4f}")
 |----|------|---|-------|------|
 | #6615 | 9:28 PM | 🔵 | Checked vnpy_china_backtest CLAUDE.md documentation | ~207 |
 | #6614 | 9:27 PM | 🔵 | Read vnpy_china_backtest/CLAUDE.md documentation file | ~156 |
-| #6591 | 8:56 PM | 🟣 | Implemented A-share backtest configuration module | ~286 |
+
+### Feb 25, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #7146 | 4:31 PM | 🔴 | vnpy_china_backtest __init__.py updated with App exports | ~153 |
+| #7131 | 4:24 PM | 🟣 | ChinaBacktestApp created for vnpy_china_backtest GUI integration | ~146 |
 </claude-mem-context>

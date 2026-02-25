@@ -54,6 +54,10 @@ from vnpy_china_backtest.config import (
     update_config
 )
 
+# GUI应用
+from vnpy_china_backtest.app import ChinaBacktestApp
+from vnpy_china_backtest.gui_engine import ChinaBacktestGuiEngine
+
 __version__ = "1.0.0"
 
 __all__ = [
@@ -98,4 +102,8 @@ __all__ = [
     "default_config",
     "get_config",
     "update_config",
+
+    # GUI应用
+    "ChinaBacktestApp",
+    "ChinaBacktestGuiEngine",
 ]

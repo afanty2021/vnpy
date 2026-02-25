@@ -8,4 +8,10 @@
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
 | #6405 | 6:57 PM | 🟣 | Created vnpy_china_interface module with A股 data provider interfaces | ~555 |
+
+### Feb 25, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #6873 | 1:40 PM | 🔵 | 发现vnpy项目中QMT适配器文件位置 | ~86 |
 </claude-mem-context>

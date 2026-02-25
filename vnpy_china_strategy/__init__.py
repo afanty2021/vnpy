@@ -37,6 +37,11 @@ from .event_driven.policy import PolicyEventStrategy
 
 from .convertible.arbitrage import ConvertibleArbitrageStrategy
 
+# GUI应用导入
+from .app import ChinaStrategyApp
+from .engine import ChinaStrategyEngine
+from .gui_engine import ChinaStrategyGuiEngine
+
 __all__ = [
     # 版本
     "__version__",
@@ -66,4 +71,8 @@ __all__ = [
     "PolicyEventStrategy",
     # 可转债策略
     "ConvertibleArbitrageStrategy",
+    # GUI应用
+    "ChinaStrategyApp",
+    "ChinaStrategyEngine",
+    "ChinaStrategyGuiEngine",
 ]

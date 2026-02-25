@@ -21,6 +21,10 @@ from .models import (
     SectorData,
 )
 
+# GUI应用
+from .app import ChinaDataApp
+from .gui_engine import ChinaDataGuiEngine
+
 __version__ = "1.0.0"
 
 __all__ = [
@@ -34,4 +38,7 @@ __all__ = [
     "DragonTigerData",
     "NorthboundFlowData",
     "SectorData",
+    # GUI应用
+    "ChinaDataApp",
+    "ChinaDataGuiEngine",
 ]

@@ -253,5 +253,8 @@ config.net_inflow_threshold = 10  # 净流入阈值(亿)
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #7112 | 4:18 PM | 🔴 | ChinaStrategyEngine event registration API corrected | ~190 |
+| #7109 | 4:17 PM | 🟣 | vnpy_china_strategy exports updated for GUI integration | ~162 |
+| #7104 | 4:15 PM | 🟣 | ChinaStrategyEngine created for vnpy_china_strategy GUI integration | ~207 |
 | #6866 | 10:44 AM | 🔵 | vnpy_china_strategy template implements A-share trading rules with position sizing and tradeability checks | ~363 |
 </claude-mem-context>

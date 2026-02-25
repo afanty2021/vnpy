@@ -1,6 +1,6 @@
 # A股交易规则适配模块
 
-> 更新时间：2026-02-24
+> 更新时间：2026-02-25
 > 版本：0.1.0
 > 开发状态：已完成
 
@@ -17,12 +17,20 @@ vnpy_china_rules/
 ├── engine.py             # 规则引擎核心 (已完成)
 ├── filter.py             # 风控过滤器 (已完成)
 ├── strategy.py           # 策略基类 (已完成)
+├── gui_engine.py         # GUI引擎 (已完成)
+├── app.py                # 应用模块 (已完成)
+├── ui/
+│   ├── __init__.py
+│   ├── widget.py         # UI组件 (已完成)
+│   └── CLAUDE.md
 ├── tests/
 │   ├── __init__.py
 │   ├── test_datasource.py  # 数据源测试
 │   ├── test_engine.py      # 规则引擎测试
 │   ├── test_filter.py      # 风控过滤器测试
-│   └── test_strategy.py    # 策略基类测试
+│   ├── test_strategy.py    # 策略基类测试
+│   ├── test_gui_integration.py  # GUI集成测试
+│   └── verify_gui.py       # GUI验证脚本
 └── CLAUDE.md            # 本文档
 ```
 
@@ -414,7 +422,105 @@ pytest vnpy_china_rules/tests/test_engine.py -v
 - 使用loguru进行日志记录
 - 使用Decimal确保价格计算精度
 
+## GUI集成模块
+
+### ChinaRulesGuiEngine
+GUI引擎，提供A股交易规则的GUI管理功能：
+
+- **get_sellable_volume(symbol)**: 获取可卖出数量
+- **calculate_limit_price(symbol, prev_close)**: 计算涨跌停价格
+- **get_pre_close(symbol)**: 获取昨收价（从缓存或数据源）
+- **is_trading_time()**: 判断当前是否在交易时间
+- **get_trading_status()**: 获取交易状态信息
+- **get_check_history(limit)**: 获取规则检查历史
+- **clear_check_history()**: 清空规则检查历史
+
+### UI组件 (ui/widget.py)
+
+#### ChinaRulesWidget
+A股交易规则主界面，包含4个标签页：
+- T+1规则页
+- 涨跌停规则页
+- 交易时间规则页
+- 规则检查历史页
+
+#### T1RulesWidget
+T+1规则界面：
+- 输入股票代码查询可卖数量
+- 显示查询结果（可卖数量、查询时间）
+- 从规则引擎获取实时数据
+
+#### PriceLimitWidget
+涨跌停规则界面：
+- 输入股票代码和昨收价计算涨跌停价格
+- 支持自动获取昨收价（从缓存）
+- 显示计算结果（涨停价、跌停价、涨跌幅）
+
+#### TimeRulesWidget
+交易时间规则界面：
+- 显示当前时间和交易时段
+- 显示交易状态（在交易时间/非交易时间）
+- 每分钟自动刷新状态
+- 根据状态显示不同颜色（绿色/红色）
+
+#### RulesHistoryWidget
+规则检查历史界面：
+- 显示所有订单的规则检查历史
+- 表格包含：时间、股票、规则、结果、消息
+- 每5秒自动刷新数据
+- 支持清空历史记录
+
+## 使用示例
+
+### GUI集成
+
+```python
+from vnpy.event import EventEngine
+from vnpy.trader.engine import MainEngine
+from vnpy_china_rules import ChinaRulesApp
+
+# 创建主引擎
+event_engine = EventEngine()
+main_engine = MainEngine(event_engine)
+
+# 添加A股规则应用
+main_engine.add_app(ChinaRulesApp)
+```
+
+### GUI功能使用
+
+```python
+# 获取GUI引擎
+gui_engine = main_engine.get_engine("ChinaRulesApp")
+
+# 查询可卖数量
+sellable = gui_engine.get_sellable_volume("000001")
+print(f"可卖数量: {sellable} 股")
+
+# 计算涨跌停价格
+limit_up, limit_down = gui_engine.calculate_limit_price("000001", 10.0)
+print(f"涨停: {limit_up}, 跌停: {limit_down}")
+
+# 获取交易状态
+status = gui_engine.get_trading_status()
+print(f"交易状态: {status}")
+
+# 获取检查历史
+history = gui_engine.get_check_history(limit=100)
+for item in history:
+    print(f"{item['time']} - {item['symbol']} - {item['rule_results']}")
+```
+
 ## 变更记录
+
+### 2026-02-25 (第五版)
+- ✨ 实现GUI集成模块
+- 📊 实现ChinaRulesGuiEngine GUI引擎
+- 🔧 实现规则引擎自动初始化
+- 🔧 实现事件监听（订单、成交、行情）
+- 🔧 实现GUI功能方法（get_sellable_volume、calculate_limit_price等）
+- 🎨 实现UI组件（4个标签页界面）
+- ✅ 完成GUI集成功能验证
 
 ### 2026-02-24 (第四版)
 - ✨ 实现策略基类
@@ -467,4 +573,12 @@ pytest vnpy_china_rules/tests/test_engine.py -v
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
 | #6354 | 5:35 PM | 🔵 | vnpy_china_rules module structure identified | ~241 |
+
+### Feb 25, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #7127 | 4:22 PM | 🟣 | vnpy_china_rules exports updated with GUI components | ~155 |
+| #7125 | 4:21 PM | 🔴 | vnpy_china_rules app.py import path corrected | ~133 |
+| #7123 | 4:20 PM | 🔵 | vnpy_china_rules engine structure analyzed | ~194 |
 </claude-mem-context>

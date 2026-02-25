@@ -34,6 +34,10 @@ from vnpy_china_rules.strategy import (
     create_strategy_base,
 )
 
+# GUI应用
+from vnpy_china_rules.app import ChinaRulesApp
+from vnpy_china_rules.gui_engine import ChinaRulesGuiEngine
+
 
 __all__ = [
     # 数据源
@@ -58,6 +62,9 @@ __all__ = [
     "ChinaStockStrategy",
     "TradingRuleMixin",
     "create_strategy_base",
+    # GUI应用
+    "ChinaRulesApp",
+    "ChinaRulesGuiEngine",
 ]
 
 

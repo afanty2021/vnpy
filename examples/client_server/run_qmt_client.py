@@ -1,220 +1,124 @@
 # -*- coding:utf-8 -*-
 """
 VeighNa RPC客户端 - Mac版本
-
-运行在Mac上，负责：
-1. 连接到Windows端的RPC服务
-2. 在Mac上进行策略开发和回测
-3. 通过RPC发送交易请求到Windows端执行
-
-适用场景：
-- Mac用户进行量化交易
-- 远程策略管理
-- 分布式交易系统
-
-环境要求：
-- macOS (任意版本)
-- VeighNa框架
-- 网络连接到Windows服务器
+使用RpcGateway连接远程QMT
+自定义显示配置
 """
 
 import sys
+import os
 from pathlib import Path
+from typing import Any
 
-# 添加项目路径
+# 消除macOS Qt输入法警告
+os.environ["QT_MAC_DISABLE_IMK"] = "1"
+
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
+
+# 修改全局小数位数显示
+import vnpy.trader.ui.widget as widget
+from vnpy.trader.ui.widget import BaseCell
+
+# 保存原始方法
+_original_set_content = BaseCell.set_content
+
+def _new_set_content(self, content: Any, data: Any) -> None:
+    """自定义格式化 - 保留2位小数"""
+    if isinstance(content, float):
+        # 格式化浮点数，保留2位小数
+        content = f"{content:.2f}"
+    _original_set_content(self, content, data)
+
+# 应用修改
+BaseCell.set_content = _new_set_content
+
+# 修改PositionMonitor - 修改显示名称
+from vnpy.trader.ui.widget import PositionMonitor
+
+# 直接修改类属性来改变显示名称
+PositionMonitor.headers = {
+    "symbol": {"display": "代码", "cell": widget.BaseCell, "update": False},
+    "exchange": {"display": "交易所", "cell": widget.EnumCell, "update": False},
+    "direction": {"display": "方向", "cell": widget.DirectionCell, "update": False},
+    "volume": {"display": "数量", "cell": widget.BaseCell, "update": True},
+    "yd_volume": {"display": "昨仓", "cell": widget.BaseCell, "update": True},
+    "frozen": {"display": "冻结", "cell": widget.BaseCell, "update": True},
+    "price": {"display": "成本价", "cell": widget.BaseCell, "update": True},
+    "pnl": {"display": "盈亏", "cell": widget.PnlCell, "update": True},
+    "gateway_name": {"display": "接口", "cell": widget.BaseCell, "update": False},
+}
 
 from vnpy.event import EventEngine
 from vnpy.trader.engine import MainEngine
 from vnpy.trader.ui import MainWindow, create_qapp
-from vnpy.rpc import RpcClient
-from vnpy_ctastrategy import CtaStrategyApp
-from vnpy_ctabacktester import CtaBacktesterApp
-from vnpy_datamanager import DataManagerApp
+from vnpy_rpcservice.rpc_gateway import RpcGateway
 
-# RPC连接配置
+# 导入A股增强模块App
+from vnpy_china_strategy import ChinaStrategyApp
+from vnpy_china_analysis import ChinaAnalysisApp
+from vnpy_china_rules import ChinaRulesApp
+from vnpy_china_data import ChinaDataApp
+from vnpy_china_backtest import ChinaBacktestApp
+from vnpy_china_capital import ChinaCapitalApp
+from vnpy_china_ml import ChinaMlApp
+
+# RPC配置
 RPC_SETTING = {
-    "req_address": "tcp://192.168.1.100:2014",  # Windows服务器IP
-    "sub_address": "tcp://192.168.1.100:4102",  # Windows服务器IP
+    "主动请求地址": "tcp://192.168.2.168:2014",
+    "推送订阅地址": "tcp://192.168.2.168:4102",
 }
 
-
-class QmtRpcClient:
-    """QMT RPC客户端"""
-
-    def __init__(self):
-        """初始化"""
-        self.rpc_client = None
-
-    def connect(self):
-        """连接到RPC服务端"""
-        print("=" * 60)
-        print("VeighNa RPC客户端 - 连接QMT服务端")
-        print("=" * 60)
-
-        # 创建RPC客户端
-        self.rpc_client = RpcClient()
-
-        print("\n正在连接到Windows RPC服务端...")
-        print(f"  请求地址: {RPC_SETTING['req_address']}")
-        print(f"  订阅地址: {RPC_SETTING['sub_address']}")
-
-        # 连接服务器
-        try:
-            self.rpc_client.connect(
-                req_address=RPC_SETTING["req_address"],
-                sub_address=RPC_SETTING["sub_address"]
-            )
-            print("✓ RPC连接成功！")
-            return True
-        except Exception as e:
-            print(f"✗ RPC连接失败: {e}")
-            print("\n请检查：")
-            print("  1. Windows端RPC服务是否已启动")
-            print("  2. IP地址是否正确")
-            print("  3. 网络连接是否正常")
-            print("  4. 防火墙是否开放端口")
-            return False
-
-    def test_connection(self):
-        """测试连接"""
-        print("\n" + "=" * 60)
-        print("测试RPC连接功能")
-        print("=" * 60)
-
-        try:
-            # 查询账户信息
-            account = self.rpc_client.get_account()
-            print(f"\n账户信息：")
-            print(f"  账户ID: {account.accountid}")
-            print(f"  余额: {account.balance}")
-            print(f"  可用: {account.available}")
-
-            # 查询持仓
-            positions = self.rpc_client.get_positions()
-            print(f"\n持仓数量: {len(positions)}")
-
-            # 查询委托
-            orders = self.rpc_client.get_orders()
-            print(f"委托数量: {len(orders)}")
-
-            # 查询成交
-            trades = self.rpc_client.get_trades()
-            print(f"成交数量: {len(trades)}")
-
-            print("\n✓ RPC功能测试通过！")
-            return True
-
-        except Exception as e:
-            print(f"\n✗ RPC功能测试失败: {e}")
-            return False
-
-    def send_order_test(self):
-        """发送测试委托（谨慎使用）"""
-        print("\n" + "=" * 60)
-        print("发送测试委托")
-        print("=" * 60)
-
-        # 警告提示
-        print("\n⚠️  警告：这将发送真实委托到QMT！")
-        print("请确认：")
-        print("  1. QMT已登录")
-        print("  2. 使用的是模拟账户")
-        print("  3. 委托参数正确")
-
-        choice = input("\n是否继续？(yes/no): ")
-        if choice.lower() != "yes":
-            print("已取消")
-            return
-
-        try:
-            # 发送测试委托（示例）
-            order_id = self.rpc_client.send_order(
-                symbol="000001",
-                exchange="SZSE",
-                direction="LONG",
-                type="LIMIT",
-                volume=100,
-                price=10.0,
-                reference="TEST_001"
-            )
-            print(f"\n✓ 委托已发送，委托号: {order_id}")
-
-        except Exception as e:
-            print(f"\n✗ 委托发送失败: {e}")
-
-    def disconnect(self):
-        """断开连接"""
-        if self.rpc_client:
-            self.rpc_client.close()
-            print("RPC连接已关闭")
-
-
 def start_gui_with_rpc():
-    """启动带RPC的GUI界面（Mac）"""
+    """启动带RPC的GUI界面"""
     qapp = create_qapp()
-
-    # 创建事件引擎
     event_engine = EventEngine()
-
-    # 创建主引擎
     main_engine = MainEngine(event_engine)
 
-    # 添加应用模块（策略、回测等在Mac上运行）
-    main_engine.add_app(CtaStrategyApp)
-    main_engine.add_app(CtaBacktesterApp)
-    main_engine.add_app(DataManagerApp)
+    # 添加RPC网关
+    rpc_gateway = main_engine.add_gateway(RpcGateway, "RPC")
 
     # 连接RPC
-    rpc_client = RpcClient()
-    try:
-        rpc_client.connect(
-            req_address=RPC_SETTING["req_address"],
-            sub_address=RPC_SETTING["sub_address"]
-        )
-        print("✓ 已连接到Windows QMT服务端")
-    except Exception as e:
-        print(f"✗ RPC连接失败: {e}")
-        print("\n系统将在无接口模式下运行")
+    print("正在连接RPC...")
+    main_engine.connect(RPC_SETTING, "RPC")
+    print("✓ 已连接到Windows QMT服务端")
+
+    # 添加A股增强模块
+    print("\n正在加载A股增强模块...")
+    main_engine.add_app(ChinaStrategyApp)
+    print("  ✓ A股策略模块")
+    main_engine.add_app(ChinaAnalysisApp)
+    print("  ✓ A股分析模块")
+    main_engine.add_app(ChinaRulesApp)
+    print("  ✓ A股规则模块")
+    main_engine.add_app(ChinaDataApp)
+    print("  ✓ A股数据模块")
+    main_engine.add_app(ChinaBacktestApp)
+    print("  ✓ A股回测模块")
+    main_engine.add_app(ChinaCapitalApp)
+    print("  ✓ A股资金模块")
+    main_engine.add_app(ChinaMlApp)
+    print("  ✓ A股机器学习模块")
+    print("✓ A股增强模块加载完成")
 
     # 创建主窗口
     main_window = MainWindow(main_engine, event_engine)
+
+    # 加载之前保存的窗口布局
+    main_window.load_window_setting("custom")
+
     main_window.showMaximized()
 
-    # 显示提示信息
     print("\n" + "=" * 60)
-    print("VeighNa Trader - Mac版本")
+    print("VeighNa Trader - RPC连接模式")
     print("=" * 60)
-    print("  策略开发: Mac本地运行")
-    print("  交易执行: 通过RPC连接到Windows QMT")
+    print(f"  连接地址: {RPC_SETTING['主动请求地址']}")
+    print("  显示精度: 2位小数")
+    print("  功能模块: A股策略、分析、规则、数据、回测、资金、机器学习")
     print("=" * 60)
 
     qapp.exec()
 
 
-def main():
-    """主函数"""
-    import argparse
-
-    parser = argparse.ArgumentParser(description="VeighNa RPC客户端 - Mac版本")
-    parser.add_argument("--mode", choices=["test", "gui"], default="test",
-                       help="运行模式: test(测试连接) 或 gui(启动界面)")
-
-    args = parser.parse_args()
-
-    if args.mode == "test":
-        # 测试模式
-        client = QmtRpcClient()
-        if client.connect():
-            client.test_connection()
-            # client.send_order_test()  # 取消注释以测试委托
-            input("\n按回车键退出...")
-            client.disconnect()
-    else:
-        # GUI模式
-        start_gui_with_rpc()
-
-
 if __name__ == "__main__":
-    main()
+    start_gui_with_rpc()
