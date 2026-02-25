@@ -6,10 +6,13 @@
 
 from .china_model import ChinaAlphaModel
 from .adapters import T1RuleAdapter, PriceLimitAdapter, ChinaTradingAdapter
+from .manager import ModelManager, ModelMetadata
 
 __all__ = [
     "ChinaAlphaModel",
     "T1RuleAdapter",
     "PriceLimitAdapter",
     "ChinaTradingAdapter",
+    "ModelManager",
+    "ModelMetadata",
 ]

@@ -32,6 +32,14 @@ from vnpy_china_monitor.web.api import (
     alert_router,
 )
 
+# 尝试导入 ML API（如果可用）
+try:
+    from vnpy_china_ml.web.api import ml_router
+    ML_API_AVAILABLE = True
+except ImportError:
+    ML_API_AVAILABLE = False
+    ml_router = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -270,6 +278,11 @@ def create_web_app(config: Optional[WebMonitorConfig] = None) -> FastAPI:
     app.include_router(trade_router)
     app.include_router(strategy_router)
     app.include_router(alert_router)
+
+    # 注册 ML API（如果可用）
+    if ML_API_AVAILABLE and ml_router:
+        app.include_router(ml_router)
+        logger.info("ML API 路由已注册")
 
     # WebSocket端点
     @app.websocket("/ws/{client_id}")

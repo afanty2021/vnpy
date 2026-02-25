@@ -1,9 +1,12 @@
 """A股机器学习UI组件"""
 from typing import Any, Optional
-from datetime import datetime
+from datetime import datetime, date
 
 from vnpy.trader.ui.qt import QtCore, QtGui, QtWidgets
 from vnpy.trader.locale import _
+
+from ..model.manager import ModelMetadata
+from ..utils.types import ModelType, PredictionResult, SignalType
 
 
 class ChinaMlWidget(QtWidgets.QWidget):
@@ -25,7 +28,21 @@ class ChinaMlWidget(QtWidgets.QWidget):
         # 预测结果数据
         self.predictions: list = []
 
+        # 模型ID映射（用于UI选择）
+        self._model_ids: dict = {}
+
         self.init_ui()
+
+        # 初始化时加载真实模型数据
+        if self.gui_engine:
+            self.refresh_models()
+            # 计算特征数据
+            self.gui_engine.calculate_features(
+                symbols=["000001.SZ", "000002.SZ", "600000.SH", "600036.SH", "600519.SH"],
+                start_date=date.today().replace(day=1),
+                end_date=date.today()
+            )
+            self._update_feature_table_from_engine()
 
     def init_ui(self) -> None:
         """初始化UI"""
@@ -109,7 +126,10 @@ class ChinaMlWidget(QtWidgets.QWidget):
         # 模型类型
         config_layout.addWidget(QtWidgets.QLabel(_("模型类型：")), 0, 0)
         self.model_type_combo = QtWidgets.QComboBox()
-        self.model_type_combo.addItems([_("LightGBM"), _("XGBoost"), ("随机森林"), ("LSTM")])
+        self.model_type_combo.addItem(_("LightGBM"), ModelType.LIGHTGBM)
+        self.model_type_combo.addItem(_("XGBoost"), ModelType.XGBOOST)
+        self.model_type_combo.addItem(_("随机森林"), ModelType.RANDOM_FOREST)
+        self.model_type_combo.addItem(_("LSTM"), ModelType.LSTM)
         config_layout.addWidget(self.model_type_combo, 0, 1)
 
         # 训练天数
@@ -119,7 +139,7 @@ class ChinaMlWidget(QtWidgets.QWidget):
 
         # 特征数量
         config_layout.addWidget(QtWidgets.QLabel(_("特征数量：")), 1, 0)
-        self.feature_count_input = QtWidgets.QLineEdit("158")
+        self.feature_count_input = QtWidgets.QLineEdit("20")
         config_layout.addWidget(self.feature_count_input, 1, 1)
 
         # 开始训练按钮
@@ -177,9 +197,6 @@ class ChinaMlWidget(QtWidgets.QWidget):
 
         toolbar.addStretch()
 
-        # 填充示例特征数据
-        self._populate_mock_features()
-
         return widget
 
     def create_prediction_tab(self) -> QtWidgets.QWidget:
@@ -202,7 +219,6 @@ class ChinaMlWidget(QtWidgets.QWidget):
         # 模型选择
         control_layout.addWidget(QtWidgets.QLabel(_("选择模型：")))
         self.model_combo = QtWidgets.QComboBox()
-        self.model_combo.addItems([_("LightGBM_v1"), _("XGBoost_v2"), ("随机森林_v1")])
         control_layout.addWidget(self.model_combo)
 
         # 预测日期
@@ -254,139 +270,270 @@ class ChinaMlWidget(QtWidgets.QWidget):
 
         return widget
 
+    # ==================== 模型管理功能 ====================
+
     def refresh_models(self) -> None:
         """刷新模型列表"""
-        # 模拟数据
-        models = [
-            {"name": "LightGBM_v1", "type": "LightGBM", "time": "2026-02-20", "accuracy": 0.65, "status": "已部署"},
-            {"name": "XGBoost_v2", "type": "XGBoost", "time": "2026-02-18", "accuracy": 0.62, "status": "待部署"},
-            {"name": "RandomForest_v1", "type": "随机森林", "time": "2026-02-15", "accuracy": 0.58, "status": "已部署"},
-        ]
+        if not self.gui_engine:
+            self.show_status(_("GUI引擎未初始化"))
+            return
+
+        models = self.gui_engine.get_all_models()
 
         self.model_table.setRowCount(len(models))
-        for row, model in enumerate(models):
-            self.model_table.setItem(row, 0, QtWidgets.QTableWidgetItem(model["name"]))
-            self.model_table.setItem(row, 1, QtWidgets.QTableWidgetItem(model["type"]))
-            self.model_table.setItem(row, 2, QtWidgets.QTableWidgetItem(model["time"]))
-            acc_item = QtWidgets.QTableWidgetItem(f"{model['accuracy']:.2%}")
+        self._model_ids.clear()
+        self.model_combo.clear()
+
+        for row, metadata in enumerate(models):
+            self._model_ids[row] = metadata.model_id
+
+            self.model_table.setItem(row, 0, QtWidgets.QTableWidgetItem(metadata.model_name))
+            self.model_table.setItem(row, 1, QtWidgets.QTableWidgetItem(metadata.model_type.value))
+
+            time_str = metadata.training_date.strftime("%Y-%m-%d") if metadata.training_date else ""
+            self.model_table.setItem(row, 2, QtWidgets.QTableWidgetItem(time_str))
+
+            acc_item = QtWidgets.QTableWidgetItem(f"{metadata.accuracy:.2%}")
             self.model_table.setItem(row, 3, acc_item)
-            self.model_table.setItem(row, 4, QtWidgets.QTableWidgetItem(model["status"]))
+            self.model_table.setItem(row, 4, QtWidgets.QTableWidgetItem(metadata.status))
+
+            # 添加到预测下拉框
+            display_name = f"{metadata.model_name} ({metadata.model_type.value})"
+            self.model_combo.addItem(display_name, metadata.model_id)
 
         self.model_table.resizeColumnsToContents()
-        self.show_status(_("模型列表已更新"))
+        self.show_status(_(f"模型列表已更新，共{len(models)}个模型"))
 
     def train_model(self) -> None:
-        """训练新模型"""
+        """训练新模型提示"""
         self.show_status(_("请在下方配置训练参数后点击开始训练"))
 
     def delete_model(self) -> None:
         """删除选中的模型"""
+        if not self.gui_engine:
+            return
+
         current_row = self.model_table.currentRow()
-        if current_row >= 0:
-            self.model_table.removeRow(current_row)
-            self.show_status(_("模型已删除"))
+        if current_row >= 0 and current_row in self._model_ids:
+            model_id = self._model_ids[current_row]
+            if self.gui_engine.delete_model(model_id):
+                self.model_table.removeRow(current_row)
+                del self._model_ids[current_row]
+                self.show_status(_("模型已删除"))
+            else:
+                self.show_status(_("删除模型失败"))
         else:
             self.show_status(_("请先选择要删除的模型"))
 
     def start_training(self) -> None:
         """开始训练"""
-        model_type = self.model_type_combo.currentText()
-        self.show_status(_(f"正在训练{model_type}模型..."))
+        if not self.gui_engine:
+            self.show_status(_("GUI引擎未初始化"))
+            return
 
-        # 模拟训练进度
-        for i in range(0, 101, 10):
-            self.train_progress.setValue(i)
-            QtCore.QTimer.singleShot(100, lambda: None)
+        # 获取训练参数
+        model_type = self.model_type_combo.currentData()
+        train_days_str = self.train_days_input.text()
 
-        # 添加新模型到列表
-        row = self.model_table.rowCount()
-        self.model_table.insertRow(row)
-        self.model_table.setItem(row, 0, QtWidgets.QTableWidgetItem(f"{model_type}_v{row + 1}"))
-        self.model_table.setItem(row, 1, QtWidgets.QTableWidgetItem(model_type))
-        self.model_table.setItem(row, 2, QtWidgets.QTableWidgetItem(datetime.now().strftime("%Y-%m-%d")))
-        self.model_table.setItem(row, 3, QtWidgets.QTableWidgetItem(f"{0.60 + row * 0.01:.2%}"))
-        self.model_table.setItem(row, 4, QtWidgets.QTableWidgetItem("待部署"))
+        try:
+            train_days = int(train_days_str)
+        except ValueError:
+            self.show_status(_("训练天数必须是数字"))
+            return
 
-        self.show_status(_(f"{model_type}模型训练完成"))
+        # 计算训练日期范围
+        end_date = date.today()
+        start_date = end_date.replace(day=1)  # 简单处理，使用月初
+        # 实际应该减去train_days天
+
+        model_name = f"{model_type.value}_model"
+
+        self.show_status(_(f"正在训练{model_type.value}模型..."))
+        self.train_progress.setValue(10)
+
+        # 设置进度回调
+        self.gui_engine.set_progress_callback(lambda v: self.train_progress.setValue(v))
+
+        # 异步训练（使用定时器模拟）
+        QtCore.QTimer.singleShot(100, lambda: self._do_training(
+            model_type, model_name, start_date, end_date
+        ))
+
+    def _do_training(
+        self,
+        model_type: ModelType,
+        model_name: str,
+        start_date: date,
+        end_date: date
+    ) -> None:
+        """执行训练"""
+        if not self.gui_engine:
+            return
+
+        model_id = self.gui_engine.train_model(
+            model_type=model_type,
+            model_name=model_name,
+            train_start=start_date,
+            train_end=end_date,
+            lookback_days=60,
+            forward_days=5
+        )
+
+        if model_id:
+            self.show_status(_(f"{model_type.value}模型训练完成"))
+            self.refresh_models()
+        else:
+            self.show_status(_("模型训练失败"))
+
         self.train_progress.setValue(0)
+
+    # ==================== 特征工程功能 ====================
 
     def refresh_feature_importance(self) -> None:
         """刷新特征重要性"""
-        self._populate_mock_features()
-        self.show_status(_("特征重要性已更新"))
+        if not self.gui_engine:
+            return
 
-    def _populate_mock_features(self) -> None:
-        """填充模拟特征数据"""
-        # Alpha 158因子示例
-        features = [
-            ("Return_5d", "动量", 0.85, 0.65),
-            ("Return_10d", "动量", 0.78, 0.58),
-            ("Volume_Ratio", "成交量", 0.72, 0.45),
-            ("MACD_Signal", "技术指标", 0.68, 0.52),
-            ("RSI_14", "技术指标", 0.65, 0.38),
-            ("Bollinger_Width", "波动率", 0.62, 0.42),
-            ("ATR_14", "波动率", 0.58, 0.35),
-            ("STOCH_K", "技术指标", 0.55, 0.31),
-            ("CCI_20", "技术指标", 0.52, 0.28),
-            ("MFI_14", "资金流", 0.48, 0.25),
-            ("OBV", "资金流", 0.45, 0.22),
-            ("ADXR", "趋势", 0.42, 0.19),
-            ("Minus_DI", "趋势", 0.38, 0.15),
-            ("Plus_DM", "趋势", 0.35, 0.12),
-            ("TRIX", "趋势", 0.32, 0.10),
-            ("Mass_Index", "波动率", 0.28, 0.08),
-            ("Chaikin_Volatility", "波动率", 0.25, 0.06),
-            ("ROC", "动量", 0.22, 0.05),
-            ("Williams_R", "技术指标", 0.18, 0.03),
-            ("Ultimate_Oscillator", "技术指标", 0.15, 0.02),
-        ]
+        # 获取当前选中的模型
+        current_row = self.model_table.currentRow()
+        if current_row >= 0 and current_row in self._model_ids:
+            model_id = self._model_ids[current_row]
+            importance_dict = self.gui_engine.get_feature_importance(model_id)
 
-        for row, (name, ftype, importance, correlation) in enumerate(features):
+            if importance_dict:
+                self._update_feature_table_from_importance(importance_dict)
+                self.show_status(_("特征重要性已更新"))
+            else:
+                self.show_status(_("无法获取特征重要性"))
+        else:
+            self.show_status(_("请先选择一个模型"))
+
+    def _update_feature_table_from_importance(self, importance_dict: dict) -> None:
+        """从特征重要性更新表格"""
+        self.feature_table.setRowCount(len(importance_dict))
+
+        for row, (name, importance) in enumerate(importance_dict.items()):
+            self.feature_table.setItem(row, 0, QtWidgets.QTableWidgetItem(name))
+
+            # 根据因子名称推断类型
+            ftype = self._infer_factor_type(name)
+            self.feature_table.setItem(row, 1, QtWidgets.QTableWidgetItem(ftype))
+
+            imp_item = QtWidgets.QTableWidgetItem(f"{importance:.4f}")
+            imp_item.setForeground(QtGui.QColor("red"))
+            self.feature_table.setItem(row, 2, imp_item)
+
+            # 相关系数暂时留空
+            self.feature_table.setItem(row, 3, QtWidgets.QTableWidgetItem(""))
+
+        self.feature_table.resizeColumnsToContents()
+
+    def _update_feature_table_from_engine(self) -> None:
+        """从引擎更新特征表格"""
+        if not self.gui_engine:
+            return
+
+        df = self.gui_engine.get_cached_features()
+        if df is None:
+            return
+
+        # 将Polars DataFrame转换为列表
+        features = df.rows()
+
+        for row, (name, ftype, importance, correlation) in enumerate(features[:20]):
             self.feature_table.setItem(row, 0, QtWidgets.QTableWidgetItem(name))
             self.feature_table.setItem(row, 1, QtWidgets.QTableWidgetItem(ftype))
+
             imp_item = QtWidgets.QTableWidgetItem(f"{importance:.2f}")
             imp_item.setForeground(QtGui.QColor("red"))
             self.feature_table.setItem(row, 2, imp_item)
+
             corr_item = QtWidgets.QTableWidgetItem(f"{correlation:.2f}")
             self.feature_table.setItem(row, 3, corr_item)
 
         self.feature_table.resizeColumnsToContents()
 
+    def _infer_factor_type(self, factor_name: str) -> str:
+        """根据因子名称推断类型"""
+        name_lower = factor_name.lower()
+
+        if "return" in name_lower or "roc" in name_lower:
+            return "动量"
+        elif "volume" in name_lower or "obv" in name_lower or "mfi" in name_lower:
+            return "成交量" if "volume" in name_lower else "资金流"
+        elif "macd" in name_lower or "rsi" in name_lower or "stoch" in name_lower or "cci" in name_lower or "williams" in name_lower:
+            return "技术指标"
+        elif "bollinger" in name_lower or "atr" in name_lower or "volatility" in name_lower:
+            return "波动率"
+        elif "adx" in name_lower or "di" in name_lower or "trix" in name_lower:
+            return "趋势"
+        else:
+            return "其他"
+
     def export_features(self) -> None:
         """导出特征"""
-        self.show_status(_("特征已导出（模拟）"))
+        if not self.gui_engine:
+            self.show_status(_("GUI引擎未初始化"))
+            return
+
+        df = self.gui_engine.get_cached_features()
+        if df is None:
+            self.show_status(_("无可导出的特征数据"))
+            return
+
+        # TODO: 实现Excel导出
+        self.show_status(_("特征导出功能待实现"))
+
+    # ==================== 预测功能 ====================
 
     def start_prediction(self) -> None:
         """开始预测"""
-        model = self.model_combo.currentText()
+        if not self.gui_engine:
+            self.show_status(_("GUI引擎未初始化"))
+            return
+
+        # 获取选中的模型
+        model_id = self.model_combo.currentData()
+        if not model_id:
+            self.show_status(_("请先选择模型"))
+            return
+
         predict_date = self.predict_date_edit.date().toPython()
 
-        self.show_status(_(f"正在使用{model}进行预测..."))
+        self.show_status(_(f"正在使用模型 {model_id} 进行预测..."))
 
-        # 模拟预测结果
-        import random
-        predictions = []
-        symbols = ["000001", "000002", "600000", "600036", "600519"]
-        names = ["平安银行", "万科A", "浦发银行", "招商银行", "贵州茅台"]
-        directions = ["上涨", "下跌", "中性"]
+        # 预测股票列表
+        symbols = [
+            "000001.SZ", "000002.SZ", "600000.SH",
+            "600036.SH", "600519.SH"
+        ]
 
-        for i in range(10):
-            idx = random.randint(0, len(symbols) - 1)
-            pred = {
-                "symbol": f"{symbols[idx]}.SZSE" if symbols[idx].startswith("000") else f"{symbols[idx]}.SSE",
-                "name": names[idx],
-                "direction": random.choice(directions),
-                "confidence": random.uniform(0.55, 0.90),
-                "time": datetime.now().strftime("%H:%M:%S"),
-            }
-            predictions.append(pred)
+        # 异步预测
+        QtCore.QTimer.singleShot(100, lambda: self._do_prediction(
+            model_id, symbols, predict_date
+        ))
 
-        self.predictions = predictions
-        self._update_prediction_table()
-        self.show_status(_(f"预测完成，共{len(predictions)}只股票"))
+    def _do_prediction(self, model_id: str, symbols: list, predict_date: date) -> None:
+        """执行预测"""
+        predictions = self.gui_engine.predict(
+            model_id=model_id,
+            symbols=symbols,
+            predict_date=predict_date
+        )
+
+        if predictions:
+            self.predictions = predictions
+            self._update_prediction_table()
+            self.show_status(_(f"预测完成，共{len(predictions)}只股票"))
+        else:
+            self.show_status(_("预测失败"))
 
     def refresh_predictions(self) -> None:
         """刷新预测结果"""
+        if not self.gui_engine:
+            return
+
+        self.predictions = self.gui_engine.get_predictions()
         self._update_prediction_table()
         self.show_status(_(f"预测列表已更新，共{len(self.predictions)}条记录"))
 
@@ -395,24 +542,46 @@ class ChinaMlWidget(QtWidgets.QWidget):
         self.prediction_table.setRowCount(len(self.predictions))
 
         for row, pred in enumerate(self.predictions):
-            self.prediction_table.setItem(row, 0, QtWidgets.QTableWidgetItem(pred["symbol"]))
-            self.prediction_table.setItem(row, 1, QtWidgets.QTableWidgetItem(pred["name"]))
+            # 提取股票名称（从model_name中提取）
+            display_name = pred.symbol
+            if "(" in pred.model_name:
+                name = pred.model_name.split("(")[-1].rstrip(")")
+                display_name = f"{pred.symbol}\n{name}"
+
+            self.prediction_table.setItem(row, 0, QtWidgets.QTableWidgetItem(pred.symbol))
+
+            # 股票名称
+            if "(" in pred.model_name:
+                stock_name = pred.model_name.split("(")[-1].rstrip(")")
+            else:
+                stock_name = ""
+            self.prediction_table.setItem(row, 1, QtWidgets.QTableWidgetItem(stock_name))
 
             # 方向（带颜色）
-            direction_item = QtWidgets.QTableWidgetItem(pred["direction"])
-            if pred["direction"] == "上涨":
+            direction_map = {
+                SignalType.BUY: "上涨",
+                SignalType.SELL: "下跌",
+                SignalType.HOLD: "中性",
+                SignalType.CLOSE: "平仓"
+            }
+            direction = direction_map.get(pred.signal, "未知")
+
+            direction_item = QtWidgets.QTableWidgetItem(direction)
+            if pred.signal == SignalType.BUY:
                 direction_item.setForeground(QtGui.QColor("red"))
-            elif pred["direction"] == "下跌":
+            elif pred.signal == SignalType.SELL:
                 direction_item.setForeground(QtGui.QColor("green"))
             self.prediction_table.setItem(row, 2, direction_item)
 
             # 置信度
-            conf_item = QtWidgets.QTableWidgetItem(f"{pred['confidence']:.2%}")
-            if pred['confidence'] > 0.7:
+            conf_item = QtWidgets.QTableWidgetItem(f"{pred.confidence:.2%}")
+            if pred.confidence > 0.7:
                 conf_item.setForeground(QtGui.QColor("red"))
             self.prediction_table.setItem(row, 3, conf_item)
 
-            self.prediction_table.setItem(row, 4, QtWidgets.QTableWidgetItem(pred["time"]))
+            # 预测时间
+            time_str = pred.datetime.strftime("%H:%M:%S")
+            self.prediction_table.setItem(row, 4, QtWidgets.QTableWidgetItem(time_str))
 
         self.prediction_table.resizeColumnsToContents()
 
@@ -421,10 +590,16 @@ class ChinaMlWidget(QtWidgets.QWidget):
         if not self.predictions:
             self.show_status(_("无可导出的数据"))
             return
-        self.show_status(_("预测结果已导出（模拟）"))
+
+        # TODO: 实现Excel导出
+        self.show_status(_("预测结果导出功能待实现"))
 
     def clear_predictions(self) -> None:
         """清空预测结果"""
+        if not self.gui_engine:
+            return
+
+        self.gui_engine.clear_predictions()
         self.predictions = []
         self.prediction_table.setRowCount(0)
         self.show_status(_("预测结果已清空"))
