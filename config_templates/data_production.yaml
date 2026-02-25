@@ -1,0 +1,22 @@
+# VeighNa A股交易系统 - 数据服务配置（生产环境）
+
+# Tushare API 配置
+tushare_token: ${TUSHARE_TOKEN}  # 从环境变量读取
+tushare_rate_limit: 200
+tushare_retry_times: 3
+tushare_retry_delay: 1
+
+# QMT 配置
+qmt_path: D:/国金证券QMT交易端/userdata_mini
+qmt_account_id: ${QMT_ACCOUNT_ID}  # 从环境变量读取
+
+# 缓存配置（秒）
+cache_bar_ttl: 300       # K线缓存 5分钟
+cache_tick_ttl: 30       # Tick缓存 30秒
+cache_info_ttl: 86400    # 基础信息缓存 1天
+
+# 增量更新配置
+auto_update_enabled: true
+update_interval: 3600     # 1小时更新一次
+update_start_time: "08:00"
+update_end_time: "20:00"

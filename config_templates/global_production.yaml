@@ -1,0 +1,55 @@
+# VeighNa A股交易系统 - 全局配置（生产环境）
+#
+# 使用方法：
+# 1. 复制此文件到 .vntrader_china/config/global_production.yaml
+# 2. 根据实际环境修改配置值
+# 3. 确保环境变量已正确设置
+
+# 运行环境
+environment: production
+
+# 数据库配置
+database:
+  # MySQL 配置
+  mysql_host: localhost
+  mysql_port: 3306
+  mysql_user: vnpy_prod
+  mysql_password: ${MYSQL_PASSWORD}  # 从环境变量读取
+  mysql_database: vnpy_china_prod
+
+  # Redis 配置
+  redis_host: localhost
+  redis_port: 6379
+  redis_password: ${REDIS_PASSWORD}  # 从环境变量读取
+  redis_db: 0
+
+  # 连接池配置
+  pool_size: 10
+  max_overflow: 20
+
+# 日志配置
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file_enabled: true
+  file_path: logs/vnpy_china.log
+  max_bytes: 104857600  # 100MB
+  backup_count: 10
+  console_enabled: false
+
+# RPC 配置
+rpc:
+  rep_address: tcp://127.0.0.1:2014
+  pub_address: tcp://127.0.0.1:4102
+  timeout: 5000
+
+# 风控全局参数
+risk:
+  max_position_ratio: 0.8      # 最大持仓比例 80%
+  max_single_position_ratio: 0.2  # 单只股票最大 20%
+  max_daily_loss_ratio: 0.05   # 单日最大亏损 5%
+  max_consecutive_losses: 5     # 最大连续亏损次数
+
+# 目录配置
+work_dir: .vntrader_china
+data_dir: data

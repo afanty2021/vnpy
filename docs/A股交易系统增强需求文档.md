@@ -31,10 +31,19 @@
 | QMT 账号配置 | ✅ 已完成 | 账号和路径已设置 |
 | CTA 策略模块 | ✅ 已完成 | vnpy_ctastrategy 已安装 |
 | 回测模块 | ✅ 已完成 | vnpy_ctabacktester 已安装 |
-| A股交易规则 | ❌ 待开发 | 需要适配 T+1、涨跌停等 |
-| 风控系统 | ❌ 待开发 | 需要集成风控模块 |
-| A股数据源 | ❌ 待配置 | 需配置 Tushare/迅投研 |
-| 监控告警 | ❌ 待开发 | 需要实现告警系统 |
+| A股交易规则 | ✅ 已完成 | `vnpy_china_rules` 模块 (REQ-001) |
+| 风控系统 | ✅ 已完成 | `vnpy_china_rules/risk` 模块 (REQ-002) |
+| A股数据源 | ✅ 已完成 | `vnpy_china_data` 模块 (REQ-003) |
+| 监控告警 | ✅ 已完成 | `vnpy_china_monitor` 模块 (REQ-004) |
+| A股特色策略库 | ✅ 已完成 | `vnpy_china_strategy` 模块 (REQ-005) |
+| 增强回测系统 | ✅ 已完成 | `vnpy_china_backtest` 模块 (REQ-006) |
+| 资金管理 | ✅ 已完成 | `vnpy_china_capital` 模块 (REQ-007) |
+| 行情数据分析 | ✅ 已完成 | `vnpy_china_analysis` 模块 (REQ-008) |
+| 数据分析报表 | ✅ 已完成 | `vnpy_china_reporting` 模块 (REQ-009) |
+| 策略参数优化 | ✅ 已完成 | `vnpy_china_optimize` 模块 (REQ-010) |
+| 机器学习策略 | ✅ 已完成 | `vnpy_china_ml` 模块 (REQ-011) |
+| Web监控系统 | ✅ 已完成 | `vnpy_china_monitor/web` 模块 (REQ-012) |
+| 统一配置管理 | ✅ 已完成 | `vnpy_china_config` 模块 (REQ-012) |
 
 ---
 
@@ -1175,18 +1184,50 @@ class TradingReport:
 
 #### 必须实现（P0）
 
-- [x] A股交易规则正确执行（T+1、涨跌停、交易单位）
-- [ ] 风控系统有效运行
-- [ ] 数据稳定获取和存储
-- [ ] 监控告警及时有效
+- [x] A股交易规则正确执行（T+1、涨跌停、交易单位） - `vnpy_china_rules`
+- [x] 风控系统有效运行 - `vnpy_china_rules/risk`
+- [x] 数据稳定获取和存储 - `vnpy_china_data`
+- [x] 监控告警及时有效 - `vnpy_china_monitor`
 
 #### 强烈推荐（P1）
 
-- [ ] 至少3个A股特色策略可用
-- [ ] 回测结果与实盘偏差<20%
-- [ ] 行情数据分析准确
-- [ ] 资金管理模块可用
-- [ ] 报表系统完整
+- [x] 至少3个A股特色策略可用 - `vnpy_china_strategy`
+  - [x] 龙虎榜策略
+  - [x] 北向资金策略
+  - [x] 板块轮动策略
+  - [x] 事件驱动策略
+  - [x] 可转债套利策略
+- [x] 回测结果与实盘偏差<20% - `vnpy_china_backtest`
+- [x] 行情数据分析准确 - `vnpy_china_analysis`
+- [x] 资金管理模块可用 - `vnpy_china_capital`
+- [x] 报表系统完整 - `vnpy_china_reporting`
+
+#### 推荐实现（P2）
+
+- [x] 策略参数优化系统 - `vnpy_china_optimize`
+  - [x] 网格搜索
+  - [x] 遗传算法
+  - [x] 贝叶斯优化
+  - [x] 过拟合检测
+- [x] 机器学习策略 - `vnpy_china_ml`
+  - [x] 特征工程
+  - [x] 模型训练
+  - [x] 模型评估
+  - [x] IC/IR分析
+
+#### 可选功能（P3）
+
+- [x] Web监控系统 - `vnpy_china_monitor/web`
+  - [x] 实时行情展示
+  - [x] 持仓查询
+  - [x] 交易记录
+  - [x] 策略状态
+  - [x] 远程控制
+- [x] 统一配置管理 - `vnpy_china_config`
+  - [x] 分层配置架构
+  - [x] 环境隔离
+  - [x] 配置验证
+  - [x] 热更新支持
 
 ### 性能验收
 

@@ -1,0 +1,29 @@
+# VeighNa A股交易系统 - 监控告警配置（生产环境）
+
+# 系统监控
+enable_system_monitor: true
+system_check_interval: 60      # 检查间隔（秒）
+cpu_threshold: 80.0            # CPU 使用率阈值
+memory_threshold: 80.0         # 内存使用率阈值
+disk_threshold: 90.0           # 磁盘使用率阈值
+
+# 交易监控
+enable_trade_monitor: true
+trade_check_interval: 10       # 交易检查间隔（秒）
+
+# 告警配置
+enable_alert: true
+alert_cooldown: 300            # 告警冷却时间（秒）
+
+# 邮件告警配置
+email_enabled: ${ALERT_EMAIL_ENABLED}  # 从环境变量读取
+smtp_host: ${SMTP_HOST}
+smtp_port: ${SMTP_PORT}
+email_username: ${EMAIL_USERNAME}
+email_password: ${EMAIL_PASSWORD}
+email_to:
+  - ${ALERT_EMAIL_TO}
+
+# 企业微信告警配置
+wechat_enabled: ${ALERT_WECHAT_ENABLED}  # 从环境变量读取
+wechat_webhook: ${WECHAT_WEBHOOK}
