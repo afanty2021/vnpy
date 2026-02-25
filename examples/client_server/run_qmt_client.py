@@ -63,14 +63,43 @@ from vnpy_china_backtest import ChinaBacktestApp
 from vnpy_china_capital import ChinaCapitalApp
 from vnpy_china_ml import ChinaMlApp
 
-# RPC配置
-RPC_SETTING = {
-    "主动请求地址": "tcp://192.168.2.168:2014",
-    "推送订阅地址": "tcp://192.168.2.168:4102",
-}
+# 导入配置管理
+from vnpy_china_config import ConfigManager, DataModuleConfig
+
+
+def load_rpc_config() -> dict:
+    """加载RPC配置
+
+    优先级：
+    1. 配置文件（.vntrader_china/config/data_development.yaml）
+    2. 环境变量
+    3. 默认值
+    """
+    # 重置单例以清除可能的缓存
+    ConfigManager.reset_instance()
+    config_manager = ConfigManager()
+    config = config_manager.load_module_config("data", DataModuleConfig, force_reload=True)
+
+    # 从配置获取RPC地址
+    req_address = config.qmt_rpc_req_address
+    sub_address = config.qmt_rpc_sub_address
+
+    # 支持环境变量覆盖
+    import os
+    req_address = os.getenv("QMT_RPC_REQ_ADDRESS", req_address)
+    sub_address = os.getenv("QMT_RPC_SUB_ADDRESS", sub_address)
+
+    return {
+        "主动请求地址": req_address,
+        "推送订阅地址": sub_address,
+    }
+
 
 def start_gui_with_rpc():
     """启动带RPC的GUI界面"""
+    # 加载RPC配置
+    RPC_SETTING = load_rpc_config()
+
     qapp = create_qapp()
     event_engine = EventEngine()
     main_engine = MainEngine(event_engine)
@@ -112,9 +141,13 @@ def start_gui_with_rpc():
     print("\n" + "=" * 60)
     print("VeighNa Trader - RPC连接模式")
     print("=" * 60)
-    print(f"  连接地址: {RPC_SETTING['主动请求地址']}")
+    print(f"  请求地址: {RPC_SETTING['主动请求地址']}")
+    print(f"  订阅地址: {RPC_SETTING['推送订阅地址']}")
     print("  显示精度: 2位小数")
     print("  功能模块: A股策略、分析、规则、数据、回测、资金、机器学习")
+    print("\n配置说明:")
+    print("  配置文件: .vntrader_china/config/data_development.yaml")
+    print("  环境变量: QMT_RPC_REQ_ADDRESS, QMT_RPC_SUB_ADDRESS")
     print("=" * 60)
 
     qapp.exec()

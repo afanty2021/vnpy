@@ -1,0 +1,29 @@
+# A股数据服务模块配置
+#
+# 此文件定义了数据服务的相关配置，包括Tushare API和QMT RPC连接
+
+# Tushare配置
+tushare_token: ""  # 从环境变量 TUSHARE_TOKEN 读取
+tushare_rate_limit: 200  # API调用频率限制（次/分钟）
+tushare_retry_times: 3  # 重试次数
+tushare_retry_delay: 1  # 重试延迟（秒）
+
+# QMT配置
+qmt_path: "D:/国金证券QMT交易端/userdata_mini/"  # QMT客户端路径（Windows端使用）
+qmt_account_id: ""  # QMT资金账号
+
+# QMT RPC配置（Mac/Linux客户端使用）
+qmt_use_rpc: true  # 是否使用RPC模式连接QMT
+qmt_rpc_req_address: "tcp://192.168.2.168:2014"  # QMT RPC请求地址
+qmt_rpc_sub_address: "tcp://192.168.2.168:4102"  # QMT RPC订阅地址
+
+# 缓存配置
+cache_bar_ttl: 300  # K线缓存TTL（秒）
+cache_tick_ttl: 30  # Tick缓存TTL（秒）
+cache_info_ttl: 86400  # 基础信息缓存TTL（秒）
+
+# 增量更新配置
+auto_update_enabled: true  # 是否启用增量更新
+update_interval: 3600  # 更新间隔（秒）
+update_start_time: "08:00"  # 更新开始时间
+update_end_time: "20:00"  # 更新结束时间

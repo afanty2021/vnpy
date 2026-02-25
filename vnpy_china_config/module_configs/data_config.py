@@ -4,6 +4,7 @@
 定义数据服务相关配置，包括 Tushare API、QMT、缓存等。
 """
 
+import os
 from pathlib import Path
 
 from pydantic import Field, field_validator
@@ -39,8 +40,11 @@ class DataModuleConfig(BaseConfig):
         update_end_time: 更新结束时间
     """
 
-    # Tushare配置
-    tushare_token: str = ""
+    # Tushare配置 - 从环境变量读取
+    tushare_token: str = Field(
+        default=os.getenv("TUSHARE_TOKEN", ""),
+        description="Tushare API Token，从环境变量TUSHARE_TOKEN读取"
+    )
     tushare_rate_limit: int = 200
     tushare_retry_times: int = 3
     tushare_retry_delay: int = 1
@@ -48,6 +52,20 @@ class DataModuleConfig(BaseConfig):
     # QMT配置
     qmt_path: Path = Field(default_factory=lambda: Path("D:/国金证券QMT交易端/userdata_mini"))
     qmt_account_id: str = ""
+
+    # QMT RPC配置
+    qmt_use_rpc: bool = Field(
+        default=True,
+        description="是否使用RPC模式连接QMT（Mac/Linux客户端推荐True）"
+    )
+    qmt_rpc_req_address: str = Field(
+        default="tcp://127.0.0.1:2014",
+        description="QMT RPC请求地址"
+    )
+    qmt_rpc_sub_address: str = Field(
+        default="tcp://127.0.0.1:4102",
+        description="QMT RPC订阅地址"
+    )
 
     # 缓存配置
     cache_bar_ttl: int = 300
