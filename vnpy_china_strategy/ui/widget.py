@@ -72,45 +72,28 @@ class ChinaStrategyWidget(QtWidgets.QWidget):
         tab_widget.addTab(convertible_widget, _("可转债"))
 
 
-class StrategyListWidget(BaseMonitor):
+class StrategyListWidget(QtWidgets.QWidget):
     """策略列表监控组件"""
-
-    event_type: str = ""
-    data_key: str = ""
-    sorting: bool = True
 
     def __init__(self, main_engine: Any, event_engine: Any, gui_engine: Optional[Any] = None) -> None:
         """初始化"""
-        super().__init__(main_engine, event_engine)
+        super().__init__()
 
-        # 获取GUI引擎
+        self.main_engine = main_engine
+        self.event_engine = event_engine
         self.gui_engine = gui_engine
 
-        # 创建按钮
-        self.create_buttons()
+        self.init_ui()
 
         # 启动定时刷新
         self.start_timer()
 
-    def init_table(self) -> None:
-        """初始化表格"""
-        # 定义表格列
-        self.headers = [
-            _("策略名称"),
-            _("合约代码"),
-            _("策略类型"),
-            _("状态"),
-            _("仓位"),
-            _("盈亏"),
-            _("创建时间"),
-        ]
+    def init_ui(self) -> None:
+        """初始化UI"""
+        layout = QtWidgets.QVBoxLayout()
+        self.setLayout(layout)
 
-        # 设置列宽
-        self.width_ratios = [2, 2, 2, 1, 1, 1, 2]
-
-    def create_buttons(self) -> None:
-        """创建控制按钮"""
-        # 添加工具栏
+        # 创建工具栏
         toolbar = QtWidgets.QHBoxLayout()
 
         refresh_btn = QtWidgets.QPushButton(_("刷新"))
@@ -126,9 +109,24 @@ class StrategyListWidget(BaseMonitor):
         toolbar.addWidget(stop_btn)
 
         toolbar.addStretch()
+        layout.addLayout(toolbar)
 
-        # 添加到布局
-        self.layout().insertLayout(0, toolbar)
+        # 创建表格
+        self.table = QtWidgets.QTableWidget()
+        self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels([
+            _("策略名称"),
+            _("合约代码"),
+            _("策略类型"),
+            _("状态"),
+            _("仓位"),
+            _("盈亏"),
+            _("创建时间"),
+        ])
+        self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        layout.addWidget(self.table)
 
     def refresh_data(self) -> None:
         """刷新数据"""
@@ -140,18 +138,18 @@ class StrategyListWidget(BaseMonitor):
             strategies = self.gui_engine.get_all_strategies()
 
             # 清空表格
-            self.setRowCount(0)
+            self.table.setRowCount(0)
 
             # 填充数据
             for row, (strategy_name, strategy) in enumerate(strategies.items()):
-                self.insertRow(row)
-                self.setItem(row, 0, QtWidgets.QTableWidgetItem(strategy_name))
+                self.table.insertRow(row)
+                self.table.setItem(row, 0, QtWidgets.QTableWidgetItem(strategy_name))
 
                 if hasattr(strategy, "vt_symbol"):
-                    self.setItem(row, 1, QtWidgets.QTableWidgetItem(strategy.vt_symbol))
+                    self.table.setItem(row, 1, QtWidgets.QTableWidgetItem(strategy.vt_symbol))
 
                 if hasattr(strategy, "strategy_class"):
-                    self.setItem(row, 2, QtWidgets.QTableWidgetItem(strategy.strategy_class.__name__))
+                    self.table.setItem(row, 2, QtWidgets.QTableWidgetItem(strategy.strategy_class.__name__))
 
                 if hasattr(strategy, "active"):
                     status = _("运行中") if strategy.active else _("已停止")
@@ -161,27 +159,30 @@ class StrategyListWidget(BaseMonitor):
                         item.setForeground(QtGui.QColor("green"))
                     else:
                         item.setForeground(QtGui.QColor("red"))
-                    self.setItem(row, 3, item)
+                    self.table.setItem(row, 3, item)
 
                 if hasattr(strategy, "pos"):
-                    self.setItem(row, 4, QtWidgets.QTableWidgetItem(str(strategy.pos)))
+                    self.table.setItem(row, 4, QtWidgets.QTableWidgetItem(str(strategy.pos)))
 
                 if hasattr(strategy, "trading_pnl"):
-                    self.setItem(row, 5, QtWidgets.QTableWidgetItem(f"{strategy.trading_pnl:.2f}"))
+                    self.table.setItem(row, 5, QtWidgets.QTableWidgetItem(f"{strategy.trading_pnl:.2f}"))
 
                 if hasattr(strategy, "create_time"):
-                    self.setItem(row, 6, QtWidgets.QTableWidgetItem(str(strategy.create_time)))
+                    self.table.setItem(row, 6, QtWidgets.QTableWidgetItem(str(strategy.create_time)))
+
+            # 调整列宽
+            self.table.resizeColumnsToContents()
         except Exception as e:
-            self.write_log(f"刷新策略列表失败：{e}")
+            print(f"刷新策略列表失败：{e}")
 
     def start_selected_strategy(self) -> None:
         """启动选中的策略"""
-        current_row = self.currentRow()
+        current_row = self.table.currentRow()
         if current_row < 0:
             QtWidgets.QMessageBox.warning(self, _("警告"), _("请先选择一个策略"))
             return
 
-        strategy_name = self.item(current_row, 0).text()
+        strategy_name = self.table.item(current_row, 0).text()
         if not self.gui_engine:
             return
 
@@ -197,12 +198,12 @@ class StrategyListWidget(BaseMonitor):
 
     def stop_selected_strategy(self) -> None:
         """停止选中的策略"""
-        current_row = self.currentRow()
+        current_row = self.table.currentRow()
         if current_row < 0:
             QtWidgets.QMessageBox.warning(self, _("警告"), _("请先选择一个策略"))
             return
 
-        strategy_name = self.item(current_row, 0).text()
+        strategy_name = self.table.item(current_row, 0).text()
         if not self.gui_engine:
             return
 

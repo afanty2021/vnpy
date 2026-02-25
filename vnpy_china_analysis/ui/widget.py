@@ -117,7 +117,11 @@ class BaseAnalysisWidget(QtWidgets.QWidget):
         """
         # 从主引擎获取所有合约
         contracts = self.main_engine.get_all_contracts()
-        return [c.symbol for c in contracts.values() if c.symbol]
+        # get_all_contracts返回list而不是dict
+        if isinstance(contracts, dict):
+            return [c.symbol for c in contracts.values() if c.symbol]
+        else:
+            return [c.symbol for c in contracts if c.symbol]
 
 
 class Level2AnalysisWidget(BaseAnalysisWidget):
