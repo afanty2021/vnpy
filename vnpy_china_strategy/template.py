@@ -162,12 +162,14 @@ class ChinaStrategyTemplate(CtaTemplate if CtaTemplate != object else object):
         if price:
             tick = self.get_tick(symbol)
             if tick:
-                # 涨停价
-                if tick.limit_up and price >= tick.limit_up:
+                # 涨停价 - 添加类型检查防止Mock对象比较
+                limit_up = getattr(tick, 'limit_up', None)
+                if limit_up is not None and isinstance(limit_up, (int, float)) and price >= limit_up:
                     self.write_log(f"跳过涨停股票: {symbol}")
                     return False
-                # 跌停价
-                if tick.limit_down and price <= tick.limit_down:
+                # 跌停价 - 添加类型检查防止Mock对象比较
+                limit_down = getattr(tick, 'limit_down', None)
+                if limit_down is not None and isinstance(limit_down, (int, float)) and price <= limit_down:
                     self.write_log(f"跳过跌停股票: {symbol}")
                     return False
         return True

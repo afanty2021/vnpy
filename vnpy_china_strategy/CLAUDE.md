@@ -248,4 +248,10 @@ config.net_inflow_threshold = 10  # 净流入阈值(亿)
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
 | #6552 | 8:24 PM | ✅ | vnpy_china_strategy Imports Updated | ~224 |
+
+### Feb 25, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #6866 | 10:44 AM | 🔵 | vnpy_china_strategy template implements A-share trading rules with position sizing and tradeability checks | ~363 |
 </claude-mem-context>

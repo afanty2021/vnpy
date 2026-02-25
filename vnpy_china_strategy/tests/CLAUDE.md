@@ -11,4 +11,10 @@
 | #6544 | 8:17 PM | 🟣 | Created test file for convertible bond strategy | ~376 |
 | #6543 | 8:16 PM | 🟣 | Created unit tests for event-driven strategy models | ~263 |
 | #6542 | " | 🟣 | Created unit tests for sector rotation strategy | ~225 |
+
+### Feb 25, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #6868 | 10:44 AM | 🔵 | vnpy_china_strategy dragon_tiger tests pass with 7 tests in 0.02 seconds | ~351 |
 </claude-mem-context>
