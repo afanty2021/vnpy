@@ -6,3 +6,28 @@
 2026-02-25 17:38:35,696 - vnpy_china_monitor.web.server - INFO - Starting VeighNa Web Monitor...
 2026-02-25 17:38:35,696 - vnpy_china_monitor.web.rpc.client - INFO - RpcClientWrapper initialized: rep_address=tcp://192.168.2.168:2014, pub_address=tcp://192.168.2.168:4102, auto_reconnect=True
 2026-02-25 17:38:35,696 - vnpy_china_monitor.web.rpc.client - INFO - RPC connection state changed: RpcConnectionState.DISCONNECTED -> RpcConnectionState.CONNECTING
+2026-02-25 17:58:31,854 - __main__ - INFO - 启动Web监控服务器: 0.0.0.0:8000
+2026-02-25 17:58:31,854 - __main__ - INFO - RPC地址: tcp://192.168.2.168:2014, tcp://192.168.2.168:4102
+2026-02-25 17:58:31,854 - __main__ - INFO - API文档: http://0.0.0.0:8000/docs
+2026-02-25 17:58:31,874 - vnpy_china_monitor.web.server - INFO - Starting VeighNa Web Monitor...
+2026-02-25 17:58:31,875 - vnpy_china_monitor.web.rpc.client - INFO - RpcClientWrapper initialized: rep_address=tcp://192.168.2.168:2014, pub_address=tcp://192.168.2.168:4102, auto_reconnect=True
+2026-02-25 17:58:31,875 - vnpy_china_monitor.web.rpc.client - INFO - RPC connection state changed: RpcConnectionState.DISCONNECTED -> RpcConnectionState.CONNECTING
+2026-02-25 17:58:31,881 - vnpy_china_monitor.web.rpc.client - INFO - RPC connection state changed: RpcConnectionState.CONNECTING -> RpcConnectionState.CONNECTED
+2026-02-25 17:58:31,881 - vnpy_china_monitor.web.rpc.client - INFO - RPC client connected successfully: tcp://192.168.2.168:2014
+2026-02-25 17:58:31,881 - vnpy_china_monitor.web.rpc.client - INFO - RPC reconnect monitor started
+2026-02-25 17:58:31,881 - vnpy_china_monitor.web.server - INFO - RPC client connected successfully
+2026-02-25 17:58:31,881 - vnpy_china_monitor.web.websocket.manager - INFO - ConnectionManager initialized: heartbeat_interval=30, max_connections=100
+2026-02-25 17:58:31,881 - vnpy_china_monitor.web.websocket.manager - INFO - Heartbeat task started
+2026-02-25 17:58:31,881 - vnpy_china_monitor.web.services.market_service - INFO - MarketService initialized
+2026-02-25 17:58:31,881 - vnpy_china_monitor.web.services.trade_service - INFO - TradeService initialized
+2026-02-25 17:58:31,881 - vnpy_china_monitor.web.services.strategy_service - INFO - StrategyService initialized
+2026-02-25 17:58:31,881 - vnpy_china_monitor.web.services.alert_service - INFO - AlertService initialized
+2026-02-25 17:58:31,881 - vnpy_china_monitor.web.rpc.client - INFO - Subscribed to RPC topic: tick
+2026-02-25 17:58:31,881 - vnpy_china_monitor.web.rpc.client - INFO - Subscribed to RPC topic: bar
+2026-02-25 17:58:31,881 - vnpy_china_monitor.web.rpc.client - INFO - Subscribed to RPC topic: order
+2026-02-25 17:58:31,881 - vnpy_china_monitor.web.rpc.client - INFO - Subscribed to RPC topic: trade
+2026-02-25 17:58:31,881 - vnpy_china_monitor.web.rpc.client - INFO - Subscribed to RPC topic: position
+2026-02-25 17:58:31,881 - vnpy_china_monitor.web.rpc.client - INFO - Subscribed to RPC topic: account
+2026-02-25 17:58:31,881 - vnpy_china_monitor.web.rpc.client - INFO - Subscribed to RPC topic: strategy
+2026-02-25 17:58:31,881 - vnpy_china_monitor.web.server - INFO - RPC event subscriptions registered
+2026-02-25 17:58:31,881 - vnpy_china_monitor.web.server - INFO - VeighNa Web Monitor started successfully

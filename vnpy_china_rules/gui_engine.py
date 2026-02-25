@@ -57,15 +57,15 @@ class ChinaRulesGuiEngine(BaseEngine):
                 from .datasource import QMTDataSource
                 qmt_source = QMTDataSource(self.main_engine)
                 dm.register_source("qmt", qmt_source, primary=True)
-                self.write_log("QMT数据源已注册")
+                self.main_engine.write_log("QMT数据源已注册", "ChinaRulesApp")
             except Exception as e:
                 logger.warning(f"QMT数据源注册失败: {e}")
 
             # 创建规则引擎
             self.rules_engine = ChinaStockRulesEngine(dm)
-            self.write_log("A股交易规则引擎初始化完成")
+            self.main_engine.write_log("A股交易规则引擎初始化完成", "ChinaRulesApp")
         except ImportError as e:
-            self.write_log(f"警告：无法导入规则引擎: {e}")
+            self.main_engine.write_log(f"警告：无法导入规则引擎: {e}", "ChinaRulesApp")
 
     def register_event(self) -> None:
         """注册事件监听"""
@@ -104,7 +104,7 @@ class ChinaRulesGuiEngine(BaseEngine):
     def set_rules_engine(self, rules_engine: Any) -> None:
         """设置规则引擎"""
         self.rules_engine = rules_engine
-        self.write_log("规则引擎已设置")
+        self.main_engine.write_log("规则引擎已设置")
 
     def get_rules_engine(self) -> Optional[Any]:
         """获取规则引擎"""
@@ -256,7 +256,7 @@ class ChinaRulesGuiEngine(BaseEngine):
     def clear_check_history(self) -> None:
         """清空检查历史"""
         self.check_results.clear()
-        self.write_log("检查历史已清空")
+        self.main_engine.write_log("检查历史已清空")
 
 
 __all__ = ["ChinaRulesGuiEngine"]

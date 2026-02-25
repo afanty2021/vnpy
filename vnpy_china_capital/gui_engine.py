@@ -12,7 +12,7 @@ class ChinaCapitalGuiEngine(BaseEngine):
         super().__init__(main_engine, event_engine, self.engine_name)
 
     def init(self):
-        self.write_log("A股资金管理引擎初始化完成")
+        self.main_engine.write_log("A股资金管理引擎初始化完成")
 
 
 __all__ = ["ChinaCapitalGuiEngine"]

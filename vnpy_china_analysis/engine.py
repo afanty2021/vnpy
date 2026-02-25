@@ -10,11 +10,11 @@ from vnpy.trader.engine import BaseEngine
 from vnpy.trader.object import TickData, BarData
 
 # 导入分析器
-from ..level2.analyzer import Level2Analyzer
-from ..money_flow.analyzer import MoneyFlowAnalyzer
-from ..technical.analyzer import TechnicalAnalyzer
-from ..auction.analyzer import AuctionAnalyzer
-from ..objects.types import TickFlowData
+from .level2.analyzer import Level2Analyzer
+from .money_flow.analyzer import MoneyFlowAnalyzer
+from .technical.analyzer import TechnicalAnalyzer
+from .auction.analyzer import AuctionAnalyzer
+from .objects.types import TickFlowData
 
 
 class ChinaAnalysisEngine(BaseEngine):
