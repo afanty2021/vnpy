@@ -28,7 +28,7 @@ sys.path.insert(0, str(project_root))
 from vnpy.event import EventEngine
 from vnpy.trader.engine import MainEngine
 from vnpy.trader.object import TickData, BarData, OrderData, TradeData, PositionData, AccountData
-from vnpy.rpcservice import RpcServiceApp
+from vnpy_rpcservice import RpcServiceApp
 from vnpy_qmt import QmtGateway
 
 # RPC服务配置
@@ -58,9 +58,8 @@ class QmtRpcServer:
         # 添加QMT网关
         self.main_engine.add_gateway(QmtGateway)
 
-        # 添加RPC服务
-        self.rpc_service = RpcServiceApp()
-        self.main_engine.add_app(self.rpc_service)
+        # 添加RPC服务（传入类，不是实例）
+        self.main_engine.add_app(RpcServiceApp)
 
         print("=" * 60)
         print("VeighNa RPC服务端 - QMT版本")
@@ -68,10 +67,11 @@ class QmtRpcServer:
 
     def start(self):
         """启动服务"""
-        # 启动RPC服务器
-        self.rpc_service.start_server(
-            req_address=RPC_SETTING["req_address"],
-            sub_address=RPC_SETTING["sub_address"]
+        # 获取RPC引擎并启动服务
+        self.rpc_engine = self.main_engine.get_engine("RpcService")
+        self.rpc_engine.start(
+            rep_address=RPC_SETTING["req_address"],
+            pub_address=RPC_SETTING["sub_address"]
         )
 
         print("\nRPC服务已启动：")
@@ -103,7 +103,8 @@ class QmtRpcServer:
 
     def stop(self):
         """停止服务"""
-        self.rpc_service.stop_server()
+        self.rpc_engine.stop()
+        self.main_engine.close()
         self.event_engine.stop()
         print("RPC服务已停止")
 

@@ -21,6 +21,33 @@ from enum import Enum
 logger = logging.getLogger(__name__)
 
 
+class _WrappedRpcClient:
+    """RpcClient 的包装类，用于处理回调"""
+
+    def __init__(self, callback_func: Callable[[str, Any], None]):
+        """初始化
+
+        Args:
+            callback_func: 回调函数，接收 (topic, data)
+        """
+        from vnpy.rpc import RpcClient
+
+        self._client = RpcClient()
+        self._callback_func = callback_func
+
+    def __getattr__(self, name: str) -> Any:
+        """转发所有其他属性和方法到内部客户端"""
+        return getattr(self._client, name)
+
+    def callback(self, topic: str, data: Any) -> None:
+        """实现 RpcClient 的回调接口"""
+        if self._callback_func:
+            try:
+                self._callback_func(topic, data)
+            except Exception as e:
+                logger.error(f"Error in RPC callback: {e}")
+
+
 class RpcConnectionState(Enum):
     """RPC连接状态"""
     DISCONNECTED = "disconnected"
@@ -146,13 +173,11 @@ class RpcClientWrapper:
         self.state = RpcConnectionState.CONNECTING
 
         try:
-            from vnpy.rpc import RpcClient
+            # 使用包装的客户端，支持回调
+            self._rpc_client = _WrappedRpcClient(self._handle_push)
 
-            self._rpc_client = RpcClient()
-            self._rpc_client.connect(self.rep_address, self.pub_address)
-
-            # 注册推送回调
-            self._rpc_client.register(self._handle_push)
+            # 使用正确的 API：start() 而不是 connect()
+            self._rpc_client.start(self.rep_address, self.pub_address)
 
             self.state = RpcConnectionState.CONNECTED
             logger.info(f"RPC client connected successfully: {self.rep_address}")
@@ -174,13 +199,68 @@ class RpcClientWrapper:
 
             return False
 
+    async def connect_async(self) -> bool:
+        """异步连接到RPC服务
+
+        在异步上下文中使用，避免阻塞事件循环
+
+        Returns:
+            是否连接成功
+        """
+        if self.connected:
+            logger.warning("RPC client already connected")
+            return True
+
+        self.state = RpcConnectionState.CONNECTING
+
+        def _connect():
+            try:
+                # 使用包装的客户端，支持回调
+                client = _WrappedRpcClient(self._handle_push)
+                # 使用正确的 API：start() 而不是 connect()
+                client.start(self.rep_address, self.pub_address)
+                return client, True
+            except Exception as e:
+                logger.error(f"RPC client connection failed: {e}")
+                return None, False
+
+        # 在线程池中执行连接，避免阻塞事件循环
+        loop = asyncio.get_event_loop()
+        try:
+            self._rpc_client, success = await loop.run_in_executor(None, _connect)
+            if success:
+                self.state = RpcConnectionState.CONNECTED
+                logger.info(f"RPC client connected successfully (async): {self.rep_address}")
+
+                # 启动重连监听
+                if self.auto_reconnect:
+                    self._start_reconnect_monitor()
+
+                return True
+            else:
+                self.state = RpcConnectionState.ERROR
+                self._rpc_client = None
+
+                # 尝试自动重连
+                if self.auto_reconnect:
+                    self._schedule_reconnect()
+
+                return False
+        except Exception as e:
+            logger.error(f"RPC async connection error: {e}")
+            self.state = RpcConnectionState.ERROR
+            self._rpc_client = None
+            return False
+
     def disconnect(self) -> None:
         """断开RPC连接"""
         self._stop_reconnect = True
 
         if self._rpc_client:
             try:
-                self._rpc_client.close()
+                # 使用正确的 API：stop() 和 join()
+                self._rpc_client.stop()
+                self._rpc_client.join()
             except Exception as e:
                 logger.error(f"Error closing RPC client: {e}")
             finally:
@@ -257,20 +337,6 @@ class RpcClientWrapper:
         if not self.connected:
             raise ConnectionError("RPC client not connected")
 
-        request = RpcRequest(
-            method=method,
-            params=kwargs,
-            timestamp=datetime.now().isoformat(),
-            request_id=self._generate_request_id(),
-        )
-
-        request_data = json.dumps({
-            "method": request.method,
-            "params": request.params,
-            "timestamp": request.timestamp,
-            "request_id": request.request_id,
-        })
-
         last_error = None
 
         # 重试逻辑
@@ -278,16 +344,12 @@ class RpcClientWrapper:
             try:
                 logger.debug(f"RPC call (attempt {attempt + 1}): method={method}, params={kwargs}")
 
-                # 发送请求
-                response_str = self._rpc_client.call(request_data)
+                # vnpy.rpc.RpcClient 通过 __getattr__ 实现动态调用
+                # 直接调用方法名即可
+                func = getattr(self._rpc_client, method)
+                result = func(**kwargs)
 
-                # 解析响应
-                if response_str:
-                    response_data = json.loads(response_str) if isinstance(response_str, str) else response_str
-                else:
-                    response_data = {}
-
-                return response_data
+                return result
 
             except Exception as e:
                 last_error = e

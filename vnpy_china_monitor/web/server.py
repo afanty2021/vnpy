@@ -71,11 +71,11 @@ async def lifespan(app: FastAPI):
         request_timeout=config.rpc.request_timeout,
     )
 
-    # 连接RPC
+    # 连接RPC（使用同步连接，避免 signal 模块的线程问题）
     if _rpc_client.connect():
         logger.info("RPC client connected successfully")
     else:
-        logger.warning("RPC client connection failed, will retry...")
+        logger.warning("RPC client connection failed, will retry in background...")
 
     # 初始化WebSocket管理器
     _connection_manager = ConnectionManager(
