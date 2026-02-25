@@ -1,0 +1,62 @@
+# VeighNa Web Monitor - Docker Compose配置
+# 用于快速部署完整的监控系统
+
+version: '3.8'
+
+services:
+  # VeighNa交易系统（带RPC服务）
+  veighna:
+    build:
+      context: .
+      dockerfile: Dockerfile.veighna
+    container_name: veighna_trader
+    environment:
+      - VNPY_LOG_LEVEL=INFO
+    volumes:
+      - veighna_data:/app/data
+    networks:
+      - vnpy_network
+    restart: unless-stopped
+
+  # Web监控服务
+  web_monitor:
+    build:
+      context: .
+      dockerfile: vnpy_china_monitor/web/Dockerfile
+    container_name: vnpy_web_monitor
+    environment:
+      - RPC_REP_ADDRESS=tcp://veighna:2014
+      - RPC_PUB_ADDRESS=tcp://veighna:4102
+      - JWT_SECRET_KEY=your_secret_key_here
+      - LOG_LEVEL=INFO
+    ports:
+      - "8000:8000"
+    depends_on:
+      - veighna
+    networks:
+      - vnpy_network
+    restart: unless-stopped
+
+  # Nginx反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: vnpy_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - web_monitor
+    networks:
+      - vnpy_network
+    restart: unless-stopped
+
+volumes:
+  veighna_data:
+    driver: local
+
+networks:
+  vnpy_network:
+    driver: bridge

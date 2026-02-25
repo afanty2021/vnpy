@@ -391,5 +391,6 @@ pytest vnpy_china_monitor/tests/test_integration.py -v
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #6749 | 6:07 AM | 🔵 | vnpy_china_monitor module implemented in req012-web-monitor worktree with monitoring and alerting capabilities | ~389 |
+| #6750 | 6:07 AM | 🔵 | REQ-012 web monitor module (vnpy_china_monitor) implementation discovered in req012-web-monitor worktree | ~422 |
+| #6749 | " | 🔵 | vnpy_china_monitor module implemented in req012-web-monitor worktree with monitoring and alerting capabilities | ~389 |
 </claude-mem-context>
