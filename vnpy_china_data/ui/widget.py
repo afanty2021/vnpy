@@ -104,8 +104,8 @@ class ChinaDataWidget(QtWidgets.QWidget):
         config_layout.addWidget(QtWidgets.QLabel(_("K线周期：")), 3, 0)
         self.interval_combo = QtWidgets.QComboBox()
         self.interval_combo.addItem(_("日线"), Interval.DAILY)
-        self.interval_combo.addItem(_("60分钟线"), Interval.HOUR_60)
-        self.interval_combo.addItem(_("30分钟线"), Interval.HOUR_30)
+        self.interval_combo.addItem(_("小时线"), Interval.HOUR)
+        self.interval_combo.addItem(_("分钟线"), Interval.MINUTE)
         config_layout.addWidget(self.interval_combo, 3, 1, 1, 3)
 
         # 下载按钮

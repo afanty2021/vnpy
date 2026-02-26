@@ -250,6 +250,25 @@ class BaseMonitor(QtWidgets.QTableWidget):
         self.load_setting()
         self.register_event()
 
+    def _get_attr(self, data: Any, attr_name: str, default: Any = None) -> Any:
+        """安全获取对象属性
+
+        如果属性不存在，返回默认值而不是抛出异常。
+        这允许扩展数据对象添加额外字段而不需要修改基类。
+
+        Args:
+            data: 数据对象
+            attr_name: 属性名
+            default: 默认值
+
+        Returns:
+            属性值或默认值
+        """
+        try:
+            return data.__getattribute__(attr_name)
+        except AttributeError:
+            return default
+
     def init_ui(self) -> None:
         """"""
         self.init_table()
@@ -326,7 +345,7 @@ class BaseMonitor(QtWidgets.QTableWidget):
         for column, header in enumerate(self.headers.keys()):
             setting: dict = self.headers[header]
 
-            content = data.__getattribute__(header)
+            content = self._get_attr(data, header, "")
             cell: QtWidgets.QTableWidgetItem = setting["cell"](content, data)
             self.setItem(0, column, cell)
 
@@ -334,18 +353,18 @@ class BaseMonitor(QtWidgets.QTableWidget):
                 row_cells[header] = cell
 
         if self.data_key:
-            key: str = data.__getattribute__(self.data_key)
+            key: str = self._get_attr(data, self.data_key, "")
             self.cells[key] = row_cells
 
     def update_old_row(self, data: Any) -> None:
         """
         Update an old row in table.
         """
-        key: str = data.__getattribute__(self.data_key)
+        key: str = self._get_attr(data, self.data_key, "")
         row_cells = self.cells[key]
 
         for header, cell in row_cells.items():
-            content = data.__getattribute__(header)
+            content = self._get_attr(data, header, "")
             cell.set_content(content, data)
 
     def resize_columns(self) -> None:
@@ -415,17 +434,15 @@ class TickMonitor(BaseMonitor):
 
     headers: dict = {
         "symbol": {"display": _("代码"), "cell": BaseCell, "update": False},
-        "exchange": {"display": _("交易所"), "cell": EnumCell, "update": False},
         "name": {"display": _("名称"), "cell": BaseCell, "update": True},
         "last_price": {"display": _("最新价"), "cell": BaseCell, "update": True},
-        "volume": {"display": _("成交量"), "cell": BaseCell, "update": True},
+        "turnover": {"display": _("成交额"), "cell": BaseCell, "update": True},
+        "volume_ratio": {"display": _("量比"), "cell": BaseCell, "update": True},
+        "change_pct": {"display": _("涨幅"), "cell": PnlCell, "update": True},
+        "avg_price": {"display": _("分时均价"), "cell": BaseCell, "update": True},
         "open_price": {"display": _("开盘价"), "cell": BaseCell, "update": True},
         "high_price": {"display": _("最高价"), "cell": BaseCell, "update": True},
         "low_price": {"display": _("最低价"), "cell": BaseCell, "update": True},
-        "bid_price_1": {"display": _("买1价"), "cell": BidCell, "update": True},
-        "bid_volume_1": {"display": _("买1量"), "cell": BidCell, "update": True},
-        "ask_price_1": {"display": _("卖1价"), "cell": AskCell, "update": True},
-        "ask_volume_1": {"display": _("卖1量"), "cell": AskCell, "update": True},
         "datetime": {"display": _("时间"), "cell": TimeCell, "update": True},
         "gateway_name": {"display": _("接口"), "cell": BaseCell, "update": False},
     }
@@ -525,11 +542,8 @@ class PositionMonitor(BaseMonitor):
     headers: dict = {
         "symbol": {"display": _("代码"), "cell": BaseCell, "update": False},
         "name": {"display": _("名称"), "cell": BaseCell, "update": False},
-        "exchange": {"display": _("交易所"), "cell": EnumCell, "update": False},
-        "direction": {"display": _("方向"), "cell": DirectionCell, "update": False},
         "volume": {"display": _("数量"), "cell": BaseCell, "update": True},
         "yd_volume": {"display": _("昨仓"), "cell": BaseCell, "update": True},
-        "frozen": {"display": _("冻结"), "cell": BaseCell, "update": True},
         "price": {"display": _("均价"), "cell": BaseCell, "update": True},
         "pnl": {"display": _("盈亏"), "cell": PnlCell, "update": True},
         "gateway_name": {"display": _("接口"), "cell": BaseCell, "update": False},

@@ -75,9 +75,66 @@ class ConfigManager:
         """初始化配置管理器"""
         if not self._initialized:
             self._configs: Dict[str, BaseConfig] = {}
-            self._config_path: Path = Path(".vntrader_china/config")
+            self._config_path: Path = self._find_config_path()
             self._environment: Environment = self._detect_environment()
             self._initialized = True
+
+    def _find_config_path(self) -> Path:
+        """查找配置文件路径
+
+        按优先级查找：
+        1. 当前目录下的 .vntrader_china/config
+        2. 向上递归查找项目根目录
+        3. 用户主目录下的 .vntrader_china/config（最后才使用）
+
+        Returns:
+            配置文件路径
+        """
+        from pathlib import Path
+
+        # 尝试当前目录
+        config_path = Path(".vntrader_china/config")
+        if config_path.exists():
+            return config_path
+
+        # 尝试向上查找项目根目录（包含 .vntrader_china 的目录）
+        # 优先使用项目目录下的配置，而不是用户主目录
+        current_path = Path.cwd()
+        original_path = current_path
+        project_config_path = None
+
+        for _ in range(10):  # 最多向上查找10层
+            check_path = current_path / ".vntrader_china/config"
+            if check_path.exists():
+                # 检查是否有配置文件（而不是空目录）
+                if (check_path / "global_development.yaml").exists():
+                    project_config_path = check_path
+                    break
+                # 或者有 global_production.yaml
+                if (check_path / "global_production.yaml").exists():
+                    project_config_path = check_path
+                    break
+                # 或者有 global_testing.yaml
+                if (check_path / "global_testing.yaml").exists():
+                    project_config_path = check_path
+                    break
+
+            parent = current_path.parent
+            if parent == current_path:  # 到达根目录
+                break
+            current_path = parent
+
+        # 如果找到项目配置，优先使用
+        if project_config_path:
+            return project_config_path
+
+        # 使用用户主目录（作为最后的fallback）
+        home_config = Path.home() / ".vntrader_china/config"
+        if home_config.exists():
+            return home_config
+
+        # 默认使用当前目录（稍后会创建）
+        return Path(".vntrader_china/config")
 
     def _detect_environment(self) -> Environment:
         """自动检测运行环境
