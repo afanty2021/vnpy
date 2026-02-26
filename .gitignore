@@ -53,3 +53,8 @@ examples/veighna_trader/run_qmt.py
 # Worktrees
 .worktrees
 worktrees
+
+# Configuration files (keep .example versions only)
+*.yaml
+!*.yaml.example
+!config_templates/
