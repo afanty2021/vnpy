@@ -524,6 +524,7 @@ class PositionMonitor(BaseMonitor):
 
     headers: dict = {
         "symbol": {"display": _("代码"), "cell": BaseCell, "update": False},
+        "name": {"display": _("名称"), "cell": BaseCell, "update": False},
         "exchange": {"display": _("交易所"), "cell": EnumCell, "update": False},
         "direction": {"display": _("方向"), "cell": DirectionCell, "update": False},
         "volume": {"display": _("数量"), "cell": BaseCell, "update": True},
@@ -533,6 +534,60 @@ class PositionMonitor(BaseMonitor):
         "pnl": {"display": _("盈亏"), "cell": PnlCell, "update": True},
         "gateway_name": {"display": _("接口"), "cell": BaseCell, "update": False},
     }
+
+    def insert_new_row(self, data: Any) -> None:
+        """
+        Insert a new row at the top of table.
+        """
+        self.insertRow(0)
+
+        row_cells: dict = {}
+        for column, header in enumerate(self.headers.keys()):
+            setting: dict = self.headers[header]
+
+            # 特殊处理名称列
+            if header == "name":
+                content = self._get_position_name(data)
+            else:
+                content = data.__getattribute__(header)
+
+            cell: QtWidgets.QTableWidgetItem = setting["cell"](content, data)
+            self.setItem(0, column, cell)
+
+            if setting["update"]:
+                row_cells[header] = cell
+
+        if self.data_key:
+            key: str = data.__getattribute__(self.data_key)
+            self.cells[key] = row_cells
+
+    def update_old_row(self, data: Any) -> None:
+        """
+        Update an old row in table.
+        """
+        key: str = data.__getattribute__(self.data_key)
+        row_cells = self.cells[key]
+
+        for header, cell in row_cells.items():
+            # 特殊处理名称列
+            if header == "name":
+                content = self._get_position_name(data)
+            else:
+                content = data.__getattribute__(header)
+            cell.set_content(content, data)
+
+    def _get_position_name(self, data: Any) -> str:
+        """
+        Get position name from contract info.
+        """
+        try:
+            vt_symbol = f"{data.symbol}.{data.exchange.value}"
+            contract = self.main_engine.get_contract(vt_symbol)
+            if contract and contract.name:
+                return contract.name
+        except Exception:
+            pass
+        return ""
 
 
 class AccountMonitor(BaseMonitor):
@@ -546,7 +601,7 @@ class AccountMonitor(BaseMonitor):
 
     headers: dict = {
         "accountid": {"display": _("账号"), "cell": BaseCell, "update": False},
-        "balance": {"display": _("余额"), "cell": BaseCell, "update": True},
+        "balance": {"display": _("总资产"), "cell": BaseCell, "update": True},
         "frozen": {"display": _("冻结"), "cell": BaseCell, "update": True},
         "available": {"display": _("可用"), "cell": BaseCell, "update": True},
         "gateway_name": {"display": _("接口"), "cell": BaseCell, "update": False},
