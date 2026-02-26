@@ -41,6 +41,13 @@ class ChinaAlphaModel:
         Args:
             model_type: 模型类型，默认为LIGHTGBM
         """
+        # 处理 model_type 可能是字符串的情况
+        if isinstance(model_type, str):
+            try:
+                model_type = ModelType(model_type)
+            except ValueError:
+                raise ValueError(f"无效的模型类型: {model_type}")
+
         self.model_type: ModelType = model_type
         self.model: Optional[Any] = None
         self.is_trained: bool = False
