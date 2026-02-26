@@ -333,6 +333,7 @@ class CustomRpcClient(RpcClient):
     def run(self) -> None:
         """运行RPC客户端循环"""
         from vnpy.rpc.common import HEARTBEAT_TOLERANCE
+        from time import time
         import zmq
 
         pull_tolerance: int = HEARTBEAT_TOLERANCE * 1000
@@ -345,8 +346,11 @@ class CustomRpcClient(RpcClient):
             # Receive data from subscribe socket
             topic, data = self._socket_sub.recv_pyobj(flags=zmq.NOBLOCK)
 
+            # 收到任何消息都更新心跳时间戳
+            self._last_received_ping = time()
+
             if topic == "heartbeat":
-                self._last_received_ping = data
+                pass  # 心跳消息
             else:
                 # Process data by callable function
                 if self.callback:
