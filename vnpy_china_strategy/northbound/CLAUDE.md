@@ -7,6 +7,9 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #6562 | 8:40 PM | 🟣 | Implemented complete vnpy_china_strategy A股 trading strategy library with 11 strategies | ~791 |
+| #6559 | 8:34 PM | 🔴 | Fixed syntax error in HoldingChangeStrategy __init__ method | ~195 |
+| #6558 | " | 🔵 | HoldingChangeStrategy tracks consecutive days of foreign investor position changes | ~255 |
 | #6528 | 8:08 PM | 🟣 | Created SectorPreferenceStrategy for northbound capital sector preference trading | ~521 |
 | #6525 | 8:07 PM | 🟣 | Implemented Northbound Capital Holding Change Strategy | ~279 |
 </claude-mem-context>

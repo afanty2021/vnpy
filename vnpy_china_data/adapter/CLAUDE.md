@@ -7,7 +7,11 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #6405 | 6:57 PM | 🟣 | Created vnpy_china_interface module with A股 data provider interfaces | ~555 |
+| #6415 | 7:00 PM | 🔴 | Fixed malformed tick attribute references in QMT adapter order book generation | ~194 |
+| #6408 | 6:59 PM | 🟣 | Implemented TushareDataAdapter with rate limiting and comprehensive API coverage | ~258 |
+| #6409 | " | 🟣 | Subagent implemented complete vnpy_china_data module for REQ-003 | ~258 |
+| #6406 | 6:57 PM | 🟣 | Implemented and committed REQ-003 A-share data service module | ~498 |
+| #6405 | " | 🟣 | Created vnpy_china_interface module with A股 data provider interfaces | ~555 |
 
 ### Feb 25, 2026
 
