@@ -1,12 +1,17 @@
 """A股机器学习UI组件"""
 from typing import Any, Optional
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 from vnpy.trader.ui.qt import QtCore, QtGui, QtWidgets
 from vnpy.trader.locale import _
 
 from ..model.manager import ModelMetadata
 from ..utils.types import ModelType, PredictionResult, SignalType
+
+# 导入新增功能模块
+from ..data import DataPreloader, DataUpdateScheduler, PreloadConfig, UpdateConfig
+from ..backtesting import FactorBacktester, create_factor_backtester
+from ..factors import FactorCombiner, WeightMethod, OrthogonalMethod
 
 
 class ChinaMlWidget(QtWidgets.QWidget):
@@ -69,6 +74,18 @@ class ChinaMlWidget(QtWidgets.QWidget):
         # 预测结果标签页
         prediction_widget = self.create_prediction_tab()
         tab.addTab(prediction_widget, _("预测结果"))
+
+        # 数据管理标签页
+        data_mgmt_widget = self.create_data_management_tab()
+        tab.addTab(data_mgmt_widget, _("数据管理"))
+
+        # 因子回测标签页
+        backtest_widget = self.create_backtest_tab()
+        tab.addTab(backtest_widget, _("因子回测"))
+
+        # 因子组合标签页
+        combination_widget = self.create_combination_tab()
+        tab.addTab(combination_widget, _("因子组合"))
 
         # 状态栏
         self.status_label = QtWidgets.QLabel(_("就绪"))
@@ -635,6 +652,515 @@ class ChinaMlWidget(QtWidgets.QWidget):
         self.predictions = []
         self.prediction_table.setRowCount(0)
         self.show_status(_("预测结果已清空"))
+
+    # ==================== 数据管理功能 ====================
+
+    def create_data_management_tab(self) -> QtWidgets.QWidget:
+        """创建数据管理标签页"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout()
+        widget.setLayout(layout)
+
+        # 标题
+        title = QtWidgets.QLabel(_("数据管理"))
+        title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        layout.addWidget(title)
+
+        # 预加载区
+        preload_group = QtWidgets.QGroupBox(_("数据预加载"))
+        preload_layout = QtWidgets.QGridLayout()
+        preload_group.setLayout(preload_layout)
+        layout.addWidget(preload_group)
+
+        # 预加载配置
+        preload_layout.addWidget(QtWidgets.QLabel(_("起始天数：")), 0, 0)
+        self.preload_start_days = QtWidgets.QSpinBox()
+        self.preload_start_days.setRange(30, 3650)
+        self.preload_start_days.setValue(365 * 3)
+        preload_layout.addWidget(self.preload_start_days, 0, 1)
+
+        preload_layout.addWidget(QtWidgets.QLabel(_("结束日期：")), 0, 2)
+        self.preload_end_date = QtWidgets.QDateEdit()
+        self.preload_end_date.setCalendarPopup(True)
+        self.preload_end_date.setDate(QtCore.QDate.currentDate())
+        preload_layout.addWidget(self.preload_end_date, 0, 3)
+
+        # 数据类型选择
+        self.enable_bar_data = QtWidgets.QCheckBox(_("K线数据"))
+        self.enable_bar_data.setChecked(True)
+        preload_layout.addWidget(self.enable_bar_data, 1, 0)
+
+        self.enable_dragon_tiger = QtWidgets.QCheckBox(_("龙虎榜数据"))
+        self.enable_dragon_tiger.setChecked(True)
+        preload_layout.addWidget(self.enable_dragon_tiger, 1, 1)
+
+        self.enable_northbound = QtWidgets.QCheckBox(_("北向资金数据"))
+        self.enable_northbound.setChecked(True)
+        preload_layout.addWidget(self.enable_northbound, 1, 2)
+
+        self.enable_sector = QtWidgets.QCheckBox(_("板块数据"))
+        self.enable_sector.setChecked(True)
+        preload_layout.addWidget(self.enable_sector, 1, 3)
+
+        # 预加载按钮
+        preload_btn = QtWidgets.QPushButton(_("开始预加载"))
+        preload_btn.clicked.connect(self.start_preload)
+        preload_layout.addWidget(preload_btn, 2, 0, 1, 4)
+
+        # 预加载进度
+        self.preload_progress = QtWidgets.QProgressBar()
+        self.preload_progress.setRange(0, 100)
+        preload_layout.addWidget(self.preload_progress, 3, 0, 1, 4)
+
+        # 预加载状态
+        self.preload_status = QtWidgets.QLabel(_("未开始"))
+        preload_layout.addWidget(self.preload_status, 4, 0, 1, 4)
+
+        # 调度器区
+        scheduler_group = QtWidgets.QGroupBox(_("定时更新调度"))
+        scheduler_layout = QtWidgets.QGridLayout()
+        scheduler_group.setLayout(scheduler_layout)
+        layout.addWidget(scheduler_group)
+
+        # 调度器配置
+        scheduler_layout.addWidget(QtWidgets.QLabel(_("更新时间：")), 0, 0)
+        self.update_time = QtWidgets.QTimeEdit()
+        self.update_time.setTime(QtCore.QTime(15, 30))
+        scheduler_layout.addWidget(self.update_time, 0, 1)
+
+        scheduler_layout.addWidget(QtWidgets.QLabel(_("回看天数：")), 0, 2)
+        self.lookback_days = QtWidgets.QSpinBox()
+        self.lookback_days.setRange(1, 30)
+        self.lookback_days.setValue(5)
+        scheduler_layout.addWidget(self.lookback_days, 0, 3)
+
+        # 调度器状态
+        self.scheduler_status = QtWidgets.QLabel(_("调度器未启动"))
+        scheduler_layout.addWidget(self.scheduler_status, 1, 0, 1, 4)
+
+        self.start_scheduler_btn = QtWidgets.QPushButton(_("启动调度器"))
+        self.start_scheduler_btn.clicked.connect(self.toggle_scheduler)
+        scheduler_layout.addWidget(self.start_scheduler_btn, 2, 0)
+
+        self.trigger_update_btn = QtWidgets.QPushButton(_("立即更新"))
+        self.trigger_update_btn.clicked.connect(self.trigger_data_update)
+        self.trigger_update_btn.setEnabled(False)
+        scheduler_layout.addWidget(self.trigger_update_btn, 2, 1)
+
+        return widget
+
+    def start_preload(self) -> None:
+        """开始预加载数据"""
+        if not self.gui_engine:
+            self.show_status(_("GUI引擎未初始化"))
+            return
+
+        start_days = self.preload_start_days.value()
+        end_date = self.preload_end_date.date().toPython()
+        start_date = end_date - timedelta(days=start_days)
+
+        self.show_status(_("开始预加载数据..."))
+        self.preload_progress.setValue(0)
+        self.preload_status.setText(_("预加载中..."))
+
+        def progress_callback(completed: int, total: int, task: str):
+            self.preload_progress.setValue(int(completed * 100 / total) if total > 0 else 0)
+            self.preload_status.setText(f"{task} ({completed}/{total})")
+
+        # 异步执行预加载
+        QtCore.QTimer.singleShot(100, lambda: self._do_preload(start_date, end_date, progress_callback))
+
+    def _do_preload(self, start_date: date, end_date: date, callback) -> None:
+        """执行预加载"""
+        try:
+            stats = self.gui_engine.preload_data(
+                start_date=start_date,
+                end_date=end_date,
+                enable_bar_data=self.enable_bar_data.isChecked(),
+                enable_dragon_tiger=self.enable_dragon_tiger.isChecked(),
+                enable_northbound=self.enable_northbound.isChecked(),
+                enable_sector=self.enable_sector.isChecked(),
+                progress_callback=callback
+            )
+
+            total = sum(stats.values())
+            self.preload_progress.setValue(100)
+            self.preload_status.setText(_("预加载完成"))
+            self.show_status(_(f"数据预加载完成，共{total}条记录"))
+        except Exception as e:
+            self.preload_status.setText(_("预加载失败"))
+            self.show_status(_(f"预加载失败: {e}"))
+
+    def toggle_scheduler(self) -> None:
+        """切换调度器状态"""
+        if not self.gui_engine:
+            return
+
+        status = self.gui_engine.get_data_scheduler_status()
+        is_running = status.get("is_running", False)
+
+        if is_running:
+            # 停止调度器
+            self.gui_engine.data_scheduler.stop()
+            self.scheduler_status.setText(_("调度器未启动"))
+            self.start_scheduler_btn.setText(_("启动调度器"))
+            self.trigger_update_btn.setEnabled(False)
+            self.show_status(_("调度器已停止"))
+        else:
+            # 启动调度器
+            update_time = self.update_time.time().toString("HH:mm")
+            self.gui_engine.update_scheduler_config(update_time=update_time)
+
+            if self.gui_engine.data_scheduler.start():
+                self.scheduler_status.setText(_("调度器运行中"))
+                self.start_scheduler_btn.setText(_("停止调度器"))
+                self.trigger_update_btn.setEnabled(True)
+                self.show_status(_("调度器已启动"))
+            else:
+                self.show_status(_("调度器启动失败"))
+
+    def trigger_data_update(self) -> None:
+        """立即触发数据更新"""
+        if not self.gui_engine:
+            return
+
+        self.show_status(_("正在触发数据更新..."))
+        result = self.gui_engine.trigger_data_update()
+
+        if result:
+            self.show_status(_("数据更新已触发"))
+        else:
+            self.show_status(_("数据更新触发失败"))
+
+    # ==================== 因子回测功能 ====================
+
+    def create_backtest_tab(self) -> QtWidgets.QWidget:
+        """创建因子回测标签页"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout()
+        widget.setLayout(layout)
+
+        # 标题
+        title = QtWidgets.QLabel(_("因子有效性回测"))
+        title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        layout.addWidget(title)
+
+        # 回测配置区
+        config_group = QtWidgets.QGroupBox(_("回测配置"))
+        config_layout = QtWidgets.QGridLayout()
+        config_group.setLayout(config_layout)
+        layout.addWidget(config_group)
+
+        # 日期范围
+        config_layout.addWidget(QtWidgets.QLabel(_("回测开始：")), 0, 0)
+        self.backtest_start_date = QtWidgets.QDateEdit()
+        self.backtest_start_date.setCalendarPopup(True)
+        self.backtest_start_date.setDate(QtCore.QDate.currentDate().addMonths(-3))
+        config_layout.addWidget(self.backtest_start_date, 0, 1)
+
+        config_layout.addWidget(QtWidgets.QLabel(_("回测结束：")), 0, 2)
+        self.backtest_end_date = QtWidgets.QDateEdit()
+        self.backtest_end_date.setCalendarPopup(True)
+        self.backtest_end_date.setDate(QtCore.QDate.currentDate())
+        config_layout.addWidget(self.backtest_end_date, 0, 3)
+
+        config_layout.addWidget(QtWidgets.QLabel(_("预测天数：")), 1, 0)
+        self.forward_days = QtWidgets.QSpinBox()
+        self.forward_days.setRange(1, 20)
+        self.forward_days.setValue(5)
+        config_layout.addWidget(self.forward_days, 1, 1)
+
+        config_layout.addWidget(QtWidgets.QLabel(_("分层数量：")), 1, 2)
+        self.n_layers = QtWidgets.QSpinBox()
+        self.n_layers.setRange(3, 10)
+        self.n_layers.setValue(5)
+        config_layout.addWidget(self.n_layers, 1, 3)
+
+        # 开始回测按钮
+        backtest_btn = QtWidgets.QPushButton(_("开始回测"))
+        backtest_btn.clicked.connect(self.start_backtest)
+        config_layout.addWidget(backtest_btn, 2, 0, 1, 4)
+
+        # 回测结果区
+        result_group = QtWidgets.QGroupBox(_("回测结果"))
+        result_layout = QtWidgets.QVBoxLayout()
+        result_group.setLayout(result_layout)
+        layout.addWidget(result_group)
+
+        # IC统计表格
+        self.ic_table = QtWidgets.QTableWidget()
+        self.ic_table.setColumnCount(4)
+        self.ic_table.setHorizontalHeaderLabels([
+            _("IC均值"), _("IC标准差"), _("IC_IR"), _("胜率")
+        ])
+        self.ic_table.setRowCount(1)
+        result_layout.addWidget(self.ic_table)
+
+        # 分层结果表格
+        layer_label = QtWidgets.QLabel(_("分层收益分析"))
+        layer_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        result_layout.addWidget(layer_label)
+
+        self.layer_table = QtWidgets.QTableWidget()
+        self.layer_table.setColumnCount(4)
+        self.layer_table.setHorizontalHeaderLabels([
+            _("分层"), _("年化收益"), _("夏普比率"), _("最大回撤")
+        ])
+        self.layer_table.setRowCount(5)
+        result_layout.addWidget(self.layer_table)
+
+        # 回测进度
+        self.backtest_progress = QtWidgets.QProgressBar()
+        result_layout.addWidget(self.backtest_progress)
+
+        return widget
+
+    def start_backtest(self) -> None:
+        """开始因子回测"""
+        if not self.gui_engine:
+            self.show_status(_("GUI引擎未初始化"))
+            return
+
+        start_date = self.backtest_start_date.date().toPython()
+        end_date = self.backtest_end_date.date().toPython()
+        forward_days = self.forward_days.value()
+        n_layers = self.n_layers.value()
+
+        self.show_status(_("正在执行因子回测..."))
+        self.backtest_progress.setValue(10)
+
+        # 异步执行回测
+        QtCore.QTimer.singleShot(100, lambda: self._do_backtest(start_date, end_date, forward_days, n_layers))
+
+    def _do_backtest(self, start_date: date, end_date: date, forward_days: int, n_layers: int) -> None:
+        """执行回测"""
+        try:
+            from ..dataset import create_alpha_dataset
+
+            self.backtest_progress.setValue(30)
+
+            # 准备数据
+            symbols = ["000001.SZ", "000002.SZ", "600000.SH", "600036.SH", "600519.SH"]
+            dataset = create_alpha_dataset(symbols, start_date, end_date)
+            factor_df, price_df = dataset.get_backtest_data()
+
+            self.backtest_progress.setValue(50)
+
+            # 创建回测器
+            backtester = create_factor_backtester()
+            report = backtester.backtest_factor(
+                factor_data=factor_df,
+                price_data=price_df,
+                start_date=start_date,
+                end_date=end_date,
+                forward_days=forward_days,
+                n_layers=n_layers
+            )
+
+            self.backtest_progress.setValue(80)
+
+            # 更新结果表格
+            self._update_backtest_results(report)
+
+            self.backtest_progress.setValue(100)
+            self.show_status(_(f"回测完成，IC: {report.ic_stats.ic_mean:.4f}, IR: {report.ic_stats.ic_ir:.4f}"))
+        except Exception as e:
+            self.backtest_progress.setValue(0)
+            self.show_status(_(f"回测失败: {e}"))
+
+    def _update_backtest_results(self, report) -> None:
+        """更新回测结果表格"""
+        # 更新IC统计
+        ic_stats = report.ic_stats
+        self.ic_table.setItem(0, 0, QtWidgets.QTableWidgetItem(f"{ic_stats.ic_mean:.4f}"))
+        self.ic_table.setItem(0, 1, QtWidgets.QTableWidgetItem(f"{ic_stats.ic_std:.4f}"))
+        self.ic_table.setItem(0, 2, QtWidgets.QTableWidgetItem(f"{ic_stats.ic_ir:.4f}"))
+        self.ic_table.setItem(0, 3, QtWidgets.QTableWidgetItem(f"{ic_stats.win_rate:.2%}"))
+        self.ic_table.resizeColumnsToContents()
+
+        # 更新分层结果
+        for i, layer_result in enumerate(report.layer_results):
+            self.layer_table.setItem(i, 0, QtWidgets.QTableWidgetItem(f"第{i+1}层"))
+            self.layer_table.setItem(i, 1, QtWidgets.QTableWidgetItem(f"{layer_result.annual_return:.2%}"))
+            self.layer_table.setItem(i, 2, QtWidgets.QTableWidgetItem(f"{layer_result.sharpe_ratio:.2f}"))
+            self.layer_table.setItem(i, 3, QtWidgets.QTableWidgetItem(f"{layer_result.max_drawdown:.2%}"))
+        self.layer_table.resizeColumnsToContents()
+
+    # ==================== 因子组合功能 ====================
+
+    def create_combination_tab(self) -> QtWidgets.QWidget:
+        """创建因子组合标签页"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout()
+        widget.setLayout(layout)
+
+        # 标题
+        title = QtWidgets.QLabel(_("自定义因子组合"))
+        title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        layout.addWidget(title)
+
+        # 因子选择区
+        factor_group = QtWidgets.QGroupBox(_("选择因子"))
+        factor_layout = QtWidgets.QVBoxLayout()
+        factor_group.setLayout(factor_layout)
+        layout.addWidget(factor_group)
+
+        # 因子列表
+        factor_list = [
+            "Return_5d", "Return_10d", "Return_20d",
+            "Volume_Ratio", "Volume_Change_5d",
+            "MACD", "RSI_14", "Bollinger_Width",
+            "ATR_14_Simple", "ROC_10"
+        ]
+        self.factor_checkboxes = {}
+        for factor in factor_list:
+            checkbox = QtWidgets.QCheckBox(factor)
+            checkbox.setChecked(True)
+            self.factor_checkboxes[factor] = checkbox
+            factor_layout.addWidget(checkbox)
+
+        # 权重方法选择
+        weight_group = QtWidgets.QGroupBox(_("权重方法"))
+        weight_layout = QtWidgets.QGridLayout()
+        weight_group.setLayout(weight_layout)
+        layout.addWidget(weight_group)
+
+        weight_layout.addWidget(QtWidgets.QLabel(_("权重方法：")), 0, 0)
+        self.weight_method_combo = QtWidgets.QComboBox()
+        self.weight_method_combo.addItem(_("等权重"), "equal")
+        self.weight_method_combo.addItem(_("IC加权"), "ic_weighted")
+        self.weight_method_combo.addItem(_("IR加权"), "ir_weighted")
+        self.weight_method_combo.addItem(_("自定义"), "custom")
+        weight_layout.addWidget(self.weight_method_combo, 0, 1)
+
+        # 自定义权重输入
+        self.custom_weights_input = QtWidgets.QLineEdit()
+        self.custom_weights_input.setPlaceholderText("Return_5d:0.5, Volume_Ratio:0.3")
+        self.custom_weights_input.setEnabled(False)
+        weight_layout.addWidget(QtWidgets.QLabel(_("自定义权重：")), 1, 0)
+        weight_layout.addWidget(self.custom_weights_input, 1, 1, 1, 3)
+
+        # 监听权重方法变化
+        self.weight_method_combo.currentTextChanged.connect(self._on_weight_method_changed)
+
+        # 正交化方法选择
+        ortho_group = QtWidgets.QGroupBox(_("正交化"))
+        ortho_layout = QtWidgets.QHBoxLayout()
+        ortho_group.setLayout(ortho_layout)
+        layout.addWidget(ortho_group)
+
+        ortho_layout.addWidget(QtWidgets.QLabel(_("正交化方法：")))
+        self.ortho_method_combo = QtWidgets.QComboBox()
+        self.ortho_method_combo.addItem(_("无"), "none")
+        self.ortho_method_combo.addItem(_("Gram-Schmidt"), "gram_schmidt")
+        self.ortho_method_combo.addItem(_("PCA"), "pca")
+        ortho_layout.addWidget(self.ortho_method_combo)
+        ortho_layout.addStretch()
+
+        # 操作按钮
+        btn_layout = QtWidgets.QHBoxLayout()
+        layout.addLayout(btn_layout)
+
+        combine_btn = QtWidgets.QPushButton(_("组合因子"))
+        combine_btn.clicked.connect(self.combine_factors)
+        btn_layout.addWidget(combine_btn)
+
+        export_btn = QtWidgets.QPushButton(_("导出组合"))
+        export_btn.clicked.connect(self.export_combination)
+        btn_layout.addWidget(export_btn)
+
+        btn_layout.addStretch()
+
+        # 组合结果区
+        result_group = QtWidgets.QGroupBox(_("组合结果"))
+        result_layout = QtWidgets.QVBoxLayout()
+        result_group.setLayout(result_layout)
+        layout.addWidget(result_group)
+
+        self.combination_result = QtWidgets.QTextEdit()
+        self.combination_result.setReadOnly(True)
+        self.combination_result.setMaximumHeight(150)
+        result_layout.addWidget(self.combination_result)
+
+        return widget
+
+    def _on_weight_method_changed(self, method: str) -> None:
+        """权重方法变化时"""
+        self.custom_weights_input.setEnabled(method == "custom")
+
+    def combine_factors(self) -> None:
+        """组合因子"""
+        if not self.gui_engine:
+            self.show_status(_("GUI引擎未初始化"))
+            return
+
+        # 获取选中的因子
+        selected_factors = [
+            name for name, checkbox in self.factor_checkboxes.items()
+            if checkbox.isChecked()
+        ]
+
+        if not selected_factors:
+            self.show_status(_("请至少选择一个因子"))
+            return
+
+        weight_method_str = self.weight_method_combo.currentData()
+        ortho_method_str = self.ortho_method_combo.currentData()
+
+        # 自定义权重解析
+        custom_weights = None
+        if weight_method_str == "custom":
+            try:
+                custom_weights = {}
+                for pair in self.custom_weights_input.text().split(","):
+                    name, weight = pair.strip().split(":")
+                    custom_weights[name.strip()] = float(weight.strip())
+            except Exception:
+                self.show_status(_("自定义权重格式错误，应如：Factor:0.5, Factor2:0.3"))
+                return
+
+        # 创建组合器并显示结果
+        try:
+            from ..factors import create_factor_combiner
+
+            combiner = create_factor_combiner(
+                factors=selected_factors,
+                weight_method=weight_method_str,
+                orthogonal_method=ortho_method_str,
+                custom_weights=custom_weights
+            )
+
+            # 获取权重信息
+            weights = combiner.get_weights()
+
+            # 显示结果
+            result_text = f"# 因子组合结果\n\n"
+            result_text += f"选中因子: {', '.join(selected_factors)}\n"
+            result_text += f"权重方法: {self.weight_method_combo.currentText()}\n"
+            result_text += f"正交化方法: {self.ortho_method_combo.currentText()}\n\n"
+            result_text += "## 因子权重:\n"
+
+            for w in weights:
+                result_text += f"- {w.factor_name}: {w.weight:.4f}"
+                if w.ic != 0:
+                    result_text += f" (IC: {w.ic:.4f})"
+                result_text += "\n"
+
+            self.combination_result.setText(result_text)
+            self.show_status(_("因子组合完成"))
+        except Exception as e:
+            self.combination_result.setText(f"组合失败: {e}")
+            self.show_status(_(f"因子组合失败: {e}"))
+
+    def export_combination(self) -> None:
+        """导出组合配置"""
+        result = self.combination_result.toPlainText()
+        if not result or "组合失败" in result:
+            self.show_status(_("无可导出的组合配置"))
+            return
+
+        # TODO: 实现文件导出
+        self.show_status(_("组合配置导出功能待实现"))
 
     def show_status(self, msg: str) -> None:
         """显示状态信息"""
