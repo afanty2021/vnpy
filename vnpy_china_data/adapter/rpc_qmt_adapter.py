@@ -133,27 +133,30 @@ class RpcQmtDataAdapter(BaseDataAdapter):
         start: datetime,
         end: datetime
     ) -> List[BarData]:
-        """获取K线数据（通过RPC）
+        """获取K线数据
 
-        Note: RPC QMT主要用于实时数据，历史数据建议使用Tushare
+        注意：RPC QMT 适配器不支持历史K线数据查询！
+
+        RPC QMT 主要用于：
+        - 实时行情订阅
+        - Tick 数据获取
+
+        历史K线数据请使用：
+        1. Tushare 适配器（vnpy_china_data.tushare_adapter）
+        2. QMT 直连适配器（vnpy_china_data.qmt_adapter，仅 Windows）
+
+        此方法返回空列表，请求会自动 fallback 到 Tushare 适配器。
         """
-        if not self._connected or not self._rpc_client:
-            return []
+        import logging
+        logger = logging.getLogger("vnpy_china_data")
 
-        try:
-            # 调用远程RPC方法
-            result = self._rpc_client.get_bar_data(
-                symbol=symbol,
-                exchange=exchange.value,
-                interval=interval.value,
-                start=start,
-                end=end,
-                timeout=10000
-            )
-            return result if result else []
-        except Exception as e:
-            print(f"RPC获取K线数据失败: {e}")
-            return []
+        logger.warning(
+            "RPC QMT 不支持历史K线数据查询。"
+            "系统已自动切换到 Tushare 数据源。"
+        )
+
+        # 返回空列表，让调用方 fallback 到 Tushare
+        return []
 
     def get_tick_data(
         self,

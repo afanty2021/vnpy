@@ -555,16 +555,58 @@ class ChinaDataService(
             self.cache.set(cache_key, serialized, ttl=86400)
         return data
 
+    # ========== 股票列表 ==========
+
+    def get_stock_list(self, list_status: str = "L") -> List[Dict[str, Any]]:
+        """获取股票列表
+
+        Args:
+            list_status: 上市状态 (L上市 D退市 P暂停上市)
+
+        Returns:
+            股票列表，每个股票包含 ts_code, symbol, name 等信息
+        """
+        # 尝试从缓存获取
+        cache_key = f"stock_list_{list_status}"
+        cached = self.cache.get(cache_key)
+        if cached:
+            return cached
+
+        # 从Tushare获取
+        data = self.tushare_adapter.get_stock_list(list_status=list_status)
+
+        if data:
+            # 缓存1天
+            self.cache.set(cache_key, data, ttl=86400)
+
+        return data
+
     # ========== 工具方法 ==========
 
     def _convert_to_ts_code(self, symbol: str, exchange: Exchange) -> str:
-        """转换symbol为tushare格式"""
+        """转换symbol为tushare格式
+
+        Args:
+            symbol: 股票代码，可能包含或不包含交易所后缀（如 "000001" 或 "000001.SZ"）
+            exchange: 交易所枚举
+
+        Returns:
+            tushare格式的股票代码（如 "000001.SZ"）
+
+        Note:
+            如果symbol已包含交易所后缀，会先去除后再添加正确的后缀
+        """
         suffix_map = {
             Exchange.SSE: "SH",
             Exchange.SZSE: "SZ",
             Exchange.BSE: "BJ"
         }
         suffix = suffix_map.get(exchange, "SZ")
+
+        # 如果symbol已包含交易所后缀，先去除
+        if '.' in symbol:
+            symbol = symbol.split('.')[0]
+
         return f"{symbol}.{suffix}"
 
     def _convert_from_ts_code(self, ts_code: str) -> tuple:
