@@ -113,14 +113,17 @@ class ChinaDataService(
 
     def connect(self) -> bool:
         """连接数据源"""
+        import logging
+        logger = logging.getLogger("vnpy_china_data")
+
         try:
             # 连接MySQL
             if not self.database.connect():
-                print("警告: MySQL连接失败")
+                logger.warning("MySQL连接失败")
 
             # 连接Redis
             if not self.cache.connect():
-                print("警告: Redis连接失败")
+                logger.warning("Redis连接失败")
 
             # 连接Tushare
             self.tushare_adapter.connect()

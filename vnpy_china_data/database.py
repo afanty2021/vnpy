@@ -77,12 +77,20 @@ class MySQLDatabaseLayer:
         Returns:
             是否连接成功
         """
+        import logging
+        logger = logging.getLogger("vnpy_china_data")
         try:
             self._connection = pymysql.connect(**self.config)
             self._connected = True
+            logger.info(f"MySQL数据库连接成功: {self.config['host']}:{self.config['port']}/{self.config['database']}")
             return True
-        except (OperationalError, DatabaseError):
+        except (OperationalError, DatabaseError) as e:
             self._connected = False
+            logger.warning(f"MySQL连接失败: {e}")
+            return False
+        except Exception as e:
+            self._connected = False
+            logger.warning(f"MySQL连接异常: {e}")
             return False
 
     def close(self) -> None:
