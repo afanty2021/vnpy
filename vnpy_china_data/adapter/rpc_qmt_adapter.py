@@ -504,6 +504,68 @@ class RpcQmtDataAdapter(BaseDataAdapter):
             print(f"RPC获取板块指数失败: {e}")
             return []
 
+    # ========== 港股通数据 ==========
+
+    def get_hk_sh_symbols(self, date: str = None) -> List[str]:
+        """获取沪港通标的列表
+
+        通过RPC调用QMT服务获取沪港通可交易的港股列表。
+
+        Args:
+            date: 交易日期（格式：YYYYMMDD），None 表示获取最新列表
+
+        Returns:
+            VeighNa 格式的股票代码列表（如 ["0700.SHHK", "2318.SHHK"]）
+
+        Examples:
+            >>> adapter = RpcQmtDataAdapter()
+            >>> adapter.connect()
+            >>> symbols = adapter.get_hk_sh_symbols()
+            >>> print(symbols[:5])  # ['0700.SHHK', '09988.SHHK', ...]
+        """
+        if not self._connected or not self._rpc_client:
+            print("RPC QMT 未连接，无法获取沪港通标的列表")
+            return []
+
+        try:
+            result = self._rpc_client.call("get_hk_sh_symbols", date)
+            if result:
+                return result
+            return []
+        except Exception as e:
+            print(f"RPC获取沪港通标的列表失败: {e}")
+            return []
+
+    def get_hk_sz_symbols(self, date: str = None) -> List[str]:
+        """获取深港通标的列表
+
+        通过RPC调用QMT服务获取深港通可交易的港股列表。
+
+        Args:
+            date: 交易日期（格式：YYYYMMDD），None 表示获取最新列表
+
+        Returns:
+            VeighNa 格式的股票代码列表（如 ["0700.SZHK", "2318.SZHK"]）
+
+        Examples:
+            >>> adapter = RpcQmtDataAdapter()
+            >>> adapter.connect()
+            >>> symbols = adapter.get_hk_sz_symbols()
+            >>> print(symbols[:5])  # ['0700.SZHK', '09988.SZHK', ...]
+        """
+        if not self._connected or not self._rpc_client:
+            print("RPC QMT 未连接，无法获取深港通标的列表")
+            return []
+
+        try:
+            result = self._rpc_client.call("get_hk_sz_symbols", date)
+            if result:
+                return result
+            return []
+        except Exception as e:
+            print(f"RPC获取深港通标的列表失败: {e}")
+            return []
+
 
 class CustomRpcClient(RpcClient):
     """自定义RPC客户端

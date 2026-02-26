@@ -171,24 +171,59 @@ class QMTDataAdapter(BaseDataAdapter):
     # ========== 实时行情订阅 ==========
 
     def subscribe(self, symbols: List[str]) -> bool:
-        """订阅实时行情"""
+        """订阅实时行情
+
+        支持沪港通和深港通实时行情订阅。
+
+        Args:
+            symbols: 股票代码列表（VeighNa格式，如 ["0700.SHHK", "2318.SZHK"]）
+
+        Returns:
+            订阅是否成功
+
+        Examples:
+            >>> adapter.subscribe(["0700.SHHK", "2318.SZHK"])  # 订阅港股通
+            >>> adapter.subscribe(["000001.SZSE"])  # 订阅A股（暂不支持）
+        """
         if not self._connected:
             return False
 
         try:
+            # 分离港股通和A股代码
+            hk_sh_symbols = []
+            hk_sz_symbols = []
+
             for symbol in symbols:
                 if symbol not in self._subscribed_symbols:
-                    # 实际订阅逻辑
-                    # self._qmt_api.subscribe_stock(symbol)
-                    self._subscribed_symbols.add(symbol)
+                    # 解析交易所
+                    parts = symbol.rsplit(".", 1)
+                    if len(parts) == 2:
+                        code, exchange = parts
+                        if exchange == "SHHK":
+                            hk_sh_symbols.append(code)
+                        elif exchange == "SZHK":
+                            hk_sz_symbols.append(code)
+                        else:
+                            print(f"不支持的交易所: {exchange} (代码: {symbol})")
+                            continue
 
-                    # 创建实时K线生成器
-                    for interval in [Interval.MINUTE_1, Interval.MINUTE_5]:
-                        key = f"{symbol}.{interval.value}"
-                        if key not in self._bar_generators:
-                            self._bar_generators[key] = RealtimeBarGenerator(
-                                symbol, interval, self._on_bar_generated
-                            )
+                        # 添加到订阅集合
+                        self._subscribed_symbols.add(symbol)
+
+                        # 创建实时K线生成器
+                        for interval in [Interval.MINUTE, Interval.MINUTE]:
+                            key = f"{symbol}.{interval.value}"
+                            if key not in self._bar_generators:
+                                self._bar_generators[key] = RealtimeBarGenerator(
+                                    symbol, interval, self._on_bar_generated
+                                )
+
+            # 调用港股通订阅方法
+            if hk_sh_symbols:
+                self.subscribe_hk_sh_quotes(hk_sh_symbols)
+
+            if hk_sz_symbols:
+                self.subscribe_hk_sz_quotes(hk_sz_symbols)
 
             return True
 
@@ -209,6 +244,196 @@ class QMTDataAdapter(BaseDataAdapter):
 
         except Exception as e:
             print(f"QMT取消订阅失败: {e}")
+            return False
+
+    def subscribe_hk_sh_quotes(self, symbols: List[str]) -> bool:
+        """订阅沪港通实时行情
+
+        使用 QMT xtdata.subscribe_quote() API 订阅沪港通 Tick 行情。
+
+        Args:
+            symbols: 股票代码列表（不含交易所后缀，如 ["0700", "2318"]）
+
+        Returns:
+            订阅是否成功
+
+        Examples:
+            >>> adapter.subscribe_hk_sh_quotes(["0700", "2318", "09988"])
+        """
+        if not self._connected:
+            print("QMT 未连接，无法订阅沪港通行情")
+            return False
+
+        if not symbols:
+            return True
+
+        try:
+            from xtquant import xtdata
+
+            # 转换为 QMT 格式（添加市场后缀）
+            qmt_symbols = []
+            for symbol in symbols:
+                qmt_symbol = f"{symbol}.HK_SHTC"
+                qmt_symbols.append(qmt_symbol)
+
+            # 调用 QMT 订阅 API
+            result = xtdata.subscribe_quote(
+                stock_list=qmt_symbols,
+                period="tick"  # 订阅 tick 级别数据
+            )
+
+            if result != 0:
+                print(f"QMT 沪港通订阅失败，错误码: {result}")
+                return False
+
+            print(f"成功订阅 {len(symbols)} 只沪港通股票的实时行情")
+            return True
+
+        except ImportError:
+            print("警告: xtdata 模块未安装，无法订阅沪港通行情")
+            return False
+        except Exception as e:
+            print(f"QMT 沪港通订阅失败: {e}")
+            return False
+
+    def subscribe_hk_sz_quotes(self, symbols: List[str]) -> bool:
+        """订阅深港通实时行情
+
+        使用 QMT xtdata.subscribe_quote() API 订阅深港通 Tick 行情。
+
+        Args:
+            symbols: 股票代码列表（不含交易所后缀，如 ["0700", "2318"]）
+
+        Returns:
+            订阅是否成功
+
+        Examples:
+            >>> adapter.subscribe_hk_sz_quotes(["0700", "2318", "09988"])
+        """
+        if not self._connected:
+            print("QMT 未连接，无法订阅深港通行情")
+            return False
+
+        if not symbols:
+            return True
+
+        try:
+            from xtquant import xtdata
+
+            # 转换为 QMT 格式（添加市场后缀）
+            qmt_symbols = []
+            for symbol in symbols:
+                qmt_symbol = f"{symbol}.HK_SZTC"
+                qmt_symbols.append(qmt_symbol)
+
+            # 调用 QMT 订阅 API
+            result = xtdata.subscribe_quote(
+                stock_list=qmt_symbols,
+                period="tick"  # 订阅 tick 级别数据
+            )
+
+            if result != 0:
+                print(f"QMT 深港通订阅失败，错误码: {result}")
+                return False
+
+            print(f"成功订阅 {len(symbols)} 只深港通股票的实时行情")
+            return True
+
+        except ImportError:
+            print("警告: xtdata 模块未安装，无法订阅深港通行情")
+            return False
+        except Exception as e:
+            print(f"QMT 深港通订阅失败: {e}")
+            return False
+
+    def unsubscribe_hk_sh_quotes(self, symbols: List[str]) -> bool:
+        """取消沪港通实时行情订阅
+
+        Args:
+            symbols: 股票代码列表（不含交易所后缀，如 ["0700", "2318"]）
+
+        Returns:
+            取消订阅是否成功
+
+        Examples:
+            >>> adapter.unsubscribe_hk_sh_quotes(["0700", "2318"])
+        """
+        if not self._connected:
+            print("QMT 未连接，无法取消沪港通订阅")
+            return False
+
+        if not symbols:
+            return True
+
+        try:
+            from xtquant import xtdata
+
+            # 转换为 QMT 格式
+            qmt_symbols = []
+            for symbol in symbols:
+                qmt_symbol = f"{symbol}.HK_SHTC"
+                qmt_symbols.append(qmt_symbol)
+
+            # 调用 QMT 取消订阅 API
+            result = xtdata.unsubscribe_quote(qmt_symbols)
+
+            if result != 0:
+                print(f"QMT 沪港通取消订阅失败，错误码: {result}")
+                return False
+
+            print(f"成功取消 {len(symbols)} 只沪港通股票的订阅")
+            return True
+
+        except ImportError:
+            print("警告: xtdata 模块未安装，无法取消沪港通订阅")
+            return False
+        except Exception as e:
+            print(f"QMT 沪港通取消订阅失败: {e}")
+            return False
+
+    def unsubscribe_hk_sz_quotes(self, symbols: List[str]) -> bool:
+        """取消深港通实时行情订阅
+
+        Args:
+            symbols: 股票代码列表（不含交易所后缀，如 ["0700", "2318"]）
+
+        Returns:
+            取消订阅是否成功
+
+        Examples:
+            >>> adapter.unsubscribe_hk_sz_quotes(["0700", "2318"])
+        """
+        if not self._connected:
+            print("QMT 未连接，无法取消深港通订阅")
+            return False
+
+        if not symbols:
+            return True
+
+        try:
+            from xtquant import xtdata
+
+            # 转换为 QMT 格式
+            qmt_symbols = []
+            for symbol in symbols:
+                qmt_symbol = f"{symbol}.HK_SZTC"
+                qmt_symbols.append(qmt_symbol)
+
+            # 调用 QMT 取消订阅 API
+            result = xtdata.unsubscribe_quote(qmt_symbols)
+
+            if result != 0:
+                print(f"QMT 深港通取消订阅失败，错误码: {result}")
+                return False
+
+            print(f"成功取消 {len(symbols)} 只深港通股票的订阅")
+            return True
+
+        except ImportError:
+            print("警告: xtdata 模块未安装，无法取消深港通订阅")
+            return False
+        except Exception as e:
+            print(f"QMT 深港通取消订阅失败: {e}")
             return False
 
     def register_callback(
@@ -248,6 +473,266 @@ class QMTDataAdapter(BaseDataAdapter):
         """K线生成回调"""
         if self.event_engine:
             self.event_engine.put(bar)
+
+    def _exchange_to_market(self, exchange: Exchange) -> Optional[str]:
+        """将交易所转换为市场标识符
+
+        Args:
+            exchange: 交易所枚举
+
+        Returns:
+            市场标识符字符串
+        """
+        # 香港交易所映射
+        if exchange == Exchange.SHHK:
+            return "HK_SHTC"  # 沪港通
+        elif exchange == Exchange.SZHK:
+            return "HK_SZTC"  # 深港通
+        elif exchange == Exchange.SEHK:
+            return "HK"  # 香港本地
+
+        # 其他交易所暂不支持
+        return None
+
+    def _qmt_symbol_to_vnpy(self, qmt_symbol: str) -> Optional[str]:
+        """将 QMT 格式的股票代码转换为 VeighNa 格式
+
+        Args:
+            qmt_symbol: QMT 格式代码（如 "0700.HK_SHTC"）
+
+        Returns:
+            VeighNa 格式代码（如 "0700.SHHK"），转换失败返回 None
+
+        Examples:
+            >>> adapter._qmt_symbol_to_vnpy("0700.HK_SHTC")
+            "0700.SHHK"
+            >>> adapter._qmt_symbol_to_vnpy("2318.HK_SZTC")
+            "2318.SZHK"
+        """
+        try:
+            # QMT 格式: "0700.HK_SHTC" 或 "2318.HK_SZTC"
+            # 处理多个点号的情况（只取第一个点号后的市场部分）
+            if "." not in qmt_symbol:
+                return None
+
+            # 只按第一个点号分割
+            parts = qmt_symbol.split(".", 1)
+            if len(parts) != 2:
+                return None
+
+            code, market = parts[0], parts[1]
+
+            # 再次按点号分割市场部分（处理类似 "HK_SHTC.EXTRA" 的情况）
+            market = market.split(".")[0]
+
+            # 映射 QMT 市场到 VeighNa 交易所
+            market_to_exchange = {
+                "HK_SHTC": "SHHK",  # 沪港通
+                "HK_SZTC": "SZHK",  # 深港通
+                "HK": "SEHK",       # 香港本地
+            }
+
+            exchange = market_to_exchange.get(market)
+            if not exchange:
+                return None
+
+            return f"{code}.{exchange}"
+
+        except Exception as e:
+            print(f"QMT股票代码转换失败 {qmt_symbol}: {e}")
+            return None
+
+    # ========== 港股通数据 ==========
+
+    def get_hk_sh_symbols(self, date: str = None) -> List[str]:
+        """获取沪港通标的列表
+
+        使用 QMT API 获取沪港通可交易的港股列表。
+
+        Args:
+            date: 交易日期（格式：YYYYMMDD），None 表示获取最新列表
+
+        Returns:
+            VeighNa 格式的股票代码列表（如 ["0700.SHHK", "2318.SHHK"]）
+
+        Examples:
+            >>> adapter = QMTDataAdapter()
+            >>> adapter.connect()
+            >>> symbols = adapter.get_hk_sh_symbols()
+            >>> print(symbols[:5])  # ['0700.SHHK', '09988.SHHK', ...]
+        """
+        if not self._connected:
+            print("QMT 未连接，无法获取沪港通标的列表")
+            return []
+
+        try:
+            # 尝试使用 xtdata 模块
+            from xtquant import xtdata
+
+            # QMT API: 获取沪港通标的列表
+            sector_code = "HK_SHTC_STOCKS"
+            stock_list = xtdata.get_stock_list_in_sector(sector_code)
+
+            if not stock_list:
+                print(f"QMT 未返回沪港通标的列表: {sector_code}")
+                return []
+
+            # 转换为 VeighNa 格式
+            result = []
+            for qmt_symbol in stock_list:
+                vnpy_symbol = self._qmt_symbol_to_vnpy(qmt_symbol)
+                if vnpy_symbol:
+                    result.append(vnpy_symbol)
+
+            print(f"获取到 {len(result)} 只沪港通标的")
+            return result
+
+        except ImportError:
+            print("警告: xtdata 模块未安装，无法获取沪港通标的")
+            return []
+        except Exception as e:
+            print(f"QMT 获取沪港通标的列表失败: {e}")
+            return []
+
+    def get_hk_sz_symbols(self, date: str = None) -> List[str]:
+        """获取深港通标的列表
+
+        使用 QMT API 获取深港通可交易的港股列表。
+
+        Args:
+            date: 交易日期（格式：YYYYMMDD），None 表示获取最新列表
+
+        Returns:
+            VeighNa 格式的股票代码列表（如 ["0700.SZHK", "2318.SZHK"]）
+
+        Examples:
+            >>> adapter = QMTDataAdapter()
+            >>> adapter.connect()
+            >>> symbols = adapter.get_hk_sz_symbols()
+            >>> print(symbols[:5])  # ['0700.SZHK', '09988.SZHK', ...]
+        """
+        if not self._connected:
+            print("QMT 未连接，无法获取深港通标的列表")
+            return []
+
+        try:
+            # 尝试使用 xtdata 模块
+            from xtquant import xtdata
+
+            # QMT API: 获取深港通标的列表
+            sector_code = "HK_SZTC_STOCKS"
+            stock_list = xtdata.get_stock_list_in_sector(sector_code)
+
+            if not stock_list:
+                print(f"QMT 未返回深港通标的列表: {sector_code}")
+                return []
+
+            # 转换为 VeighNa 格式
+            result = []
+            for qmt_symbol in stock_list:
+                vnpy_symbol = self._qmt_symbol_to_vnpy(qmt_symbol)
+                if vnpy_symbol:
+                    result.append(vnpy_symbol)
+
+            print(f"获取到 {len(result)} 只深港通标的")
+            return result
+
+        except ImportError:
+            print("警告: xtdata 模块未安装，无法获取深港通标的")
+            return []
+        except Exception as e:
+            print(f"QMT 获取深港通标的列表失败: {e}")
+            return []
+
+    def _get_stock_list_in_sector_mock(self, sector_code: str) -> List[str]:
+        """获取板块成分股的 Mock 方法，用于测试
+
+        Args:
+            sector_code: 板块代码
+
+        Returns:
+            成分股代码列表
+        """
+        # 这个方法可以在子类中重写或用于 Mock
+        return []
+
+    def get_hk_sh_symbols_mockable(self, date: str = None) -> List[str]:
+        """获取沪港通标的列表（可 Mock 版本）
+
+        这个方法使用 _get_stock_list_in_sector_mock 方法，
+        方便在测试中 Mock。
+
+        Args:
+            date: 交易日期（格式：YYYYMMDD），None 表示获取最新列表
+
+        Returns:
+            VeighNa 格式的股票代码列表
+        """
+        if not self._connected:
+            print("QMT 未连接，无法获取沪港通标的列表")
+            return []
+
+        try:
+            # QMT API: 获取沪港通标的列表
+            sector_code = "HK_SHTC_STOCKS"
+            stock_list = self._get_stock_list_in_sector_mock(sector_code)
+
+            if not stock_list:
+                print(f"QMT 未返回沪港通标的列表: {sector_code}")
+                return []
+
+            # 转换为 VeighNa 格式
+            result = []
+            for qmt_symbol in stock_list:
+                vnpy_symbol = self._qmt_symbol_to_vnpy(qmt_symbol)
+                if vnpy_symbol:
+                    result.append(vnpy_symbol)
+
+            print(f"获取到 {len(result)} 只沪港通标的")
+            return result
+
+        except Exception as e:
+            print(f"QMT 获取沪港通标的列表失败: {e}")
+            return []
+
+    def get_hk_sz_symbols_mockable(self, date: str = None) -> List[str]:
+        """获取深港通标的列表（可 Mock 版本）
+
+        这个方法使用 _get_stock_list_in_sector_mock 方法，
+        方便在测试中 Mock。
+
+        Args:
+            date: 交易日期（格式：YYYYMMDD），None 表示获取最新列表
+
+        Returns:
+            VeighNa 格式的股票代码列表
+        """
+        if not self._connected:
+            print("QMT 未连接，无法获取深港通标的列表")
+            return []
+
+        try:
+            # QMT API: 获取深港通标的列表
+            sector_code = "HK_SZTC_STOCKS"
+            stock_list = self._get_stock_list_in_sector_mock(sector_code)
+
+            if not stock_list:
+                print(f"QMT 未返回深港通标的列表: {sector_code}")
+                return []
+
+            # 转换为 VeighNa 格式
+            result = []
+            for qmt_symbol in stock_list:
+                vnpy_symbol = self._qmt_symbol_to_vnpy(qmt_symbol)
+                if vnpy_symbol:
+                    result.append(vnpy_symbol)
+
+            print(f"获取到 {len(result)} 只深港通标的")
+            return result
+
+        except Exception as e:
+            print(f"QMT 获取深港通标的列表失败: {e}")
+            return []
 
     # ========== 订单簿功能 ==========
 
@@ -549,11 +1034,11 @@ class RealtimeBarGenerator:
 
     def _is_new_bar(self, current_time: datetime, bar_time: datetime) -> bool:
         """判断是否新K线"""
-        if self.interval == Interval.MINUTE_1:
+        if self.interval == Interval.MINUTE:
             return current_time.minute != bar_time.minute
-        elif self.interval == Interval.MINUTE_5:
+        elif self.interval == Interval.MINUTE:
             return (current_time - bar_time).seconds >= 300
-        elif self.interval == Interval.MINUTE_15:
+        elif self.interval == Interval.MINUTE5:
             return (current_time - bar_time).seconds >= 900
         elif self.interval == Interval.MINUTE_30:
             return (current_time - bar_time).seconds >= 1800
@@ -562,12 +1047,12 @@ class RealtimeBarGenerator:
 
     def _get_bar_time(self, tick_time: datetime) -> datetime:
         """获取K线时间"""
-        if self.interval == Interval.MINUTE_1:
+        if self.interval == Interval.MINUTE:
             return tick_time.replace(second=0, microsecond=0)
-        elif self.interval == Interval.MINUTE_5:
+        elif self.interval == Interval.MINUTE:
             minute = (tick_time.minute // 5) * 5
             return tick_time.replace(minute=minute, second=0, microsecond=0)
-        elif self.interval == Interval.MINUTE_15:
+        elif self.interval == Interval.MINUTE5:
             minute = (tick_time.minute // 15) * 15
             return tick_time.replace(minute=minute, second=0, microsecond=0)
         elif self.interval == Interval.MINUTE_30:
@@ -580,9 +1065,9 @@ class RealtimeBarGenerator:
     def _get_interval_seconds(interval: Interval) -> int:
         """获取周期秒数"""
         mapping = {
-            Interval.MINUTE_1: 60,
-            Interval.MINUTE_5: 300,
-            Interval.MINUTE_15: 900,
+            Interval.MINUTE: 60,
+            Interval.MINUTE: 300,
+            Interval.MINUTE5: 900,
             Interval.MINUTE_30: 1800,
             Interval.HOUR_1: 3600,
         }

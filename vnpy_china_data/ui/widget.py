@@ -80,6 +80,9 @@ class ChinaDataWidget(QtWidgets.QWidget):
         self.scope_combo.addItem(_("上海证券交易所"), "SSE")
         self.scope_combo.addItem(_("深圳证券交易所"), "SZSE")
         self.scope_combo.addItem(_("北京证券交易所"), "BSE")
+        self.scope_combo.addItem(_("沪港通"), "HK_SH")
+        self.scope_combo.addItem(_("深港通"), "HK_SZ")
+        self.scope_combo.addItem(_("港股通全部"), "HK_ALL")
         self.scope_combo.addItem(_("沪深300指数"), "HS300")
         self.scope_combo.addItem(_("中证500指数"), "ZZ500")
         self.scope_combo.addItem(_("中证1000指数"), "ZZ1000")
@@ -90,7 +93,7 @@ class ChinaDataWidget(QtWidgets.QWidget):
         # 股票代码输入框
         self.symbols_input = QtWidgets.QPlainTextEdit()
         self.symbols_input.setPlaceholderText(
-            _("每行一个股票代码，如：\n000001.SZ\n600000.SH\n\n选择其他范围时自动填充")
+            _("每行一个股票代码，如：\n000001.SZ\n600000.SH\n00700.HK\n\n选择其他范围时自动填充")
         )
         self.symbols_input.setMaximumHeight(80)
         config_layout.addWidget(self.symbols_input, 0, 2, 2, 1)
@@ -174,6 +177,8 @@ class ChinaDataWidget(QtWidgets.QWidget):
             symbols = self.gui_engine.get_exchange_symbols(scope)
         elif scope in ["HS300", "ZZ500", "ZZ1000"]:
             symbols = self.gui_engine.get_index_symbols(scope)
+        elif scope in ["HK_SH", "HK_SZ", "HK_ALL"]:
+            symbols = self.gui_engine.get_hk_symbols(scope)
 
         if symbols:
             self.symbols_input.setPlainText("\n".join(symbols))

@@ -176,7 +176,7 @@ class ChinaDataGuiEngine(BaseEngine):
         """获取交易所所有股票代码
 
         Args:
-            exchange: 交易所代码 (SSE/SZSE/BSE)
+            exchange: 交易所代码 (SSE/SZSE/BSE/HK_SH/HK_SZ/HK_ALL)
 
         Returns:
             股票代码列表
@@ -213,6 +213,66 @@ class ChinaDataGuiEngine(BaseEngine):
         except Exception as e:
             self.main_engine.write_log(f"获取交易所股票失败: {e}", "ChinaDataApp")
             return []
+
+    def get_hk_symbols(self, hk_type: str) -> List[str]:
+        """获取港股通股票代码
+
+        Args:
+            hk_type: 港股通类型 (HK_SH/HK_SZ/HK_ALL)
+
+        Returns:
+            港股代码列表
+        """
+        try:
+            # 从数据服务获取港股通股票列表
+            # 需要数据服务提供 get_hk_stock_list 方法
+            hk_list = self.data_service.get_hk_stock_list(hk_type)
+
+            if not hk_list:
+                self.main_engine.write_log(f"未获取到{hk_type}港股通股票", "ChinaDataApp")
+                return []
+
+            # 转换为股票代码格式
+            symbols = []
+            for stock in hk_list:
+                ts_code = stock.get("ts_code", "")
+                if ts_code and ts_code.endswith(".HK"):
+                    symbols.append(ts_code)
+
+            self.main_engine.write_log(
+                f"获取{hk_type}港股通股票：共 {len(symbols)} 只",
+                "ChinaDataApp"
+            )
+
+            return symbols
+
+        except AttributeError:
+            # 数据服务尚未实现港股通方法，返回空列表
+            self.main_engine.write_log(
+                f"警告：数据服务暂不支持港股通股票查询，"
+                f"请联系数据服务提供商添加 get_hk_stock_list 方法",
+                "ChinaDataApp"
+            )
+            return []
+        except Exception as e:
+            self.main_engine.write_log(f"获取港股通股票失败: {e}", "ChinaDataApp")
+            return []
+
+    def get_hk_sh_symbols(self) -> List[str]:
+        """获取沪港通股票代码
+
+        Returns:
+            沪港通股票代码列表
+        """
+        return self.get_hk_symbols("HK_SH")
+
+    def get_hk_sz_symbols(self) -> List[str]:
+        """获取深港通股票代码
+
+        Returns:
+            深港通股票代码列表
+        """
+        return self.get_hk_symbols("HK_SZ")
 
     def get_index_symbols(self, index: str) -> List[str]:
         """获取指数成分股

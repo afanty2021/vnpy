@@ -519,6 +519,94 @@ class TushareDataAdapter(BaseDataAdapter):
 
         return df.to_dict('records')
 
+    def get_hk_sh_symbols(self, date: str = None) -> List[str]:
+        """获取沪港通标的列表
+
+        使用 Tushare 获取沪港通可交易的港股列表。
+
+        Args:
+            date: 交易日期（格式：YYYYMMDD），None 表示获取最新列表
+
+        Returns:
+            VeighNa 格式的股票代码列表（如 ["0700.SHHK", "2318.SHHK"]）
+
+        Note:
+            Tushare 的 hk_basic 接口返回港股基本信息，需要筛选沪港通标的
+        """
+        try:
+            # 获取港股基本信息
+            df = self._call_api(
+                "hk_basic",
+                is_sch="S"  # 沪港通
+            )
+
+            if df.empty:
+                return []
+
+            # 转换为 VeighNa 格式
+            result = []
+            for _, row in df.iterrows():
+                try:
+                    ts_code = row.get("ts_code", "")
+                    # Tushare 港股格式: 00700.HK
+                    # 转换为 VeighNa 格式: 0700.SHHK
+                    if ts_code and ts_code.endswith(".HK"):
+                        symbol = ts_code.split(".")[0]
+                        vnpy_symbol = f"{symbol}.SHHK"
+                        result.append(vnpy_symbol)
+                except Exception:
+                    continue
+
+            return result
+
+        except Exception as e:
+            print(f"Tushare 获取沪港通标的列表失败: {e}")
+            return []
+
+    def get_hk_sz_symbols(self, date: str = None) -> List[str]:
+        """获取深港通标的列表
+
+        使用 Tushare 获取深港通可交易的港股列表。
+
+        Args:
+            date: 交易日期（格式：YYYYMMDD），None 表示获取最新列表
+
+        Returns:
+            VeighNa 格式的股票代码列表（如 ["0700.SZHK", "2318.SZHK"]）
+
+        Note:
+            Tushare 的 hk_basic 接口返回港股基本信息，需要筛选深港通标的
+        """
+        try:
+            # 获取港股基本信息
+            df = self._call_api(
+                "hk_basic",
+                is_sch="D"  # 深港通
+            )
+
+            if df.empty:
+                return []
+
+            # 转换为 VeighNa 格式
+            result = []
+            for _, row in df.iterrows():
+                try:
+                    ts_code = row.get("ts_code", "")
+                    # Tushare 港股格式: 00700.HK
+                    # 转换为 VeighNa 格式: 0700.SZHK
+                    if ts_code and ts_code.endswith(".HK"):
+                        symbol = ts_code.split(".")[0]
+                        vnpy_symbol = f"{symbol}.SZHK"
+                        result.append(vnpy_symbol)
+                except Exception:
+                    continue
+
+            return result
+
+        except Exception as e:
+            print(f"Tushare 获取深港通标的列表失败: {e}")
+            return []
+
     def get_pro_bar(
         self,
         ts_code: str,
@@ -596,3 +684,86 @@ class TushareDataAdapter(BaseDataAdapter):
             return []
 
         return df.to_dict('records')
+
+    # ========== 交易日历 ==========
+    def get_trade_calendar(
+        self,
+        exchange: str = "SSE",
+        start_date: str = None,
+        end_date: str = None
+    ) -> List[str]:
+        """获取交易日历
+
+        Args:
+            exchange: 交易所 ("SSE"上交所, "SZSE"深交所, "HKEX"港交所)
+            start_date: 开始日期（格式：YYYYMMDD）
+            end_date: 结束日期（格式：YYYYMMDD）
+
+        Returns:
+            交易日期列表（格式：YYYYMMDD）
+        """
+        # 默认获取最近一年的交易日历
+        if not start_date:
+            start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+        if not end_date:
+            end_date = datetime.now().strftime("%Y%m%d")
+
+        try:
+            # Tushare的trade_cal接口支持以下exchange参数：
+            # SSE - 上交所
+            # SZSE - 深交所（使用相同日历）
+            # 对于香港市场，需要使用不同的方法
+            df = self._call_api(
+                "trade_cal",
+                exchange=exchange,
+                start_date=start_date,
+                end_date=end_date,
+                is_open="1"  # 只返回开市的日期
+            )
+
+            if df.empty:
+                return []
+
+            return df["cal_date"].tolist()
+
+        except Exception as e:
+            print(f"获取交易日历失败: {e}")
+            return []
+
+    def get_hk_trade_calendar(
+        self,
+        start_date: str = None,
+        end_date: str = None
+    ) -> List[str]:
+        """获取香港交易日历
+
+        Args:
+            start_date: 开始日期（格式：YYYYMMDD）
+            end_date: 结束日期（格式：YYYYMMDD）
+
+        Returns:
+            交易日期列表（格式：YYYYMMDD）
+        """
+        # 默认获取最近一年的交易日历
+        if not start_date:
+            start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+        if not end_date:
+            end_date = datetime.now().strftime("%Y%m%d")
+
+        try:
+            # Tushare的hk_trade_cal接口用于获取港股交易日历
+            df = self._call_api(
+                "hk_trade_cal",
+                start_date=start_date,
+                end_date=end_date,
+                is_open="1"  # 只返回开市的日期
+            )
+
+            if df.empty:
+                return []
+
+            return df["cal_date"].tolist()
+
+        except Exception as e:
+            print(f"获取香港交易日历失败: {e}")
+            return []

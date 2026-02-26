@@ -6,7 +6,7 @@ A股数据服务主类
 """
 
 from typing import List, Optional, Dict, Any
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from threading import Lock
 from pathlib import Path
 
@@ -581,6 +581,378 @@ class ChinaDataService(
 
         return data
 
+    def get_hk_sh_symbols(self, date: str = None) -> List[str]:
+        """获取沪港通标的股票列表
+
+        优先从 QMT 获取，失败则从缓存读取，支持缓存机制（1天有效期）。
+
+        Args:
+            date: 交易日期（格式：YYYYMMDD），None 表示获取最新列表
+
+        Returns:
+            VeighNa 格式的股票代码列表（如 ["0700.SHHK", "2318.SHHK"]）
+
+        Examples:
+            >>> service = ChinaDataService()
+            >>> service.connect()
+            >>> symbols = service.get_hk_sh_symbols()
+            >>> print(f"沪港通标的数量: {len(symbols)}")
+            >>> print(symbols[:5])  # ['0700.SHHK', '09988.SHHK', ...]
+        """
+        import logging
+        logger = logging.getLogger("vnpy_china_data")
+
+        # 格式化日期参数
+        date_param = date
+        if date is None:
+            # 使用当前日期作为默认
+            date_param = datetime.now().strftime("%Y%m%d")
+        elif isinstance(date, datetime):
+            # 如果传入的是 datetime 对象，转换为字符串
+            date_param = date.strftime("%Y%m%d")
+        elif hasattr(date, 'strftime'):
+            # 如果传入的是 date 对象，转换为字符串
+            date_param = date.strftime("%Y%m%d")
+
+        # 尝试从缓存获取
+        cache_key = f"hk_sh_symbols_{date_param}"
+        cached = self.cache.get(cache_key)
+        if cached:
+            logger.info(f"从缓存获取沪港通标的列表: {len(cached)} 只")
+            return cached
+
+        # 优先使用 QMT 适配器
+        if self.qmt_adapter and self.qmt_adapter.connected:
+            try:
+                data = self.qmt_adapter.get_hk_sh_symbols(date=date_param)
+                if data:
+                    # 缓存1天
+                    self.cache.set(cache_key, data, ttl=86400)
+                    logger.info(f"从 QMT 获取沪港通标的列表: {len(data)} 只")
+                    return data
+            except Exception as e:
+                logger.warning(f"QMT 获取沪港通标的列表失败: {e}")
+
+        # Fallback: 从Tushare获取（如果有的话）
+        try:
+            data = self.tushare_adapter.get_hk_sh_symbols(date=date_param)
+            if data:
+                # 缓存1天
+                self.cache.set(cache_key, data, ttl=86400)
+                logger.info(f"从 Tushare 获取沪港通标的列表: {len(data)} 只")
+                return data
+        except Exception as e:
+            logger.warning(f"Tushare 获取沪港通标的列表失败: {e}")
+
+        logger.warning("无法获取沪港通标的列表")
+        return []
+
+    def get_hk_sz_symbols(self, date: str = None) -> List[str]:
+        """获取深港通标的股票列表
+
+        优先从 QMT 获取，失败则从缓存读取，支持缓存机制（1天有效期）。
+
+        Args:
+            date: 交易日期（格式：YYYYMMDD），None 表示获取最新列表
+
+        Returns:
+            VeighNa 格式的股票代码列表（如 ["0700.SZHK", "2318.SZHK"]）
+
+        Examples:
+            >>> service = ChinaDataService()
+            >>> service.connect()
+            >>> symbols = service.get_hk_sz_symbols()
+            >>> print(f"深港通标的数量: {len(symbols)}")
+            >>> print(symbols[:5])  # ['0700.SZHK', '09988.SZHK', ...]
+        """
+        import logging
+        logger = logging.getLogger("vnpy_china_data")
+
+        # 格式化日期参数
+        date_param = date
+        if date is None:
+            # 使用当前日期作为默认
+            date_param = datetime.now().strftime("%Y%m%d")
+        elif isinstance(date, datetime):
+            # 如果传入的是 datetime 对象，转换为字符串
+            date_param = date.strftime("%Y%m%d")
+        elif hasattr(date, 'strftime'):
+            # 如果传入的是 date 对象，转换为字符串
+            date_param = date.strftime("%Y%m%d")
+
+        # 尝试从缓存获取
+        cache_key = f"hk_sz_symbols_{date_param}"
+        cached = self.cache.get(cache_key)
+        if cached:
+            logger.info(f"从缓存获取深港通标的列表: {len(cached)} 只")
+            return cached
+
+        # 优先使用 QMT 适配器
+        if self.qmt_adapter and self.qmt_adapter.connected:
+            try:
+                data = self.qmt_adapter.get_hk_sz_symbols(date=date_param)
+                if data:
+                    # 缓存1天
+                    self.cache.set(cache_key, data, ttl=86400)
+                    logger.info(f"从 QMT 获取深港通标的列表: {len(data)} 只")
+                    return data
+            except Exception as e:
+                logger.warning(f"QMT 获取深港通标的列表失败: {e}")
+
+        # Fallback: 从Tushare获取（如果有的话）
+        try:
+            data = self.tushare_adapter.get_hk_sz_symbols(date=date_param)
+            if data:
+                # 缓存1天
+                self.cache.set(cache_key, data, ttl=86400)
+                logger.info(f"从 Tushare 获取深港通标的列表: {len(data)} 只")
+                return data
+        except Exception as e:
+            logger.warning(f"Tushare 获取深港通标的列表失败: {e}")
+
+        logger.warning("无法获取深港通标的列表")
+        return []
+
+    def get_hk_all_symbols(self, date: str = None) -> List[str]:
+        """合并获取所有港股通标的
+
+        合并沪港通和深港通的标的列表，去重后返回。
+
+        Args:
+            date: 交易日期（格式：YYYYMMDD），None 表示获取最新列表
+
+        Returns:
+            VeighNa 格式的股票代码列表（如 ["0700.SHHK", "2318.SZHK", ...]）
+
+        Examples:
+            >>> service = ChinaDataService()
+            >>> service.connect()
+            >>> symbols = service.get_hk_all_symbols()
+            >>> print(f"港股通标的总数: {len(symbols)}")
+            >>> # 统计沪港通和深港通数量
+            >>> sh_count = sum(1 for s in symbols if s.endswith('.SHHK'))
+            >>> sz_count = sum(1 for s in symbols if s.endswith('.SZHK'))
+            >>> print(f"沪港通: {sh_count}, 深港通: {sz_count}")
+        """
+        import logging
+        logger = logging.getLogger("vnpy_china_data")
+
+        # 获取沪港通和深港通标的
+        sh_symbols = self.get_hk_sh_symbols(date)
+        sz_symbols = self.get_hk_sz_symbols(date)
+
+        # 合并去重
+        all_symbols = list(set(sh_symbols + sz_symbols))
+
+        logger.info(f"港股通标的总数: {len(all_symbols)} (沪港通: {len(sh_symbols)}, 深港通: {len(sz_symbols)})")
+
+        return all_symbols
+
+    # ========== 港股通交易日历 ==========
+    def _get_hk_sh_trading_calendar(self, start_date: str = None, end_date: str = None) -> set:
+        """获取沪港通交易日历（内地交易日 ∩ 香港交易日）
+
+        Args:
+            start_date: 开始日期（格式：YYYYMMDD）
+            end_date: 结束日期（格式：YYYYMMDD）
+
+        Returns:
+            沪港通交易日期集合（格式：YYYYMMDD）
+        """
+        import logging
+        logger = logging.getLogger("vnpy_china_data")
+
+        # 默认获取最近一年的交易日历
+        if not start_date:
+            start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+        if not end_date:
+            end_date = datetime.now().strftime("%Y%m%d")
+
+        # 尝试从缓存获取
+        cache_key = f"hk_sh_calendar_{start_date}_{end_date}"
+        cached = self.cache.get(cache_key)
+        if cached:
+            return set(cached)
+
+        try:
+            # 获取内地交易日历
+            cn_calendar = self.tushare_adapter.get_trade_calendar(
+                exchange="SSE",
+                start_date=start_date,
+                end_date=end_date
+            )
+            cn_dates = set(cn_calendar)
+
+            # 获取香港交易日历
+            hk_calendar = self.tushare_adapter.get_hk_trade_calendar(
+                start_date=start_date,
+                end_date=end_date
+            )
+            hk_dates = set(hk_calendar)
+
+            # 计算交集（两地都开市的日期）
+            sh_calendar = cn_dates & hk_dates
+
+            # 缓存30天
+            self.cache.set(cache_key, list(sh_calendar), ttl=30 * 86400)
+            logger.info(f"获取沪港通交易日历: {len(sh_calendar)} 个交易日")
+
+            return sh_calendar
+
+        except Exception as e:
+            logger.warning(f"获取沪港通交易日历失败: {e}")
+            return set()
+
+    def _get_hk_sz_trading_calendar(self, start_date: str = None, end_date: str = None) -> set:
+        """获取深港通交易日历（内地交易日 ∩ 香港交易日）
+
+        Args:
+            start_date: 开始日期（格式：YYYYMMDD）
+            end_date: 结束日期（格式：YYYYMMDD）
+
+        Returns:
+            深港通交易日期集合（格式：YYYYMMDD）
+        """
+        import logging
+        logger = logging.getLogger("vnpy_china_data")
+
+        # 默认获取最近一年的交易日历
+        if not start_date:
+            start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+        if not end_date:
+            end_date = datetime.now().strftime("%Y%m%d")
+
+        # 尝试从缓存获取
+        cache_key = f"hk_sz_calendar_{start_date}_{end_date}"
+        cached = self.cache.get(cache_key)
+        if cached:
+            return set(cached)
+
+        try:
+            # 获取内地交易日历
+            cn_calendar = self.tushare_adapter.get_trade_calendar(
+                exchange="SZSE",
+                start_date=start_date,
+                end_date=end_date
+            )
+            cn_dates = set(cn_calendar)
+
+            # 获取香港交易日历
+            hk_calendar = self.tushare_adapter.get_hk_trade_calendar(
+                start_date=start_date,
+                end_date=end_date
+            )
+            hk_dates = set(hk_calendar)
+
+            # 计算交集（两地都开市的日期）
+            sz_calendar = cn_dates & hk_dates
+
+            # 缓存30天
+            self.cache.set(cache_key, list(sz_calendar), ttl=30 * 86400)
+            logger.info(f"获取深港通交易日历: {len(sz_calendar)} 个交易日")
+
+            return sz_calendar
+
+        except Exception as e:
+            logger.warning(f"获取深港通交易日历失败: {e}")
+            return set()
+
+    def is_hk_sh_trading_day(self, date_str: str) -> bool:
+        """判断是否为沪港通交易日
+
+        沪港通交易日 = A股交易日 ∩ 香港交易日
+
+        Args:
+            date_str: 日期字符串，格式可以是：
+                      - "20260220" (YYYYMMDD)
+                      - "2026-02-20" (YYYY-MM-DD)
+                      - datetime.date 对象
+                      - datetime.datetime 对象
+
+        Returns:
+            True: 是沪港通交易日
+            False: 不是沪港通交易日
+
+        Examples:
+            >>> service = ChinaDataService()
+            >>> service.connect()
+            >>> service.is_hk_sh_trading_day("20260220")
+            True
+            >>> service.is_hk_sh_trading_day(date(2026, 2, 20))
+            True
+        """
+        import logging
+        logger = logging.getLogger("vnpy_china_data")
+
+        # 格式化日期参数
+        date_param = date_str
+        if isinstance(date_str, datetime):
+            date_param = date_str.strftime("%Y%m%d")
+        elif isinstance(date_str, date):
+            date_param = date_str.strftime("%Y%m%d")
+        elif "-" in date_str:
+            # 将 "2026-02-20" 转换为 "20260220"
+            date_param = date_str.replace("-", "")
+
+        # 获取沪港通交易日历（包含过去和未来3个月的日期）
+        target_date = datetime.strptime(date_param, "%Y%m%d")
+        start_date = (target_date - timedelta(days=90)).strftime("%Y%m%d")
+        end_date = (target_date + timedelta(days=90)).strftime("%Y%m%d")
+
+        calendar = self._get_hk_sh_trading_calendar(start_date, end_date)
+
+        result = date_param in calendar
+        logger.debug(f"日期 {date_param} 是否为沪港通交易日: {result}")
+        return result
+
+    def is_hk_sz_trading_day(self, date_str: str) -> bool:
+        """判断是否为深港通交易日
+
+        深港通交易日 = A股交易日 ∩ 香港交易日
+
+        Args:
+            date_str: 日期字符串，格式可以是：
+                      - "20260220" (YYYYMMDD)
+                      - "2026-02-20" (YYYY-MM-DD)
+                      - datetime.date 对象
+                      - datetime.datetime 对象
+
+        Returns:
+            True: 是深港通交易日
+            False: 不是深港通交易日
+
+        Examples:
+            >>> service = ChinaDataService()
+            >>> service.connect()
+            >>> service.is_hk_sz_trading_day("20260220")
+            True
+            >>> service.is_hk_sz_trading_day(date(2026, 2, 20))
+            True
+        """
+        import logging
+        logger = logging.getLogger("vnpy_china_data")
+
+        # 格式化日期参数
+        date_param = date_str
+        if isinstance(date_str, datetime):
+            date_param = date_str.strftime("%Y%m%d")
+        elif isinstance(date_str, date):
+            date_param = date_str.strftime("%Y%m%d")
+        elif "-" in date_str:
+            # 将 "2026-02-20" 转换为 "20260220"
+            date_param = date_str.replace("-", "")
+
+        # 获取深港通交易日历（包含过去和未来3个月的日期）
+        target_date = datetime.strptime(date_param, "%Y%m%d")
+        start_date = (target_date - timedelta(days=90)).strftime("%Y%m%d")
+        end_date = (target_date + timedelta(days=90)).strftime("%Y%m%d")
+
+        calendar = self._get_hk_sz_trading_calendar(start_date, end_date)
+
+        result = date_param in calendar
+        logger.debug(f"日期 {date_param} 是否为深港通交易日: {result}")
+        return result
+
     # ========== 工具方法 ==========
 
     def _convert_to_ts_code(self, symbol: str, exchange: Exchange) -> str:
@@ -595,11 +967,16 @@ class ChinaDataService(
 
         Note:
             如果symbol已包含交易所后缀，会先去除后再添加正确的后缀
+            港股通交易所 (SHHK/SZHK/SEHK) 都映射为 "HK"
         """
         suffix_map = {
             Exchange.SSE: "SH",
             Exchange.SZSE: "SZ",
-            Exchange.BSE: "BJ"
+            Exchange.BSE: "BJ",
+            # 港股通交易所映射
+            Exchange.SHHK: "HK",
+            Exchange.SZHK: "HK",
+            Exchange.SEHK: "HK",
         }
         suffix = suffix_map.get(exchange, "SZ")
 
@@ -610,7 +987,12 @@ class ChinaDataService(
         return f"{symbol}.{suffix}"
 
     def _convert_from_ts_code(self, ts_code: str) -> tuple:
-        """从tushare格式转换为(symbol, exchange)"""
+        """从tushare格式转换为(symbol, exchange)
+
+        Note:
+            对于 "HK" 后缀，默认映射到 Exchange.SEHK
+            (港股通的实际交易所需要根据业务逻辑判断)
+        """
         if '.' not in ts_code:
             return ts_code, Exchange.SZSE
 
@@ -619,7 +1001,9 @@ class ChinaDataService(
         exchange_map = {
             "SH": Exchange.SSE,
             "SZ": Exchange.SZSE,
-            "BJ": Exchange.BSE
+            "BJ": Exchange.BSE,
+            # HK后缀默认映射到SEHK (港股通)
+            "HK": Exchange.SEHK
         }
         exchange = exchange_map.get(suffix, Exchange.SZSE)
 
