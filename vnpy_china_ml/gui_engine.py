@@ -99,9 +99,13 @@ class ChinaMlGuiEngine(BaseEngine):
             return
 
         try:
-            # 创建数据服务实例
-            self.data_service = ChinaDataService()
-            self.data_service.connect()
+            # 获取数据服务实例（单例）
+            from vnpy_china_data import get_data_service
+            self.data_service = get_data_service()
+
+            # 如果未连接，尝试连接
+            if not self.data_service.connected:
+                self.data_service.connect()
 
             self._log("数据服务连接成功")
 
