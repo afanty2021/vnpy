@@ -29,6 +29,10 @@ class ModelMetadata:
         status: 模型状态 (待部署/已部署)
         file_path: 模型文件路径
         description: 模型描述
+        version: 语义化版本号
+        parent_model_id: 父模型ID
+        version_tag: 版本标签（production/staging/development）
+        changelog: 变更日志
     """
     model_id: str
     model_name: str
@@ -40,6 +44,10 @@ class ModelMetadata:
     status: str = "待部署"
     file_path: Optional[str] = None
     description: str = ""
+    version: str = "1.0.0"
+    parent_model_id: Optional[str] = None
+    version_tag: str = "development"
+    changelog: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -53,7 +61,11 @@ class ModelMetadata:
             "feature_count": self.feature_count,
             "status": self.status,
             "file_path": self.file_path,
-            "description": self.description
+            "description": self.description,
+            "version": self.version,
+            "parent_model_id": self.parent_model_id,
+            "version_tag": self.version_tag,
+            "changelog": self.changelog
         }
 
 
@@ -80,12 +92,26 @@ class ModelManager:
         self._load_metadata()
 
     def _load_metadata(self) -> None:
-        """从文件加载模型元数据"""
+        """从文件加载模型元数据（向后兼容旧版本）"""
         metadata_file = self.model_dir / "metadata.pkl"
         if metadata_file.exists():
             try:
                 with open(metadata_file, 'rb') as f:
-                    self._models = pickle.load(f)
+                    loaded_models = pickle.load(f)
+
+                # 确保向后兼容：为旧元数据添加新字段
+                for model_id, metadata in loaded_models.items():
+                    # 检查是否有新增字段，没有则添加默认值
+                    if not hasattr(metadata, 'version'):
+                        metadata.version = "1.0.0"
+                    if not hasattr(metadata, 'parent_model_id'):
+                        metadata.parent_model_id = None
+                    if not hasattr(metadata, 'version_tag'):
+                        metadata.version_tag = "development"
+                    if not hasattr(metadata, 'changelog'):
+                        metadata.changelog = ""
+
+                self._models = loaded_models
             except Exception as e:
                 print(f"加载模型元数据失败: {e}")
                 self._models = {}

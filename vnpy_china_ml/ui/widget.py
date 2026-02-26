@@ -1,6 +1,7 @@
 """A股机器学习UI组件"""
 from typing import Any, Optional
 from datetime import datetime, date, timedelta
+import numpy as np
 
 from vnpy.trader.ui.qt import QtCore, QtGui, QtWidgets
 from vnpy.trader.locale import _
@@ -86,6 +87,14 @@ class ChinaMlWidget(QtWidgets.QWidget):
         # 因子组合标签页
         combination_widget = self.create_combination_tab()
         tab.addTab(combination_widget, _("因子组合"))
+
+        # 版本管理标签页
+        version_widget = self.create_version_management_tab()
+        tab.addTab(version_widget, _("版本管理"))
+
+        # A/B测试标签页
+        ab_test_widget = self.create_ab_test_tab()
+        tab.addTab(ab_test_widget, _("A/B测试"))
 
         # 状态栏
         self.status_label = QtWidgets.QLabel(_("就绪"))
@@ -1161,6 +1170,456 @@ class ChinaMlWidget(QtWidgets.QWidget):
 
         # TODO: 实现文件导出
         self.show_status(_("组合配置导出功能待实现"))
+
+    # ==================== 版本管理功能 ====================
+
+    def create_version_management_tab(self) -> QtWidgets.QWidget:
+        """创建版本管理标签页"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout()
+        widget.setLayout(layout)
+
+        # 标题
+        title = QtWidgets.QLabel(_("模型版本管理"))
+        title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        layout.addWidget(title)
+
+        # 模型选择区
+        model_group = QtWidgets.QGroupBox(_("选择模型"))
+        model_layout = QtWidgets.QHBoxLayout()
+        model_group.setLayout(model_layout)
+        layout.addWidget(model_group)
+
+        model_layout.addWidget(QtWidgets.QLabel(_("模型名称：")))
+        self.version_model_combo = QtWidgets.QComboBox()
+        self.version_model_combo.currentTextChanged.connect(self.on_version_model_changed)
+        model_layout.addWidget(self.version_model_combo)
+
+        refresh_versions_btn = QtWidgets.QPushButton(_("刷新"))
+        refresh_versions_btn.clicked.connect(self.refresh_version_models)
+        model_layout.addWidget(refresh_versions_btn)
+
+        # 版本列表区
+        version_group = QtWidgets.QGroupBox(_("版本历史"))
+        version_layout = QtWidgets.QVBoxLayout()
+        version_group.setLayout(version_layout)
+        layout.addWidget(version_group)
+
+        # 版本表格
+        self.version_table = QtWidgets.QTableWidget()
+        self.version_table.setColumnCount(7)
+        self.version_table.setHorizontalHeaderLabels([
+            _("版本号"), _("模型名称"), _("类型"), _("训练时间"),
+            _("准确率"), _("标签"), _("状态")
+        ])
+        self.version_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.version_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        version_layout.addWidget(self.version_table)
+
+        # 版本操作按钮
+        version_btn_layout = QtWidgets.QHBoxLayout()
+        version_layout.addLayout(version_btn_layout)
+
+        set_production_btn = QtWidgets.QPushButton(_("设为生产版本"))
+        set_production_btn.clicked.connect(self.set_production_version)
+        version_btn_layout.addWidget(set_production_btn)
+
+        rollback_btn = QtWidgets.QPushButton(_("回滚到选中版本"))
+        rollback_btn.clicked.connect(self.rollback_to_version)
+        version_btn_layout.addWidget(rollback_btn)
+
+        compare_btn = QtWidgets.QPushButton(_("对比选中版本"))
+        compare_btn.clicked.connect(self.compare_versions)
+        version_btn_layout.addWidget(compare_btn)
+
+        # 创建新版本区
+        create_group = QtWidgets.QGroupBox(_("创建新版本"))
+        create_layout = QtWidgets.QGridLayout()
+        create_group.setLayout(create_layout)
+        layout.addWidget(create_group)
+
+        create_layout.addWidget(QtWidgets.QLabel(_("版本号：")), 0, 0)
+        self.new_version_input = QtWidgets.QLineEdit("1.0.1")
+        create_layout.addWidget(self.new_version_input, 0, 1)
+
+        create_layout.addWidget(QtWidgets.QLabel(_("标签：")), 0, 2)
+        self.version_tag_combo = QtWidgets.QComboBox()
+        self.version_tag_combo.addItem(_("开发版本"), "development")
+        self.version_tag_combo.addItem(_("测试版本"), "staging")
+        self.version_tag_combo.addItem(_("生产版本"), "production")
+        create_layout.addWidget(self.version_tag_combo, 0, 3)
+
+        create_layout.addWidget(QtWidgets.QLabel(_("变更日志：")), 1, 0)
+        self.changelog_input = QtWidgets.QLineEdit()
+        self.changelog_input.setPlaceholderText("描述本次变更内容...")
+        create_layout.addWidget(self.changelog_input, 1, 1, 1, 3)
+
+        create_version_btn = QtWidgets.QPushButton(_("创建版本"))
+        create_version_btn.clicked.connect(self.create_new_version)
+        create_layout.addWidget(create_version_btn, 2, 0, 1, 4)
+
+        return widget
+
+    def on_version_model_changed(self, model_name: str) -> None:
+        """模型选择变化时"""
+        if model_name and self.gui_engine:
+            self.refresh_version_list(model_name)
+
+    def refresh_version_models(self) -> None:
+        """刷新版本模型列表"""
+        if not self.gui_engine:
+            return
+
+        self.version_model_combo.clear()
+
+        # 获取所有唯一的模型名称
+        models = self.gui_engine.get_all_models()
+        model_names = set(m.model_name for m in models)
+
+        for name in sorted(model_names):
+            self.version_model_combo.addItem(name)
+
+        if model_names:
+            self.refresh_version_list(sorted(model_names)[0])
+
+    def refresh_version_list(self, model_name: str) -> None:
+        """刷新版本列表"""
+        if not self.gui_engine:
+            return
+
+        version_tree = self.gui_engine.get_version_tree(model_name)
+
+        self.version_table.setRowCount(len(version_tree))
+
+        for row, version_info in enumerate(version_tree):
+            self.version_table.setItem(row, 0, QtWidgets.QTableWidgetItem(version_info["version"]))
+            self.version_table.setItem(row, 1, QtWidgets.QTableWidgetItem(model_name))
+            self.version_table.setItem(row, 2, QtWidgets.QTableWidgetItem(version_info.get("type", "")))
+
+            time_str = ""
+            if version_info.get("training_date"):
+                time_str = version_info["training_date"].strftime("%Y-%m-%d %H:%M")
+            self.version_table.setItem(row, 3, QtWidgets.QTableWidgetItem(time_str))
+
+            acc_item = QtWidgets.QTableWidgetItem(f"{version_info.get('accuracy', 0):.2%}")
+            self.version_table.setItem(row, 4, acc_item)
+
+            tag = version_info.get("tag", "development")
+            tag_item = QtWidgets.QTableWidgetItem(tag)
+            if tag == "production":
+                tag_item.setForeground(QtGui.QColor("green"))
+            elif tag == "staging":
+                tag_item.setForeground(QtGui.QColor("orange"))
+            self.version_table.setItem(row, 5, tag_item)
+
+            status = "生产" if version_info.get("is_production") else "开发"
+            self.version_table.setItem(row, 6, QtWidgets.QTableWidgetItem(status))
+
+        self.version_table.resizeColumnsToContents()
+
+    def create_new_version(self) -> None:
+        """创建新版本"""
+        if not self.gui_engine:
+            return
+
+        model_name = self.version_model_combo.currentText()
+        if not model_name:
+            self.show_status(_("请先选择模型"))
+            return
+
+        version = self.new_version_input.text()
+        tag = self.version_tag_combo.currentData()
+        changelog = self.changelog_input.text()
+
+        new_id = self.gui_engine.create_model_version(
+            model_name=model_name,
+            version=version,
+            tag=tag,
+            changelog=changelog
+        )
+
+        if new_id:
+            self.refresh_version_list(model_name)
+            self.show_status(_(f"已创建版本: {version}"))
+        else:
+            self.show_status(_("创建版本失败"))
+
+    def set_production_version(self) -> None:
+        """设置生产版本"""
+        if not self.gui_engine:
+            return
+
+        current_row = self.version_table.currentRow()
+        if current_row < 0:
+            self.show_status(_("请先选择版本"))
+            return
+
+        # 获取模型ID（从版本树中获取）
+        model_name = self.version_model_combo.currentText()
+        version_tree = self.gui_engine.get_version_tree(model_name)
+
+        if current_row < len(version_tree):
+            model_id = version_tree[current_row]["model_id"]
+            if self.gui_engine.set_production_version(model_id):
+                self.refresh_version_list(model_name)
+                self.show_status(_("已设置为生产版本"))
+
+    def rollback_to_version(self) -> None:
+        """回滚到选中版本"""
+        if not self.gui_engine:
+            return
+
+        current_row = self.version_table.currentRow()
+        if current_row < 0:
+            self.show_status(_("请先选择版本"))
+            return
+
+        model_name = self.version_model_combo.currentText()
+        version_tree = self.gui_engine.get_version_tree(model_name)
+
+        if current_row < len(version_tree):
+            model_id = version_tree[current_row]["model_id"]
+            if self.gui_engine.rollback_model(model_id):
+                self.refresh_version_list(model_name)
+                self.show_status(_("已回滚到选中版本"))
+
+    def compare_versions(self) -> None:
+        """对比选中版本"""
+        if not self.gui_engine:
+            return
+
+        selected = self.version_table.selectedRanges()
+        if len(selected) < 2 or selected[0].rowCount() < 2:
+            self.show_status(_("请选择两个版本进行对比"))
+            return
+
+        model_name = self.version_model_combo.currentText()
+        version_tree = self.gui_engine.get_version_tree(model_name)
+
+        rows = [r for r in range(self.version_table.rowCount())
+                if self.version_table.item(r, 0).isSelected()]
+
+        if len(rows) >= 2:
+            model_id_1 = version_tree[rows[0]]["model_id"]
+            model_id_2 = version_tree[rows[1]]["model_id"]
+
+            comparison = self.gui_engine.compare_model_versions(model_id_1, model_id_2)
+
+            # 显示对比结果（使用消息框）
+            result_text = f"# 版本对比结果\n\n"
+            result_text += f"模型1: {comparison['model_1']['version']} (准确率: {comparison['model_1']['accuracy']:.2%})\n"
+            result_text += f"模型2: {comparison['model_2']['version']} (准确率: {comparison['model_2']['accuracy']:.2%})\n\n"
+            result_text += f"准确率差异: {comparison['differences']['accuracy']:.2%}\n"
+
+            QtWidgets.QMessageBox.information(
+                self, _("版本对比结果"), result_text
+            )
+            self.show_status(_("版本对比完成"))
+
+    # ==================== A/B测试功能 ====================
+
+    def create_ab_test_tab(self) -> QtWidgets.QWidget:
+        """创建A/B测试标签页"""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout()
+        widget.setLayout(layout)
+
+        # 标题
+        title = QtWidgets.QLabel(_("模型A/B测试"))
+        title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        layout.addWidget(title)
+
+        # 测试配置区
+        config_group = QtWidgets.QGroupBox(_("测试配置"))
+        config_layout = QtWidgets.QGridLayout()
+        config_group.setLayout(config_layout)
+        layout.addWidget(config_group)
+
+        # 测试名称
+        config_layout.addWidget(QtWidgets.QLabel(_("测试名称：")), 0, 0)
+        self.ab_test_name_input = QtWidgets.QLineEdit()
+        self.ab_test_name_input.setPlaceholderText("例如: LightGBM_vs_XGBoost")
+        config_layout.addWidget(self.ab_test_name_input, 0, 1)
+
+        # 模型选择（多选）
+        config_layout.addWidget(QtWidgets.QLabel(_("选择模型：")), 1, 0)
+        self.ab_test_model_list = QtWidgets.QListWidget()
+        self.ab_test_model_list.setSelectionMode(QtWidgets.QAbstractItemView.MultiSelection)
+        config_layout.addWidget(self.ab_test_model_list, 1, 1, 1, 3)
+
+        refresh_ab_models_btn = QtWidgets.QPushButton(_("刷新模型列表"))
+        refresh_ab_models_btn.clicked.connect(self.refresh_ab_test_models)
+        config_layout.addWidget(refresh_ab_models_btn, 1, 4)
+
+        # 日期范围
+        config_layout.addWidget(QtWidgets.QLabel(_("测试开始：")), 2, 0)
+        self.ab_test_start_date = QtWidgets.QDateEdit()
+        self.ab_test_start_date.setCalendarPopup(True)
+        self.ab_test_start_date.setDate(QtCore.QDate.currentDate().addMonths(-1))
+        config_layout.addWidget(self.ab_test_start_date, 2, 1)
+
+        config_layout.addWidget(QtWidgets.QLabel(_("测试结束：")), 2, 2)
+        self.ab_test_end_date = QtWidgets.QDateEdit()
+        self.ab_test_end_date.setCalendarPopup(True)
+        self.ab_test_end_date.setDate(QtCore.QDate.currentDate())
+        config_layout.addWidget(self.ab_test_end_date, 2, 3)
+
+        # 运行测试按钮
+        run_ab_test_btn = QtWidgets.QPushButton(_("运行A/B测试"))
+        run_ab_test_btn.clicked.connect(self.run_ab_test)
+        config_layout.addWidget(run_ab_test_btn, 3, 0, 1, 5)
+
+        # 测试结果区
+        result_group = QtWidgets.QGroupBox(_("测试结果"))
+        result_layout = QtWidgets.QVBoxLayout()
+        result_group.setLayout(result_layout)
+        layout.addWidget(result_group)
+
+        # 结果对比表格
+        self.ab_result_table = QtWidgets.QTableWidget()
+        self.ab_result_table.setColumnCount(6)
+        self.ab_result_table.setHorizontalHeaderLabels([
+            _("模型名称"), _("准确率"), _("IC"), _("MSE"),
+            _("MAE"), _("夏普比率")
+        ])
+        result_layout.addWidget(self.ab_result_table)
+
+        # 测试历史
+        history_label = QtWidgets.QLabel(_("测试历史"))
+        history_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        result_layout.addWidget(history_label)
+
+        self.ab_test_history_table = QtWidgets.QTableWidget()
+        self.ab_test_history_table.setColumnCount(4)
+        self.ab_test_history_table.setHorizontalHeaderLabels([
+            _("测试名称"), _("测试时间"), _("推荐模型"), _("显著性")
+        ])
+        self.ab_test_history_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.ab_test_history_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        result_layout.addWidget(self.ab_test_history_table)
+
+        return widget
+
+    def refresh_ab_test_models(self) -> None:
+        """刷新A/B测试模型列表"""
+        if not self.gui_engine:
+            return
+
+        self.ab_test_model_list.clear()
+
+        models = self.gui_engine.get_all_models()
+        trained_models = [m for m in models if m.is_trained]
+
+        for metadata in trained_models:
+            item = QtWidgets.QTableWidgetItem(
+                f"{metadata.model_name} ({metadata.model_type.value}) - {metadata.accuracy:.2%}"
+            )
+            item.setData(QtCore.Qt.UserRole, metadata.model_id)
+            self.ab_test_model_list.addItem(item)
+
+    def run_ab_test(self) -> None:
+        """运行A/B测试"""
+        if not self.gui_engine:
+            return
+
+        # 获取选中的模型
+        selected_items = self.ab_test_model_list.selectedItems()
+        if len(selected_items) < 2:
+            self.show_status(_("请至少选择2个模型进行对比"))
+            return
+
+        model_ids = [item.data(QtCore.Qt.UserRole) for item in selected_items]
+        test_name = self.ab_test_name_input.text() or f"test_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        start_date = self.ab_test_start_date.date().toPython()
+        end_date = self.ab_test_end_date.date().toPython()
+
+        self.show_status(_("正在创建A/B测试..."))
+
+        # 创建测试
+        test_id = self.gui_engine.create_ab_test(
+            test_name=test_name,
+            model_ids=model_ids,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        if not test_id:
+            self.show_status(_("创建A/B测试失败"))
+            return
+
+        # 生成测试数据（模拟）
+        import numpy as np
+        n_samples = 1000
+        n_features = 20
+        X = np.random.randn(n_samples, n_features)
+        y = np.random.randn(n_samples) * 0.02
+
+        self.show_status(_("正在运行A/B测试..."))
+
+        # 异步运行测试
+        QtCore.QTimer.singleShot(100, lambda: self._do_run_ab_test(test_id, X, y))
+
+    def _do_run_ab_test(self, test_id: str, X: np.ndarray, y: np.ndarray) -> None:
+        """执行A/B测试"""
+        result = self.gui_engine.run_ab_test(test_id, X, y)
+
+        if result:
+            self._update_ab_test_results(result)
+            self._update_ab_test_history()
+            self.show_status(_(f"A/B测试完成: {result.test_name}"))
+        else:
+            self.show_status(_("A/B测试失败"))
+
+    def _update_ab_test_results(self, result) -> None:
+        """更新A/B测试结果表格"""
+        self.ab_result_table.setRowCount(len(result.model_results))
+
+        for row, (model_id, metrics) in enumerate(result.model_results.items()):
+            # 获取模型名称
+            metadata = self.gui_engine.model_manager.get_model_metadata(model_id)
+            model_name = metadata.model_name if metadata else model_id
+
+            self.ab_result_table.setItem(row, 0, QtWidgets.QTableWidgetItem(model_name))
+
+            # 填充指标
+            self.ab_result_table.setItem(row, 1, QtWidgets.QTableWidgetItem(
+                f"{metrics.get('accuracy', 0):.2%}"))
+            self.ab_result_table.setItem(row, 2, QtWidgets.QTableWidgetItem(
+                f"{metrics.get('ic', 0):.4f}"))
+            self.ab_result_table.setItem(row, 3, QtWidgets.QTableWidgetItem(
+                f"{metrics.get('mse', 0):.6f}"))
+            self.ab_result_table.setItem(row, 4, QtWidgets.QTableWidgetItem(
+                f"{metrics.get('mae', 0):.6f}"))
+            self.ab_result_table.setItem(row, 5, QtWidgets.QTableWidgetItem(
+                f"{metrics.get('sharpe_ratio', 0):.4f}"))
+
+        self.ab_result_table.resizeColumnsToContents()
+
+    def _update_ab_test_history(self) -> None:
+        """更新A/B测试历史"""
+        if not self.gui_engine:
+            return
+
+        history = self.gui_engine.get_ab_test_history()
+
+        self.ab_test_history_table.setRowCount(len(history))
+
+        for row, result in enumerate(history):
+            self.ab_test_history_table.setItem(row, 0, QtWidgets.QTableWidgetItem(result.test_name))
+
+            time_str = result.timestamp.strftime("%Y-%m-%d %H:%M")
+            self.ab_test_history_table.setItem(row, 1, QtWidgets.QTableWidgetItem(time_str))
+
+            winner = result.winner or "无"
+            self.ab_test_history_table.setItem(row, 2, QtWidgets.QTableWidgetItem(winner))
+
+            sig_text = ""
+            if result.significance is not None:
+                sig_status = _("显著") if result.is_significant() else _("不显著")
+                sig_text = f"{sig_status} (p={result.significance:.4f})"
+            self.ab_test_history_table.setItem(row, 3, QtWidgets.QTableWidgetItem(sig_text))
+
+        self.ab_test_history_table.resizeColumnsToContents()
 
     def show_status(self, msg: str) -> None:
         """显示状态信息"""

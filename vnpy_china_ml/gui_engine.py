@@ -15,6 +15,9 @@ from vnpy.trader.object import BarData, TickData
 
 from .model.manager import ModelManager, ModelMetadata
 from .model.china_model import ChinaAlphaModel
+from .model.version_manager import ModelVersionManager
+from .model.ab_tester import ModelABTester
+from .model.ab_test import ABTestConfig, ABTestResult, ModelVersionInfo
 from .utils.types import ModelType, PredictionResult, SignalType
 
 # 数据管理模块导入
@@ -46,6 +49,16 @@ class ChinaMlGuiEngine(BaseEngine):
 
         # 模型管理器
         self.model_manager: ModelManager = ModelManager()
+
+        # 版本管理器
+        self.version_manager: ModelVersionManager = ModelVersionManager(
+            model_manager=self.model_manager
+        )
+
+        # A/B测试器
+        self.ab_tester: ModelABTester = ModelABTester(
+            model_manager=self.model_manager
+        )
 
         # 存储预测结果
         self.predictions: List[PredictionResult] = []
@@ -855,6 +868,252 @@ class ChinaMlGuiEngine(BaseEngine):
         except Exception as e:
             self._log(f"更新调度器配置失败: {e}")
             return False
+
+    # ==================== 版本管理 ====================
+
+    def get_model_versions(self, model_name: str) -> List[ModelMetadata]:
+        """获取模型的所有版本
+
+        Args:
+            model_name: 模型名称
+
+        Returns:
+            版本历史列表
+        """
+        return self.version_manager.get_version_history(model_name)
+
+    def get_version_tree(self, model_name: str) -> List[Dict]:
+        """获取模型版本树
+
+        Args:
+            model_name: 模型名称
+
+        Returns:
+            版本树列表（包含父子关系）
+        """
+        return self.version_manager.get_version_tree(model_name)
+
+    def create_model_version(
+        self,
+        model_name: str,
+        version: str,
+        tag: str = "development",
+        changelog: str = ""
+    ) -> Optional[str]:
+        """创建模型新版本
+
+        Args:
+            model_name: 模型名称
+            version: 版本号（如 "1.0.0"）
+            tag: 版本标签
+            changelog: 变更日志
+
+        Returns:
+            新版本模型ID
+        """
+        new_id = self.version_manager.create_version(
+            model_name=model_name,
+            version=version,
+            tag=tag,
+            changelog=changelog
+        )
+
+        if new_id:
+            self._log(f"已创建新版本: {model_name} v{version} ({new_id})")
+        else:
+            self._log(f"创建版本失败: {model_name} v{version}")
+
+        return new_id
+
+    def rollback_model(self, model_id: str) -> bool:
+        """回滚模型到指定版本
+
+        Args:
+            model_id: 目标版本模型ID
+
+        Returns:
+            是否回滚成功
+        """
+        result = self.version_manager.rollback_to_version(model_id)
+
+        if result:
+            self._log(f"已回滚到版本: {model_id}")
+        else:
+            self._log(f"回滚失败: {model_id}")
+
+        return result
+
+    def compare_model_versions(self, model_id_1: str, model_id_2: str) -> Dict:
+        """对比两个模型版本
+
+        Args:
+            model_id_1: 模型1 ID
+            model_id_2: 模型2 ID
+
+        Returns:
+            对比结果字典
+        """
+        return self.version_manager.compare_versions(model_id_1, model_id_2)
+
+    def set_production_version(self, model_id: str) -> bool:
+        """设置生产版本
+
+        Args:
+            model_id: 模型ID
+
+        Returns:
+            是否设置成功
+        """
+        result = self.version_manager.set_production_version(model_id)
+
+        if result:
+            self._log(f"已设置生产版本: {model_id}")
+        else:
+            self._log(f"设置生产版本失败: {model_id}")
+
+        return result
+
+    def get_production_version(self, model_name: str) -> Optional[ModelMetadata]:
+        """获取生产版本
+
+        Args:
+            model_name: 模型名称
+
+        Returns:
+            生产版本的元数据
+        """
+        return self.version_manager.get_production_version(model_name)
+
+    def tag_model_version(self, model_id: str, tag: str) -> bool:
+        """为模型版本打标签
+
+        Args:
+            model_id: 模型ID
+            tag: 标签（production/staging/development）
+
+        Returns:
+            是否打标签成功
+        """
+        result = self.version_manager.tag_version(model_id, tag)
+
+        if result:
+            self._log(f"已为版本打标签: {model_id} -> {tag}")
+        else:
+            self._log(f"打标签失败: {model_id}")
+
+        return result
+
+    # ==================== A/B测试 ====================
+
+    def create_ab_test(
+        self,
+        test_name: str,
+        model_ids: List[str],
+        start_date: date,
+        end_date: date,
+        metrics: Optional[List[str]] = None
+    ) -> Optional[str]:
+        """创建A/B测试
+
+        Args:
+            test_name: 测试名称
+            model_ids: 参与测试的模型ID列表
+            start_date: 测试数据开始日期
+            end_date: 测试数据结束日期
+            metrics: 评估指标列表
+
+        Returns:
+            测试ID
+        """
+        config = ABTestConfig(
+            test_name=test_name,
+            model_ids=model_ids,
+            test_data_start=start_date,
+            test_data_end=end_date,
+            metrics=metrics or ["accuracy", "ic"]
+        )
+
+        test_id = self.ab_tester.create_test(config)
+
+        if test_id:
+            self._log(f"已创建A/B测试: {test_name} ({test_id})")
+        else:
+            self._log(f"创建A/B测试失败: {test_name}")
+
+        return test_id
+
+    def run_ab_test(
+        self,
+        test_id: str,
+        X: np.ndarray,
+        y: np.ndarray,
+        metrics: Optional[List[str]] = None
+    ) -> Optional[ABTestResult]:
+        """运行A/B测试
+
+        Args:
+            test_id: 测试ID
+            X: 测试特征矩阵
+            y: 测试目标变量
+            metrics: 评估指标列表
+
+        Returns:
+            测试结果
+        """
+        self._log(f"正在运行A/B测试: {test_id}...")
+
+        result = self.ab_tester.run_test(test_id, X, y, metrics)
+
+        if result:
+            self._log(f"A/B测试完成: {result.test_name}")
+            if result.winner:
+                self._log(f"推荐模型: {result.winner}")
+            if result.significance is not None:
+                sig_status = "显著" if result.is_significant() else "不显著"
+                self._log(f"统计显著性: {sig_status} (p={result.significance:.4f})")
+        else:
+            self._log(f"A/B测试失败: {test_id}")
+
+        return result
+
+    def get_ab_test_results(self, test_id: str) -> Optional[ABTestResult]:
+        """获取A/B测试结果
+
+        Args:
+            test_id: 测试ID
+
+        Returns:
+            测试结果
+        """
+        return self.ab_tester.get_test_result(test_id)
+
+    def get_ab_test_history(self) -> List[ABTestResult]:
+        """获取A/B测试历史
+
+        Returns:
+            所有测试结果列表
+        """
+        return self.ab_tester.get_test_history()
+
+    def compare_models(
+        self,
+        model_ids: List[str],
+        X: np.ndarray,
+        y: np.ndarray,
+        metrics: Optional[List[str]] = None
+    ) -> Dict[str, Dict]:
+        """快速对比多个模型
+
+        Args:
+            model_ids: 模型ID列表
+            X: 特征矩阵
+            y: 目标变量
+            metrics: 评估指标列表
+
+        Returns:
+            模型ID到指标结果的映射
+        """
+        return self.ab_tester.compare_models(model_ids, X, y, metrics)
 
 
 __all__ = ["ChinaMlGuiEngine"]
