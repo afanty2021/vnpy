@@ -78,13 +78,9 @@ class RpcQmtDataAdapter(BaseDataAdapter):
             # 启动RPC客户端
             self._rpc_client.start(self.req_address, self.sub_address)
 
-            # 测试连接
-            try:
-                # 调用远程方法测试连接
-                self._rpc_client.connect(timeout=5000)
-            except AttributeError:
-                # 如果connect方法不存在，说明连接成功但RPC服务没有提供这个方法
-                pass
+            # 等待一小段时间确保连接建立
+            import time
+            time.sleep(0.5)
 
             self._connected = True
             print(f"RPC QMT适配器已连接: {self.req_address}")
