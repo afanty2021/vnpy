@@ -5,7 +5,7 @@ A股数据服务主类
 整合QMT实时数据和Tushare离线数据。
 """
 
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from datetime import datetime, date
 from threading import Lock
 from pathlib import Path
