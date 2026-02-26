@@ -439,6 +439,27 @@ class QMTDataAdapter(BaseDataAdapter):
             print(f"QMT获取板块指数失败: {e}")
             return []
 
+    # ========== 龙虎榜数据 ==========
+
+    def get_dragon_tiger_data(self, trade_date: str) -> List:
+        """获取龙虎榜数据
+
+        QMT 暂不支持直接获取龙虎榜数据，返回空列表。
+        龙虎榜数据需要通过其他方式获取（如东方财富、同花顺等）。
+
+        Args:
+            trade_date: 交易日期 (YYYYMMDD)
+
+        Returns:
+            龙虎榜数据列表
+        """
+        # QMT 目前不提供龙虎榜数据接口
+        # 实际项目中可以通过以下方式获取：
+        # 1. 东方财富 API
+        # 2. 同花顺 API
+        # 3. Tushare (需要高级权限)
+        return []
+
 
 class RealtimeBarGenerator:
     """实时K线生成器

@@ -318,14 +318,21 @@ class ChinaDataService(
         self,
         trade_date: date
     ) -> List[InterfaceDragonTigerData]:
-        """获取指定日期的龙虎榜数据"""
+        """获取指定日期的龙虎榜数据
+
+        Note: 龙虎榜数据获取有限制：
+        - Tushare 需要高级权限
+        - QMT 暂不支持龙虎榜数据接口
+
+        建议使用东方财富、同花顺等第三方数据源。
+        """
         # 尝试从缓存获取
         cache_key = f"dragon_tiger_{trade_date.isoformat()}"
         cached = self.cache.get(cache_key)
         if cached:
             return [DragonTigerData.from_dict(d) for d in cached]
 
-        # 从Tushare获取
+        # 从Tushare获取（需要高级权限）
         trade_date_str = trade_date.strftime("%Y%m%d")
         data = self.tushare_adapter.get_dragon_tiger_data(trade_date_str)
 
@@ -334,6 +341,16 @@ class ChinaDataService(
             serialized = [d.to_dict() for d in data]
             self.cache.set(cache_key, serialized, ttl=7 * 86400)
             return data
+
+        # 如果没有数据，输出提示
+        import logging
+        logger = logging.getLogger("vnpy_china_data")
+        logger.warning(
+            f"未获取到 {trade_date_str} 的龙虎榜数据。"
+            f"Tushare 需要高级权限访问龙虎榜数据，"
+            f"建议使用东方财富、同花顺等第三方数据源。"
+        )
+
         return []
 
     def get_institution_rank(
