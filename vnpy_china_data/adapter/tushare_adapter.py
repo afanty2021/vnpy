@@ -121,8 +121,7 @@ class TushareDataAdapter(BaseDataAdapter):
 
         if interval == Interval.DAILY:
             return self._get_daily_bars(ts_code, start, end)
-        elif interval in [Interval.MINUTE_1, Interval.MINUTE_5,
-                          Interval.MINUTE_15, Interval.MINUTE_30]:
+        elif interval == Interval.MINUTE:
             return self._get_minute_bars(ts_code, start, end, interval)
         else:
             return []
@@ -178,15 +177,10 @@ class TushareDataAdapter(BaseDataAdapter):
         """获取分钟线数据
 
         Note: Tushare分钟线需要高级权限
+        VeighNa 使用 Interval.MINUTE 表示分钟线，默认使用1分钟
         """
-        # 转换为Tushare频率格式
-        freq_map = {
-            Interval.MINUTE_1: "1min",
-            Interval.MINUTE_5: "5min",
-            Interval.MINUTE_15: "15min",
-            Interval.MINUTE_30: "30min",
-        }
-        freq = freq_map.get(interval, "5min")
+        # VeighNa Interval.MINUTE 表示分钟线，默认使用1分钟
+        freq = "1min"
 
         start_time = start.strftime("%Y%m%d%H%M%S")
         end_time = end.strftime("%Y%m%d%H%M%S")

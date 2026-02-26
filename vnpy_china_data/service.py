@@ -237,19 +237,61 @@ class ChinaDataService(
         start: datetime,
         end: datetime
     ) -> List[BarData]:
-        """从API获取K线数据"""
+        """从API获取K线数据
+
+        优先使用 QMT（券商提供，数据更全），其次使用 Tushare。
+        """
         # 转换symbol为tushare格式
         ts_code = self._convert_to_ts_code(symbol, exchange)
 
         if interval == Interval.MINUTE:
             # 分钟线：优先使用QMT
-            if self.qmt_adapter.connected:
-                return self.qmt_adapter.get_bar_data(symbol, exchange, interval, start, end)
-            else:
-                return self.tushare_adapter.get_bar_data(symbol, exchange, interval, start, end)
+            if self.qmt_adapter and self.qmt_adapter.connected:
+                try:
+                    bars = self.qmt_adapter.get_bar_data(symbol, exchange, interval, start, end)
+                    if bars:
+                        return bars
+                except Exception as e:
+                    import logging
+                    logger = logging.getLogger("vnpy_china_data")
+                    logger.warning(f"QMT获取分钟线失败: {e}，尝试Tushare")
+
+            # Fallback: Tushare (需要高级权限)
+            bars = self.tushare_adapter.get_bar_data(symbol, exchange, interval, start, end)
+            if bars:
+                return bars
+
+            import logging
+            logger = logging.getLogger("vnpy_china_data")
+            logger.warning(
+                f"无法获取{ts_code}分钟线数据。"
+                f"QMT未连接或Tushare需要高级权限。"
+            )
+            return []
         else:
-            # 日线及以上：使用Tushare
-            return self.tushare_adapter.get_bar_data(symbol, exchange, interval, start, end)
+            # 日线及以上：优先使用QMT，其次使用Tushare
+            if self.qmt_adapter and self.qmt_adapter.connected:
+                try:
+                    bars = self.qmt_adapter.get_bar_data(symbol, exchange, interval, start, end)
+                    if bars:
+                        return bars
+                except Exception as e:
+                    import logging
+                    logger = logging.getLogger("vnpy_china_data")
+                    logger.warning(f"QMT获取日线失败: {e}，尝试Tushare")
+
+            # Fallback: Tushare
+            bars = self.tushare_adapter.get_bar_data(symbol, exchange, interval, start, end)
+            if bars:
+                return bars
+
+            import logging
+            logger = logging.getLogger("vnpy_china_data")
+            logger.warning(
+                f"无法获取{ts_code}数据。"
+                f"QMT未连接或Tushare无数据。"
+            )
+            return []
 
     def get_tick_data(
         self,

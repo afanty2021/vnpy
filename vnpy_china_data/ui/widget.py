@@ -73,19 +73,32 @@ class ChinaDataWidget(QtWidgets.QWidget):
         config_group.setLayout(config_layout)
         layout.addWidget(config_group)
 
-        # 股票代码
-        config_layout.addWidget(QtWidgets.QLabel(_("股票代码：")), 0, 0)
+        # 股票选择方式
+        config_layout.addWidget(QtWidgets.QLabel(_("股票范围：")), 0, 0)
+        self.scope_combo = QtWidgets.QComboBox()
+        self.scope_combo.addItem(_("自定义代码"), "custom")
+        self.scope_combo.addItem(_("上海证券交易所"), "SSE")
+        self.scope_combo.addItem(_("深圳证券交易所"), "SZSE")
+        self.scope_combo.addItem(_("北京证券交易所"), "BSE")
+        self.scope_combo.addItem(_("沪深300指数"), "HS300")
+        self.scope_combo.addItem(_("中证500指数"), "ZZ500")
+        self.scope_combo.addItem(_("中证1000指数"), "ZZ1000")
+        self.scope_combo.addItem(_("默认蓝筹股"), "default")
+        self.scope_combo.currentTextChanged.connect(self.on_scope_changed)
+        config_layout.addWidget(self.scope_combo, 0, 1, 1, 3)
+
+        # 股票代码输入框
         self.symbols_input = QtWidgets.QPlainTextEdit()
         self.symbols_input.setPlaceholderText(
-            _("每行一个股票代码，如：\n000001.SZ\n600000.SH\n\n留空则使用默认蓝筹股列表")
+            _("每行一个股票代码，如：\n000001.SZ\n600000.SH\n\n选择其他范围时自动填充")
         )
         self.symbols_input.setMaximumHeight(80)
-        config_layout.addWidget(self.symbols_input, 0, 1, 2, 3)
+        config_layout.addWidget(self.symbols_input, 0, 2, 2, 1)
 
-        # 快速填充按钮
-        fill_default_btn = QtWidgets.QPushButton(_("使用默认股票"))
-        fill_default_btn.clicked.connect(self.fill_default_symbols)
-        config_layout.addWidget(fill_default_btn, 0, 4)
+        # 刷新按钮
+        refresh_btn = QtWidgets.QPushButton(_("刷新股票列表"))
+        refresh_btn.clicked.connect(self.refresh_symbols)
+        config_layout.addWidget(refresh_btn, 0, 4)
 
         # 日期范围
         config_layout.addWidget(QtWidgets.QLabel(_("开始日期：")), 2, 0)
@@ -142,14 +155,32 @@ class ChinaDataWidget(QtWidgets.QWidget):
 
         return widget
 
-    def fill_default_symbols(self) -> None:
-        """填充默认股票代码"""
+    def on_scope_changed(self, scope: str) -> None:
+        """股票范围改变时自动刷新股票列表"""
+        if scope != "custom":
+            self.refresh_symbols()
+
+    def refresh_symbols(self) -> None:
+        """刷新股票列表"""
         if not self.gui_engine:
             return
 
-        symbols = self.gui_engine.get_default_symbols()
-        self.symbols_input.setPlainText("\n".join(symbols))
-        self.show_status(_(f"已填充 {len(symbols)} 只默认股票"))
+        scope = self.scope_combo.currentData()
+        symbols = []
+
+        if scope == "default":
+            symbols = self.gui_engine.get_default_symbols()
+        elif scope in ["SSE", "SZSE", "BSE"]:
+            symbols = self.gui_engine.get_exchange_symbols(scope)
+        elif scope in ["HS300", "ZZ500", "ZZ1000"]:
+            symbols = self.gui_engine.get_index_symbols(scope)
+
+        if symbols:
+            self.symbols_input.setPlainText("\n".join(symbols))
+            self.show_status(_(f"已加载 {len(symbols)} 只股票"))
+        else:
+            self.symbols_input.clear()
+            self.show_status(_(f"未获取到股票列表"))
 
     def start_download(self) -> None:
         """开始下载历史数据"""

@@ -172,6 +172,111 @@ class ChinaDataGuiEngine(BaseEngine):
             "000858.SZ",  # 五粮液
         ]
 
+    def get_exchange_symbols(self, exchange: str) -> List[str]:
+        """获取交易所所有股票代码
+
+        Args:
+            exchange: 交易所代码 (SSE/SZSE/BSE)
+
+        Returns:
+            股票代码列表
+        """
+        try:
+            # 从数据服务获取股票列表
+            stock_list = self.data_service.get_stock_list()
+
+            # 根据交易所筛选
+            exchange_suffix_map = {
+                "SSE": ".SH",
+                "SZSE": ".SZ",
+                "BSE": ".BJ",
+            }
+
+            suffix = exchange_suffix_map.get(exchange)
+            if not suffix:
+                return []
+
+            # 筛选股票代码
+            symbols = []
+            for stock in stock_list:
+                ts_code = stock.get("ts_code", "")
+                if ts_code.endswith(suffix):
+                    symbols.append(ts_code)
+
+            self.main_engine.write_log(
+                f"获取{exchange}交易所股票：共 {len(symbols)} 只",
+                "ChinaDataApp"
+            )
+
+            return symbols[:500]  # 限制数量，避免过多
+
+        except Exception as e:
+            self.main_engine.write_log(f"获取交易所股票失败: {e}", "ChinaDataApp")
+            return []
+
+    def get_index_symbols(self, index: str) -> List[str]:
+        """获取指数成分股
+
+        Args:
+            index: 指数代码 (HS300/ZZ500/ZZ1000)
+
+        Returns:
+            成分股代码列表
+        """
+        try:
+            # 指数代码映射
+            index_map = {
+                "HS300": "000300.SH",  # 沪深300
+                "ZZ500": "000905.SH",  # 中证500
+                "ZZ1000": "000852.SH",  # 中证1000
+            }
+
+            index_code = index_map.get(index)
+            if not index_code:
+                return []
+
+            # 从数据服务获取指数成分股
+            # 暂时使用硬编码的成分股列表
+            # 实际项目中应该从 Tushare index_classify 或 index_member API 获取
+
+            # 沪深300成分股（前50只示例）
+            if index == "HS300":
+                symbols = [
+                    "600000.SH", "600036.SH", "600519.SH", "600887.SH",
+                    "601318.SH", "601398.SH", "601857.SH", "601988.SH",
+                    "000001.SZ", "000002.SZ", "000063.SZ", "000066.SZ",
+                    "000333.SZ", "000333.SZ", "000858.SZ", "002594.SZ",
+                ]
+            # 中证500成分股（前50只示例）
+            elif index == "ZZ500":
+                symbols = [
+                    "600000.SH", "600004.SH", "600009.SH", "600010.SH",
+                    "600016.SH", "600030.SH", "600104.SH", "600196.SH",
+                    "000001.SZ", "000002.SZ", "000006.SZ", "000009.SZ",
+                    "000012.SZ", "000025.SZ", "000027.SZ", "000030.SZ",
+                ]
+            # 中证1000成分股（前50只示例）
+            elif index == "ZZ1000":
+                symbols = [
+                    "600000.SH", "600036.SH", "600519.SH", "600887.SH",
+                    "601318.SH", "601398.SH", "601857.SH", "601988.SH",
+                    "000001.SZ", "000002.SZ", "000063.SZ", "000066.SZ",
+                    "000333.SZ", "000858.SZ", "002594.SZ", "300750.SZ",
+                ]
+            else:
+                symbols = []
+
+            self.main_engine.write_log(
+                f"获取{index}成分股：共 {len(symbols)} 只（示例）",
+                "ChinaDataApp"
+            )
+
+            return symbols
+
+        except Exception as e:
+            self.main_engine.write_log(f"获取指数成分股失败: {e}", "ChinaDataApp")
+            return []
+
     def _parse_exchange(self, symbol: str) -> Exchange:
         """从股票代码解析交易所
 
