@@ -241,6 +241,12 @@ class ChinaDataService(
         # 转换symbol为tushare格式
         ts_code = self._convert_to_ts_code(symbol, exchange)
 
+        # 处理 Interval 映射：将通用 MINUTE/HOUR 映射到具体的 MINUTE_1/HOUR_1
+        if interval == Interval.MINUTE:
+            interval = Interval.MINUTE_1
+        elif interval == Interval.HOUR:
+            interval = Interval.HOUR_1
+
         if interval in [Interval.MINUTE_1, Interval.MINUTE_5,
                        Interval.MINUTE_15, Interval.MINUTE_30]:
             # 分钟线：优先使用QMT
