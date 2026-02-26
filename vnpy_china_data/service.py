@@ -72,6 +72,13 @@ class ChinaDataService(
         self.config: DataModuleConfig = config_manager.load_module_config("data", DataModuleConfig)
         self.global_config = config_manager.load_global_config()
 
+        # 调试：打印配置加载信息
+        import logging
+        logger = logging.getLogger("vnpy_china_data")
+        logger.info(f"ConfigManager配置路径: {config_manager.config_path.absolute()}")
+        logger.info(f"MySQL用户: {self.global_config.database.mysql_user}")
+        logger.info(f"MySQL密码长度: {len(self.global_config.database.mysql_password)}")
+
         # 初始化组件
         self.cache = DataQueryCache(
             host=self.global_config.database.redis_host,
@@ -375,7 +382,16 @@ class ChinaDataService(
         if cached:
             return [SectorData.from_dict(d) for d in cached]
 
-        # 从Tushare获取
+        # 优先使用 QMT 适配器（无需特殊权限）
+        if self.qmt_adapter:
+            data = self.qmt_adapter.get_sector_list()
+            if data:
+                # 缓存1天
+                serialized = [d.to_dict() for d in data]
+                self.cache.set(cache_key, serialized, ttl=86400)
+                return data
+
+        # Fallback: 从Tushare获取
         data = self.tushare_adapter.get_sector_list()
 
         if data:
@@ -397,7 +413,13 @@ class ChinaDataService(
         end_date: str
     ) -> List[BarData]:
         """获取板块指数数据"""
-        # 简化实现
+        # 优先使用 QMT 适配器
+        if self.qmt_adapter:
+            data = self.qmt_adapter.get_sector_index(sector_code, start_date, end_date)
+            if data:
+                return data
+
+        # Fallback: 简化实现
         return []
 
     # ========== 资金流向数据 ==========

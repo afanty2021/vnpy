@@ -241,6 +241,9 @@ class RpcQmtDataAdapter(BaseDataAdapter):
     def _on_tick(self, tick: TickData) -> None:
         """处理Tick数据"""
         with self._lock:
+            # 增强Tick数据，添加A股特有字段
+            self._enhance_tick_data(tick)
+
             # 更新缓存
             self._tick_cache[tick.vt_symbol] = tick
             self._tick_count += 1
@@ -257,6 +260,40 @@ class RpcQmtDataAdapter(BaseDataAdapter):
             # 发布事件
             if self.event_engine:
                 self.event_engine.put(tick)
+
+    def _enhance_tick_data(self, tick: TickData) -> None:
+        """增强Tick数据，添加A股特有字段
+
+        添加字段：
+        - turnover: 成交额
+        - volume_ratio: 量比
+        - change_pct: 涨跌幅
+        - avg_price: 分时均价
+        """
+        # 成交额 = 成交量 * 最新价
+        if not hasattr(tick, 'turnover') or tick.turnover == 0:
+            turnover = tick.volume * tick.last_price
+            setattr(tick, 'turnover', turnover)
+
+        # 涨跌幅 = (最新价 - 昨收) / 昨收 * 100
+        if not hasattr(tick, 'change_pct'):
+            if tick.pre_close and tick.pre_close > 0:
+                change_pct = (tick.last_price - tick.pre_close) / tick.pre_close * 100
+                setattr(tick, 'change_pct', change_pct)
+            else:
+                setattr(tick, 'change_pct', 0.0)
+
+        # 分时均价 = 成交额 / 成交量
+        if not hasattr(tick, 'avg_price'):
+            if tick.volume > 0:
+                avg_price = getattr(tick, 'turnover', 0) / tick.volume
+                setattr(tick, 'avg_price', avg_price)
+            else:
+                setattr(tick, 'avg_price', tick.last_price)
+
+        # 量比需要累积数据，暂时设为1.0
+        if not hasattr(tick, 'volume_ratio'):
+            setattr(tick, 'volume_ratio', 1.0)
 
     def _on_bar(self, bar: BarData) -> None:
         """K线生成回调"""
@@ -318,6 +355,100 @@ class RpcQmtDataAdapter(BaseDataAdapter):
         """订阅数量"""
         return len(self._subscribed_symbols)
 
+    # ========== 板块数据 ==========
+
+    def get_sector_list(self) -> List:
+        """获取板块列表
+
+        通过RPC调用QMT服务获取板块列表。
+        如果RPC调用失败，返回硬编码的板块列表作为fallback。
+        """
+        # 首先尝试RPC调用
+        try:
+            if self._rpc_client and self._connected:
+                result = self._rpc_client.call("get_sector_list")
+                if result:
+                    from ..models.sector import SectorData
+                    return [SectorData.from_dict(d) if isinstance(d, dict) else d for d in result]
+        except Exception as e:
+            pass  # Fallback到硬编码列表
+
+        # Fallback: 返回硬编码的申万行业板块
+        try:
+            from ..models.sector import SectorData
+
+            sector_list = []
+            sw_sectors = {
+                "801010": "农林牧渔",
+                "801020": "采掘",
+                "801030": "化工",
+                "801040": "钢铁",
+                "801050": "有色金属",
+                "801080": "电子",
+                "801110": "家用电器",
+                "801120": "食品饮料",
+                "801130": "纺织服装",
+                "801140": "轻工制造",
+                "801150": "医药生物",
+                "801160": "公用事业",
+                "801170": "交通运输",
+                "801180": "房地产",
+                "801200": "商业贸易",
+                "801210": "休闲服务",
+                "801230": "综合",
+                "801710": "建筑材料",
+                "801720": "建筑装饰",
+                "801730": "电气设备",
+                "801740": "国防军工",
+                "801750": "计算机",
+                "801760": "传媒",
+                "801770": "通信",
+                "801780": "银行",
+                "801790": "非银金融",
+                "801880": "汽车",
+                "801890": "机械设备",
+            }
+
+            for code, name in sw_sectors.items():
+                sector = SectorData(
+                    sector_code=code,
+                    sector_name=name,
+                    trade_date=datetime.now().date(),
+                    change_pct=0.0,
+                )
+                sector_list.append(sector)
+
+            return sector_list
+
+        except Exception as e:
+            print(f"获取板块列表失败: {e}")
+            return []
+
+    def get_sector_index(
+        self,
+        sector_code: str,
+        start_date: str,
+        end_date: str
+    ) -> List[BarData]:
+        """获取板块指数数据
+
+        通过RPC调用QMT服务获取板块指数。
+
+        Args:
+            sector_code: 板块代码
+            start_date: 开始日期 (YYYYMMDD)
+            end_date: 结束日期 (YYYYMMDD)
+        """
+        try:
+            if self._rpc_client:
+                result = self._rpc_client.call("get_sector_index", sector_code, start_date, end_date)
+                if result:
+                    return [BarData(**d) if isinstance(d, dict) else d for d in result]
+            return []
+        except Exception as e:
+            print(f"RPC获取板块指数失败: {e}")
+            return []
+
 
 class CustomRpcClient(RpcClient):
     """自定义RPC客户端
@@ -332,29 +463,65 @@ class CustomRpcClient(RpcClient):
 
     def run(self) -> None:
         """运行RPC客户端循环"""
-        from vnpy.rpc.common import HEARTBEAT_TOLERANCE
-        from time import time
+        from time import time as current_time
         import zmq
 
+        # 心跳容忍时间（秒）
+        HEARTBEAT_TOLERANCE: int = 30
         pull_tolerance: int = HEARTBEAT_TOLERANCE * 1000
 
+        # 确保类型正确（调试信息）
+        assert isinstance(HEARTBEAT_TOLERANCE, int), f"HEARTBEAT_TOLERANCE必须是int，当前类型: {type(HEARTBEAT_TOLERANCE)}"
+
         while self._active:
-            if not self._socket_sub.poll(pull_tolerance):
-                self.on_disconnected()
+            now = current_time()
+            assert isinstance(now, float), f"now必须是float，当前类型: {type(now)}"
+
+            # 检查是否真正超时（基于上次收到消息的时间）
+            time_since_last_ping = (now - self._last_received_ping) * 1000
+            if time_since_last_ping > pull_tolerance:
+                # 只有在真正超过心跳容忍时间时才警告
+                # 然后继续等待新消息
+                if not hasattr(self, '_last_warning_time'):
+                    self.on_disconnected()
+                    self._last_warning_time = now
+                else:
+                    # 确保_last_warning_time是数值类型
+                    last_warning = self._last_warning_time
+                    if isinstance(last_warning, (int, float)):
+                        if (now - last_warning) > HEARTBEAT_TOLERANCE:
+                            self.on_disconnected()
+                            self._last_warning_time = now
+                    else:
+                        # 类型错误，重置并记录
+                        print(f"警告: _last_warning_time类型错误 ({type(last_warning)})，重置为当前时间")
+                        self._last_warning_time = now
+
+            # 使用较短的轮询间隔，以便更频繁地检查超时状态
+            # 但也允许处理连续的消息流
+            short_poll_timeout = min(1000, pull_tolerance - int(time_since_last_ping))
+            if short_poll_timeout < 100:
+                short_poll_timeout = 100
+
+            if not self._socket_sub.poll(short_poll_timeout):
                 continue
 
             # Receive data from subscribe socket
-            topic, data = self._socket_sub.recv_pyobj(flags=zmq.NOBLOCK)
+            try:
+                topic, data = self._socket_sub.recv_pyobj(flags=zmq.NOBLOCK)
 
-            # 收到任何消息都更新心跳时间戳
-            self._last_received_ping = time()
+                # 收到任何消息都更新心跳时间戳
+                self._last_received_ping = current_time()
 
-            if topic == "heartbeat":
-                pass  # 心跳消息
-            else:
-                # Process data by callable function
-                if self.callback:
-                    self.callback(topic, data)
+                if topic == "heartbeat":
+                    pass  # 心跳消息
+                else:
+                    # Process data by callable function
+                    if self.callback:
+                        self.callback(topic, data)
+            except zmq.ZMQError as e:
+                # 接收错误，忽略并继续
+                pass
 
         # Close socket
         self._socket_req.close()

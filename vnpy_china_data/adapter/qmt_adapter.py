@@ -23,6 +23,8 @@ class QMTDataAdapter(BaseDataAdapter):
     - 实时行情订阅
     - Tick数据获取
     - 实时K线生成
+    - 申万行业板块数据
+    - 板块成分股查询
     """
 
     def __init__(
@@ -302,6 +304,141 @@ class QMTDataAdapter(BaseDataAdapter):
         """订阅数量"""
         return len(self._subscribed_symbols)
 
+    # ========== 板块数据 ==========
+
+    def get_sector_list(self) -> List:
+        """获取板块列表
+
+        使用 QMT API 获取申万行业板块分类。
+
+        Returns:
+            板块列表
+        """
+        try:
+            from ..models.sector import SectorData
+
+            sector_list = []
+
+            # 常见申万一级行业（硬编码，无需连接即可使用）
+            sw_sectors = {
+                "801010": "农林牧渔",
+                "801020": "采掘",
+                "801030": "化工",
+                "801040": "钢铁",
+                "801050": "有色金属",
+                "801080": "电子",
+                "801110": "家用电器",
+                "801120": "食品饮料",
+                "801130": "纺织服装",
+                "801140": "轻工制造",
+                "801150": "医药生物",
+                "801160": "公用事业",
+                "801170": "交通运输",
+                "801180": "房地产",
+                "801200": "商业贸易",
+                "801210": "休闲服务",
+                "801230": "综合",
+                "801710": "建筑材料",
+                "801720": "建筑装饰",
+                "801730": "电气设备",
+                "801740": "国防军工",
+                "801750": "计算机",
+                "801760": "传媒",
+                "801770": "通信",
+                "801780": "银行",
+                "801790": "非银金融",
+                "801880": "汽车",
+                "801890": "机械设备",
+            }
+
+            for code, name in sw_sectors.items():
+                sector = SectorData(
+                    sector_code=code,
+                    sector_name=name,
+                    trade_date=datetime.now().date(),
+                    change_pct=0.0,
+                )
+                sector_list.append(sector)
+
+            return sector_list
+
+        except Exception as e:
+            print(f"QMT获取板块列表失败: {e}")
+            return []
+
+    def get_sector_stocks(self, sector_code: str) -> List[str]:
+        """获取板块成分股
+
+        Args:
+            sector_code: 板块代码
+
+        Returns:
+            成分股代码列表
+        """
+        if not self._connected or not self._qmt_api:
+            return []
+
+        try:
+            # QMT API: 获取板块成分股
+            if hasattr(self._qmt_api, 'get_stock_list_in_sector'):
+                stock_list = self._qmt_api.get_stock_list_in_sector(sector_code)
+                return stock_list if stock_list else []
+            return []
+        except Exception as e:
+            print(f"QMT获取板块成分股失败: {e}")
+            return []
+
+    def get_sector_index(
+        self,
+        sector_code: str,
+        start_date: str,
+        end_date: str
+    ) -> List[BarData]:
+        """获取板块指数数据
+
+        Args:
+            sector_code: 板块代码
+            start_date: 开始日期 (YYYYMMDD)
+            end_date: 结束日期 (YYYYMMDD)
+
+        Returns:
+            K线数据列表
+        """
+        if not self._connected or not self._qmt_api:
+            return []
+
+        try:
+            # QMT API: 获取板块指数K线
+            if hasattr(self._qmt_api, 'download_history_data'):
+                bars = self._qmt_api.download_history_data(
+                    stock_code=sector_code,
+                    period="1d",
+                    start_time=start_date,
+                    end_time=end_date
+                )
+
+                result = []
+                for bar in bars:
+                    bar_data = BarData(
+                        symbol=sector_code,
+                        exchange=Exchange.SSE if sector_code.startswith("80") else Exchange.SZSE,
+                        datetime=datetime.strptime(bar["time"], "%Y%m%d %H:%M:%S"),
+                        interval=Interval.DAILY,
+                        open_price=bar.get("open", 0),
+                        high_price=bar.get("high", 0),
+                        low_price=bar.get("low", 0),
+                        close_price=bar.get("close", 0),
+                        volume=bar.get("volume", 0),
+                        turnover=bar.get("amount", 0),
+                    )
+                    result.append(bar_data)
+
+                return result
+            return []
+        except Exception as e:
+            print(f"QMT获取板块指数失败: {e}")
+            return []
+
 
 class RealtimeBarGenerator:
     """实时K线生成器
@@ -429,3 +566,4 @@ class RealtimeBarGenerator:
             Interval.HOUR_1: 3600,
         }
         return mapping.get(interval, 60)
+
