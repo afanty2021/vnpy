@@ -189,6 +189,13 @@ class ChinaMlGuiEngine(BaseEngine):
             模型ID，如果训练失败返回None
         """
         try:
+            # 处理 model_type 可能是字符串的情况
+            if isinstance(model_type, str):
+                try:
+                    model_type = ModelType(model_type)
+                except ValueError:
+                    raise ValueError(f"无效的模型类型: {model_type}")
+
             self._log(f"开始训练{model_type.value}模型: {model_name}")
 
             # 1. 准备训练数据
@@ -270,12 +277,11 @@ class ChinaMlGuiEngine(BaseEngine):
         """
         # 导入数据集模块
         try:
-            from ..dataset import create_alpha_dataset
+            from vnpy_china_ml.dataset import create_alpha_dataset
         except ImportError as e:
             raise RuntimeError(
                 f"数据集模块不可用: {e}\n"
-                f"请确保已安装 vnpy.alpha 模块\n"
-                f"安装命令: pip install vnpy-alpha"
+                f"请确保已正确安装 vnpy_china_ml 模块"
             )
 
         self._log("从数据库加载历史数据...")
@@ -441,7 +447,7 @@ class ChinaMlGuiEngine(BaseEngine):
 
         # 导入数据加载模块
         try:
-            from ..dataset import ChinaDataLoader, Alpha158Calculator
+            from vnpy_china_ml.dataset import ChinaDataLoader, Alpha158Calculator
         except ImportError as e:
             raise RuntimeError(
                 f"数据集模块不可用: {e}\n"
@@ -565,7 +571,7 @@ class ChinaMlGuiEngine(BaseEngine):
             RuntimeError: 当数据加载失败时
         """
         # 尝试使用真实数据计算因子
-        from ..dataset import ChinaDataLoader, Alpha158Calculator
+        from vnpy_china_ml.dataset import ChinaDataLoader, Alpha158Calculator
 
         self._log("计算Alpha 158因子...")
 
