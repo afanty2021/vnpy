@@ -170,7 +170,8 @@ class RpcQmtDataAdapter(BaseDataAdapter):
                 "interval": interval.value
             }
 
-            result = self._rpc_client.query_history(req, timeout=60000)
+            # MainEngine.query_history 需要 (req, gateway_name) 两个参数
+            result = self._rpc_client.query_history(req, "QMT", timeout=60000)
             return result if result else []
 
         except Exception as e:

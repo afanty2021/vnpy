@@ -154,8 +154,10 @@ class TestRpcQmtDataAdapter(unittest.TestCase):
             # 检查请求参数
             call_args = self.adapter._rpc_client.query_history.call_args
             req = call_args[0][0]
+            gateway_name = call_args[0][1]
             self.assertEqual(req["symbol"], "000001")
             self.assertEqual(req["exchange"], "SZSE")
+            self.assertEqual(gateway_name, "QMT")  # 验证 gateway_name 参数
 
     def test_get_bar_data_rpc_exception(self):
         """测试 RPC 调用异常情况"""
