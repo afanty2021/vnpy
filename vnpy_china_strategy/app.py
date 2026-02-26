@@ -6,7 +6,7 @@ A股策略应用模块
 from pathlib import Path
 from typing import Type
 from vnpy.trader.app import BaseApp
-from .engine import ChinaStrategyEngine
+from .gui_engine import ChinaStrategyGuiEngine
 
 
 class ChinaStrategyApp(BaseApp):
@@ -16,7 +16,7 @@ class ChinaStrategyApp(BaseApp):
     app_module: str = "vnpy_china_strategy"
     app_path: Path = Path(__file__).parent
     display_name: str = "A股策略"
-    engine_class: Type[ChinaStrategyEngine] = ChinaStrategyEngine
+    engine_class: Type[ChinaStrategyGuiEngine] = ChinaStrategyGuiEngine
     widget_name: str = "ChinaStrategyWidget"
     icon_name: str = "strategy.ico"
 
