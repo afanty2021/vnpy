@@ -82,6 +82,17 @@ class ChinaMlGuiEngine(BaseEngine):
         """初始化引擎"""
         self.main_engine.write_log("A股机器学习引擎初始化完成")
 
+        # 检查并创建预置模型（首次使用时）
+        if not self.model_manager.has_preset_models():
+            trained_count = len(self.model_manager.get_trained_models())
+            if trained_count == 0:
+                self._log("检测到首次使用，正在创建预置模型...")
+                count = self.model_manager.create_preset_models()
+                if count > 0:
+                    self._log(f"已创建 {count} 个预置模型，可以开始预测功能")
+                else:
+                    self._log("预置模型创建失败")
+
         # 启动数据更新调度器
         if self.data_scheduler:
             if self.data_scheduler.start():

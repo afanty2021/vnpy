@@ -288,6 +288,83 @@ class ModelManager:
         """
         return [m for m in self._models.values() if m.is_trained]
 
+    def has_preset_models(self) -> bool:
+        """检查是否有预置模型
+
+        Returns:
+            是否存在预置模型
+        """
+        return any(m.description.startswith("[预置]") for m in self._models.values())
+
+    def create_preset_models(self) -> int:
+        """创建预置模型（用于首次使用或演示）
+
+        使用模拟数据创建简单预训练模型，让用户可以快速体验功能。
+
+        Returns:
+            创建的模型数量
+        """
+        import numpy as np
+
+        created_count = 0
+        preset_configs = [
+            {
+                "name": "random_forest_preset",
+                "type": ModelType.RANDOM_FOREST,
+                "description": "[预置] 随机森林模型 - 使用模拟数据训练",
+                "accuracy": 0.65
+            },
+            {
+                "name": "lightgbm_preset",
+                "type": ModelType.LIGHTGBM,
+                "description": "[预置] LightGBM模型 - 使用模拟数据训练",
+                "accuracy": 0.68
+            },
+            {
+                "name": "lasso_preset",
+                "type": ModelType.LASSO,
+                "description": "[预置] Lasso回归模型 - 使用模拟数据训练",
+                "accuracy": 0.62
+            }
+        ]
+
+        for config in preset_configs:
+            # 检查是否已存在同名预置模型
+            existing = [m for m in self._models.values()
+                       if m.model_name == config["name"] and m.description.startswith("[预置]")]
+            if existing:
+                continue
+
+            try:
+                # 创建模型
+                model = ChinaAlphaModel(model_type=config["type"])
+
+                # 生成模拟训练数据
+                n_samples = 1000
+                n_features = 20
+                X = np.random.randn(n_samples, n_features)
+                y = np.random.randn(n_samples) * 0.02
+
+                # 训练模型
+                feature_names = [f"feature_{i}" for i in range(n_features)]
+                model.train(X, y, feature_names=feature_names)
+
+                # 注册模型
+                model_id = self.register_model(
+                    model_name=config["name"],
+                    model=model,
+                    accuracy=config["accuracy"],
+                    description=config["description"]
+                )
+
+                if model_id:
+                    created_count += 1
+
+            except Exception as e:
+                print(f"创建预置模型失败 {config['name']}: {e}")
+
+        return created_count
+
     def clear_all(self) -> None:
         """清空所有模型"""
         # 删除所有模型文件
