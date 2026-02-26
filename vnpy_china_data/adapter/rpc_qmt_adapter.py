@@ -6,7 +6,7 @@ RPC QMT数据适配器
 """
 
 from typing import List, Optional, Dict, Any, Callable
-from datetime import datetime, date
+from datetime import datetime, date, time
 from threading import Thread, Event, Lock
 from collections import defaultdict
 
@@ -135,28 +135,80 @@ class RpcQmtDataAdapter(BaseDataAdapter):
     ) -> List[BarData]:
         """获取K线数据
 
-        注意：RPC QMT 适配器不支持历史K线数据查询！
+        策略：
+        - 交易时段：返回空列表，避免干扰实时数据，让系统 fallback 到 Tushare
+        - 盘后时段：通过 RPC 调用 QMT 网关的 query_history 方法获取历史数据
 
-        RPC QMT 主要用于：
-        - 实时行情订阅
-        - Tick 数据获取
-
-        历史K线数据请使用：
-        1. Tushare 适配器（vnpy_china_data.tushare_adapter）
-        2. QMT 直连适配器（vnpy_china_data.qmt_adapter，仅 Windows）
-
-        此方法返回空列表，请求会自动 fallback 到 Tushare 适配器。
+        这样设计的原因：
+        1. QMT 在交易时段需要处理实时行情，不宜进行大量历史数据查询
+        2. 盘后时段可以充分利用 QMT 的历史数据补充功能
+        3. Tushare 作为备用数据源，随时可用
         """
         import logging
         logger = logging.getLogger("vnpy_china_data")
 
-        logger.warning(
-            "RPC QMT 不支持历史K线数据查询。"
-            "系统已自动切换到 Tushare 数据源。"
-        )
+        # 检查是否在交易时段
+        if self._is_trading_time():
+            logger.debug(
+                f"当前处于交易时段，RPC QMT 跳过历史数据查询 ({symbol})。"
+                "系统将使用 Tushare 数据源。"
+            )
+            return []
 
-        # 返回空列表，让调用方 fallback 到 Tushare
-        return []
+        # 盘后时段：尝试通过 RPC 获取历史数据
+        if not self._connected or not self._rpc_client:
+            return []
+
+        try:
+            # 调用远程 RPC 的 query_history 方法
+            # VeighNa RPC 服务会自动将请求转发到 QMT 网关
+            req = {
+                "symbol": symbol,
+                "exchange": exchange.value,
+                "start": start,
+                "end": end,
+                "interval": interval.value
+            }
+
+            result = self._rpc_client.query_history(req, timeout=60000)
+            return result if result else []
+
+        except Exception as e:
+            logger.warning(f"RPC QMT 获取历史数据失败: {e}，系统将使用 Tushare")
+            return []
+
+    def _is_trading_time(self) -> bool:
+        """判断是否在交易时段
+
+        A 股交易时段：
+        - 上午：9:30 - 11:30
+        - 下午：13:00 - 15:00
+
+        Returns:
+            True 表示在交易时段，False 表示盘后
+        """
+        from datetime import time
+
+        now = datetime.now().time()
+        weekday = datetime.now().weekday()
+
+        # 周末不交易
+        if weekday >= 5:  # 5=周六, 6=周日
+            return False
+
+        # 上午时段：9:30 - 11:30
+        morning_start = time(9, 30)
+        morning_end = time(11, 30)
+
+        # 下午时段：13:00 - 15:00
+        afternoon_start = time(13, 0)
+        afternoon_end = time(15, 0)
+
+        # 判断是否在交易时段
+        is_morning = morning_start <= now <= morning_end
+        is_afternoon = afternoon_start <= now <= afternoon_end
+
+        return is_morning or is_afternoon
 
     def get_tick_data(
         self,
