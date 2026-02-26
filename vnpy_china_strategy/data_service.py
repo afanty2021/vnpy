@@ -254,11 +254,35 @@ class ChinaStrategyDataService(IDataProvider):
             for item in sector_list:
                 # 支持按名称或代码匹配
                 if item.sector_name == sector or item.sector_code == sector:
-                    # 获取板块当日行情
-                    sector_index = self.data_service.get_sector_index(item.sector_code, trade_date)
-                    result = item.to_dict() if hasattr(item, 'to_dict') else item
-                    if sector_index:
-                        result.update(sector_index)
+                    # 转换为字典格式
+                    result = item.to_dict() if hasattr(item, 'to_dict') else {
+                        "sector_code": item.sector_code,
+                        "sector_name": item.sector_name,
+                    }
+
+                    # 尝试获取板块指数数据（如果已实现）
+                    try:
+                        date_str = trade_date.strftime("%Y%m%d")
+                        sector_index_data = self.data_service.get_sector_index(
+                            item.sector_code, date_str, date_str
+                        )
+
+                        # 处理返回的K线数据
+                        if sector_index_data and len(sector_index_data) > 0:
+                            latest_bar = sector_index_data[-1]
+                            result.update({
+                                "open_price": latest_bar.open_price,
+                                "high_price": latest_bar.high_price,
+                                "low_price": latest_bar.low_price,
+                                "close_price": latest_bar.close_price,
+                                "volume": latest_bar.volume,
+                                "turnover": latest_bar.turnover,
+                                "datetime": latest_bar.datetime,
+                            })
+                    except (AttributeError, NotImplementedError):
+                        # 板块指数数据功能尚未实现，返回基本板块信息
+                        pass
+
                     return result
             raise RuntimeError(f"未找到板块: {sector}")
         except RuntimeError:

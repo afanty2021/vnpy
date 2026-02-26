@@ -40,14 +40,18 @@ class ChinaStrategyGuiEngine(BaseEngine):
         """初始化组件"""
         try:
             from .engine import ChinaStrategyEngine
-            from .data_service import get_data_service
+            from .data_service import get_data_service as get_strategy_data_service
+            from vnpy_china_data import get_data_service
 
             # 初始化策略引擎
             self.strategy_engine = ChinaStrategyEngine(self.main_engine, self.event_engine)
             self.main_engine.write_log("A股策略引擎初始化成功", "ChinaStrategyApp")
 
-            # 获取或创建数据服务单例
-            self.data_service = get_data_service()
+            # 获取 vnpy_china_data 服务实例
+            china_data_service = get_data_service()
+
+            # 获取或创建策略数据服务单例，并传入底层数据服务
+            self.data_service = get_strategy_data_service(china_data_service)
             self.main_engine.write_log("策略数据服务初始化成功", "ChinaStrategyApp")
 
         except ImportError as e:
@@ -269,13 +273,30 @@ class ChinaStrategyGuiEngine(BaseEngine):
 
         try:
             self.main_engine.write_log(f"查询板块偏好：{trade_date}", "ChinaStrategyApp")
+
+            # 检查是否有板块数据可用
+            sector_list = self.data_service.data_service.get_sector_list()
+            if not sector_list:
+                self.main_engine.write_log(
+                    "提示：板块数据功能尚未启用。需要 Tushare 高级权限访问申万行业数据。",
+                    "ChinaStrategyApp"
+                )
+                return []
+
             # 获取主要板块的数据
             sectors = ["半导体", "新能源", "医药生物", "食品饮料", "计算机"]
             result = []
             for sector in sectors:
-                data = self.data_service.get_sector_data(sector, trade_date)
-                if data:
-                    result.append(data)
+                try:
+                    data = self.data_service.get_sector_data(sector, trade_date)
+                    if data:
+                        result.append(data)
+                except RuntimeError as e:
+                    # 单个板块查询失败，继续处理其他板块
+                    if f"未找到板块: {sector}" in str(e):
+                        continue
+                    else:
+                        raise
             self.main_engine.write_log(f"查询完成，共{len(result)}个板块", "ChinaStrategyApp")
             return result
         except Exception as e:
@@ -303,6 +324,16 @@ class ChinaStrategyGuiEngine(BaseEngine):
 
         try:
             self.main_engine.write_log(f"查询板块强度：{sector} @ {trade_date}", "ChinaStrategyApp")
+
+            # 检查是否有板块数据可用
+            sector_list = self.data_service.data_service.get_sector_list()
+            if not sector_list:
+                self.main_engine.write_log(
+                    "提示：板块数据功能尚未启用。需要 Tushare 高级权限访问申万行业数据。",
+                    "ChinaStrategyApp"
+                )
+                return None
+
             data = self.data_service.get_sector_data(sector, trade_date)
             return data
         except Exception as e:
@@ -327,18 +358,36 @@ class ChinaStrategyGuiEngine(BaseEngine):
 
         try:
             self.main_engine.write_log(f"查询轮动信号：{trade_date}", "ChinaStrategyApp")
+
+            # 首先检查是否有板块数据可用
+            sector_list = self.data_service.data_service.get_sector_list()
+            if not sector_list:
+                self.main_engine.write_log(
+                    "提示：板块数据功能尚未启用。需要 Tushare 高级权限访问申万行业数据。",
+                    "ChinaStrategyApp"
+                )
+                return []
+
             # 获取主要板块并计算强度排序
             sectors = ["半导体", "新能源", "医药生物", "食品饮料", "计算机"]
             result = []
             for sector in sectors:
-                data = self.data_service.get_sector_data(sector, trade_date)
-                if data:
-                    result.append({
-                        "sector": sector,
-                        "change_pct": data.get("change_pct", 0),
-                        "volume": data.get("volume", 0),
-                        "signal": "buy" if data.get("change_pct", 0) > 2 else "hold"
-                    })
+                try:
+                    data = self.data_service.get_sector_data(sector, trade_date)
+                    if data:
+                        result.append({
+                            "sector": sector,
+                            "change_pct": data.get("change_pct", 0),
+                            "volume": data.get("volume", 0),
+                            "signal": "buy" if data.get("change_pct", 0) > 2 else "hold"
+                        })
+                except RuntimeError as e:
+                    # 单个板块查询失败，继续处理其他板块
+                    if f"未找到板块: {sector}" in str(e):
+                        continue
+                    else:
+                        raise
+
             # 按涨跌幅排序
             result.sort(key=lambda x: x["change_pct"], reverse=True)
             self.main_engine.write_log(f"查询完成，共{len(result)}个信号", "ChinaStrategyApp")
