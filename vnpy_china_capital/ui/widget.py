@@ -136,10 +136,10 @@ class ChinaCapitalWidget(QtWidgets.QWidget):
 
         # 流水表格
         self.cash_flow_table = QtWidgets.QTableWidget()
-        self.cash_flow_table.setColumnCount(5)
+        self.cash_flow_table.setColumnCount(6)
         self.cash_flow_table.setHorizontalHeaderLabels([
             _("时间"), _("类型"), _("金额"),
-            _("说明"), _("余额")
+            _("说明"), _("余额"), _("可用")
         ])
         self.cash_flow_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.cash_flow_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
@@ -328,6 +328,12 @@ class ChinaCapitalWidget(QtWidgets.QWidget):
             balance_text = f"{balance:,.2f}"
             balance_item = QtWidgets.QTableWidgetItem(balance_text)
             self.cash_flow_table.setItem(row, 4, balance_item)
+
+            # 可用
+            available = flow.get("available", 0)
+            available_text = f"{available:,.2f}"
+            available_item = QtWidgets.QTableWidgetItem(available_text)
+            self.cash_flow_table.setItem(row, 5, available_item)
 
         self.cash_flow_table.resizeColumnsToContents()
         self.show_status(_("资金流水已更新，共{}条记录").format(len(flows)))
