@@ -184,6 +184,44 @@ class ChinaDataService(
             self.cache.set(cache_key, self._serialize_bars(api_data), ttl=data_config.BAR_CACHE_TTL)
         return api_data
 
+    def download_bar_data(
+        self,
+        symbol: str,
+        exchange: Exchange,
+        interval: Interval,
+        start: date,
+        end: date
+    ) -> List[BarData]:
+        """下载并存储历史K线数据
+
+        这个方法会强制从API获取数据并存储到数据库，跳过缓存。
+        专门用于历史数据批量下载功能。
+
+        Args:
+            symbol: 股票代码
+            exchange: 交易所
+            interval: K线周期
+            start: 开始日期
+            end: 结束日期
+
+        Returns:
+            下载的K线数据列表
+        """
+        # 转换为datetime
+        start_datetime = datetime.combine(start, datetime.min.time())
+        end_datetime = datetime.combine(end, datetime.max.time())
+
+        # 直接从API获取
+        api_data = self._fetch_bars_from_api(
+            symbol, exchange, interval, start_datetime, end_datetime
+        )
+
+        # 存储到数据库
+        if api_data:
+            self.database.save_bar_data(api_data)
+
+        return api_data
+
     def _fetch_bars_from_api(
         self,
         symbol: str,

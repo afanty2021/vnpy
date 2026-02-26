@@ -4,15 +4,17 @@ A股数据服务GUI引擎
 """
 
 from typing import Dict, Any, Optional, List
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from vnpy.event import EventEngine, Event
 from vnpy.trader.engine import BaseEngine
+from vnpy.trader.constant import Exchange, Interval
 
 
 class ChinaDataGuiEngine(BaseEngine):
     """A股数据服务GUI引擎
 
     提供A股数据服务的GUI管理功能：
+    - 历史数据下载
     - 龙虎榜数据查询
     - 北向资金数据查询
     - 板块数据查询
@@ -27,6 +29,9 @@ class ChinaDataGuiEngine(BaseEngine):
 
         # 数据服务引用
         self.data_service: Optional[Any] = None
+
+        # 下载状态
+        self._downloading: bool = False
 
         # 直接在__init__中初始化数据服务
         self._init_data_service()
@@ -51,6 +56,147 @@ class ChinaDataGuiEngine(BaseEngine):
         """引擎初始化（由VeighNa框架调用）"""
         # 数据服务已在__init__中初始化
         pass
+
+    # ==================== 历史数据下载 ====================
+
+    def download_history_data(
+        self,
+        symbols: List[str],
+        start_date: date,
+        end_date: date,
+        interval: Interval = Interval.DAILY
+    ) -> Dict[str, Any]:
+        """下载历史数据
+
+        Args:
+            symbols: 股票代码列表（如 ["000001.SZ", "600000.SH"]）
+            start_date: 开始日期
+            end_date: 结束日期
+            interval: K线周期
+
+        Returns:
+            下载结果字典，包含 success, downloaded_count, failed_symbols 等
+        """
+        if not self.data_service:
+            return {
+                "success": False,
+                "error": "数据服务未初始化，请配置Tushare token或QMT RPC连接"
+            }
+
+        if self._downloading:
+            return {
+                "success": False,
+                "error": "已有下载任务正在进行"
+            }
+
+        self._downloading = True
+        result = {
+            "success": True,
+            "downloaded_count": 0,
+            "failed_symbols": [],
+            "total_symbols": len(symbols)
+        }
+
+        try:
+            self.main_engine.write_log(
+                f"开始下载历史数据：{len(symbols)}只股票，{start_date} 至 {end_date}",
+                "ChinaDataApp"
+            )
+
+            for i, symbol in enumerate(symbols):
+                try:
+                    # 解析股票代码和交易所
+                    exchange = self._parse_exchange(symbol)
+
+                    # 下载数据
+                    bars = self.data_service.download_bar_data(
+                        symbol=symbol,
+                        exchange=exchange,
+                        interval=interval,
+                        start=start_date,
+                        end=end_date
+                    )
+
+                    if bars:
+                        result["downloaded_count"] += len(bars)
+
+                    self.main_engine.write_log(
+                        f"[{i+1}/{len(symbols)}] {symbol}: 已下载 {len(bars) if bars else 0} 条数据",
+                        "ChinaDataApp"
+                    )
+
+                except Exception as e:
+                    result["failed_symbols"].append(symbol)
+                    self.main_engine.write_log(f"下载 {symbol} 失败: {e}", "ChinaDataApp")
+
+            self.main_engine.write_log(
+                f"下载完成：成功 {result['downloaded_count']} 条，失败 {len(result['failed_symbols'])} 只",
+                "ChinaDataApp"
+            )
+
+        except Exception as e:
+            result["success"] = False
+            result["error"] = str(e)
+            self.main_engine.write_log(f"下载历史数据失败: {e}", "ChinaDataApp")
+
+        finally:
+            self._downloading = False
+
+        return result
+
+    def get_default_symbols(self) -> List[str]:
+        """获取默认股票代码列表
+
+        Returns:
+            常用A股代码列表
+        """
+        return [
+            # 上证指数
+            "000001.SH",
+            # 深证成指
+            "399001.SZ",
+            # 蓝筹股
+            "600000.SH",  # 浦发银行
+            "600036.SH",  # 招商银行
+            "600519.SH",  # 贵州茅台
+            "600887.SH",  # 伊利股份
+            "601318.SH",  # 中国平安
+            "601398.SH",  # 工商银行
+            "601857.SH",  # 中国石油
+            "601988.SH",  # 中国银行
+            "000001.SZ",  # 平安银行
+            "000002.SZ",  # 万科A
+            "000063.SZ",  # 中兴通讯
+            "000066.SZ",  # 长城电脑
+            "000333.SZ",  # 美的集团
+            "000858.SZ",  # 五粮液
+        ]
+
+    def _parse_exchange(self, symbol: str) -> Exchange:
+        """从股票代码解析交易所
+
+        Args:
+            symbol: 股票代码（如 "000001.SZ" 或 "000001.SZSE"）
+
+        Returns:
+            交易所枚举
+        """
+        if symbol.endswith(".SH") or ".SH" in symbol:
+            return Exchange.SSE
+        elif symbol.endswith(".SZ") or ".SZ" in symbol:
+            return Exchange.SZSE
+        else:
+            # 默认判断
+            if symbol.startswith("6"):
+                return Exchange.SSE
+            else:
+                return Exchange.SZSE
+
+    def is_downloading(self) -> bool:
+        """是否正在下载数据"""
+        return self._downloading
+
+    # ==================== 龙虎榜数据查询 ====================
 
     def query_dragon_tiger(self, trade_date: Optional[date] = None) -> List[Any]:
         """查询龙虎榜数据
