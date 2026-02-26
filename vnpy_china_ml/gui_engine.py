@@ -264,13 +264,19 @@ class ChinaMlGuiEngine(BaseEngine):
 
         Returns:
             (X, y, feature_names) 元组
+
+        Raises:
+            RuntimeError: 当数据加载失败时
         """
         # 导入数据集模块
         try:
             from ..dataset import create_alpha_dataset
-        except ImportError:
-            self._log("数据集模块不可用，使用模拟数据")
-            return self._generate_mock_data(1000, 20)
+        except ImportError as e:
+            raise RuntimeError(
+                f"数据集模块不可用: {e}\n"
+                f"请确保已安装 vnpy.alpha 模块\n"
+                f"安装命令: pip install vnpy-alpha"
+            )
 
         self._log("从数据库加载历史数据...")
 
@@ -281,54 +287,31 @@ class ChinaMlGuiEngine(BaseEngine):
             "601318.SH", "601398.SH", "601857.SH", "601988.SH"
         ]
 
-        try:
-            # 创建数据集
-            dataset = create_alpha_dataset(
-                symbols=symbols,
-                start_date=start_date,
-                end_date=end_date,
-                lookback_days=lookback_days,
-                forward_days=forward_days
+        # 创建数据集
+        dataset = create_alpha_dataset(
+            symbols=symbols,
+            start_date=start_date,
+            end_date=end_date,
+            lookback_days=lookback_days,
+            forward_days=forward_days
+        )
+
+        # 获取训练数据
+        X, y = dataset.get_all_data()
+        feature_names = dataset.get_feature_names()
+
+        if len(X) == 0:
+            raise RuntimeError(
+                f"本地数据库中没有训练数据\n"
+                f"请先下载历史数据:\n"
+                f"  1. 打开「A股数据」模块\n"
+                f"  2. 点击「下载历史数据」\n"
+                f"  3. 选择股票代码和日期范围\n"
+                f"  4. 确保下载范围包含 {start_date} 到 {end_date}\n"
+                f"训练需要至少 {lookback_days} 天的历史数据"
             )
 
-            # 获取训练数据
-            X, y = dataset.get_all_data()
-            feature_names = dataset.get_feature_names()
-
-            self._log(f"数据加载完成: {len(X)}样本, {len(feature_names)}特征")
-
-            return X, y, feature_names
-
-        except Exception as e:
-            self._log(f"数据加载失败: {e}，使用模拟数据")
-            return self._generate_mock_data(1000, 20)
-
-    def _generate_mock_data(self, n_samples: int, n_features: int) -> tuple:
-        """生成模拟数据（备用方案）
-
-        Args:
-            n_samples: 样本数量
-            n_features: 特征数量
-
-        Returns:
-            (X, y, feature_names) 元组
-        """
-        self._log("生成模拟训练数据...")
-
-        # 生成特征矩阵
-        X = np.random.randn(n_samples, n_features)
-
-        # 生成目标变量（未来收益率）
-        y = np.random.randn(n_samples) * 0.02  # 2%的波动率
-
-        # 特征名称
-        feature_names = [
-            "Return_5d", "Return_10d", "Return_20d",
-            "Volume_Ratio", "Volume_Change_5d",
-            "MACD", "MACD_Signal", "RSI_14",
-            "Bollinger_Width", "ATR_14_Simple",
-            "ROC_10", "Price_Position_20"
-        ][:n_features]
+        self._log(f"数据加载完成: {len(X)}样本, {len(feature_names)}特征")
 
         return X, y, feature_names
 
@@ -389,18 +372,18 @@ class ChinaMlGuiEngine(BaseEngine):
         # 加载模型
         model = self.model_manager.load_model(model_id)
         if model is None:
-            self._log(f"加载模型失败: {model_id}")
-            return []
+            error_msg = f"模型未找到: {model_id}，请先训练模型"
+            self._log(error_msg)
+            raise RuntimeError(error_msg)
 
         try:
             self._log(f"使用模型 {model_id} 进行预测...")
 
-            # 准备预测数据
+            # 准备预测数据（不使用模拟数据）
             X, symbols_list, names_list = self._prepare_prediction_data(symbols, predict_date)
 
             if X is None or len(X) == 0:
-                self._log("预测数据为空")
-                return []
+                raise RuntimeError("预测数据准备失败")
 
             # 进行预测
             dates = [datetime.combine(predict_date, datetime.min.time())] * len(symbols_list)
@@ -424,9 +407,13 @@ class ChinaMlGuiEngine(BaseEngine):
 
             return predictions
 
+        except RuntimeError as e:
+            # 重新抛出运行时错误（包含详细信息）
+            raise
         except Exception as e:
-            self._log(f"预测失败: {e}")
-            return []
+            error_msg = f"预测失败: {e}\n请检查数据源配置和模型状态"
+            self._log(error_msg)
+            raise RuntimeError(error_msg) from e
 
     def _prepare_prediction_data(
         self,
@@ -441,6 +428,9 @@ class ChinaMlGuiEngine(BaseEngine):
 
         Returns:
             (X, symbols, names) 元组
+
+        Raises:
+            RuntimeError: 当真实数据加载失败时
         """
         # 股票名称映射
         symbol_names = {
@@ -449,95 +439,80 @@ class ChinaMlGuiEngine(BaseEngine):
             "600519.SH": "贵州茅台"
         }
 
-        # 尝试加载真实数据
+        # 导入数据加载模块
         try:
             from ..dataset import ChinaDataLoader, Alpha158Calculator
-
-            self._log("加载预测数据...")
-
-            # 数据加载器
-            loader = ChinaDataLoader()
-            factor_calc = Alpha158Calculator()
-
-            # 计算数据起始日期（需要足够的历史数据计算因子）
-            start_date = predict_date - timedelta(days=90)
-
-            # 加载K线数据
-            df = loader.load_bars(
-                symbols=symbols,
-                start_date=start_date,
-                end_date=predict_date,
-                interval="1d"
+        except ImportError as e:
+            raise RuntimeError(
+                f"数据集模块不可用: {e}\n"
+                f"请确保已安装 vnpy.alpha 模块\n"
+                f"安装命令: pip install vnpy-alpha"
             )
 
-            if len(df) == 0:
-                self._log("未能加载真实数据，使用模拟数据")
-                return self._generate_mock_prediction_data(symbols, symbol_names)
+        self._log("加载预测数据...")
 
-            # 计算因子
-            df = factor_calc.calculate_all(df)
+        # 数据加载器
+        loader = ChinaDataLoader()
+        factor_calc = Alpha158Calculator()
 
-            # 获取预测日期的最新数据
-            predict_datetime = datetime.combine(predict_date, datetime.min.time())
-            latest_df = df.filter(
-                pl.col("datetime") <= pl.lit(predict_datetime)
-            ).group_by("vt_symbol").last()
+        # 计算数据起始日期（需要足够的历史数据计算因子）
+        start_date = predict_date - timedelta(days=90)
 
-            if len(latest_df) == 0:
-                self._log("没有可用的预测数据，使用模拟数据")
-                return self._generate_mock_prediction_data(symbols, symbol_names)
+        # 加载K线数据
+        df = loader.load_bars(
+            symbols=symbols,
+            start_date=start_date,
+            end_date=predict_date,
+            interval="1d"
+        )
 
-            # 提取特征
-            base_cols = ["datetime", "vt_symbol", "open_price", "high_price",
-                         "low_price", "close_price", "volume", "turnover"]
-            feature_cols = [col for col in latest_df.columns if col not in base_cols]
+        if len(df) == 0:
+            raise RuntimeError(
+                f"本地数据库中没有股票数据\n"
+                f"请先下载历史数据:\n"
+                f"  1. 打开「A股数据」模块\n"
+                f"  2. 点击「下载历史数据」\n"
+                f"  3. 选择股票代码和日期范围\n"
+                f"  4. 确保下载范围包含 {start_date} 到 {predict_date}\n"
+                f"当前请求的股票: {', '.join(symbols[:5])}{'...' if len(symbols) > 5 else ''}"
+            )
 
-            if not feature_cols:
-                self._log("没有计算出任何特征，使用模拟数据")
-                return self._generate_mock_prediction_data(symbols, symbol_names)
+        # 计算因子
+        df = factor_calc.calculate_all(df)
 
-            X = latest_df.select(feature_cols).to_numpy()
+        # 获取预测日期的最新数据
+        predict_datetime = datetime.combine(predict_date, datetime.min.time())
+        latest_df = df.filter(
+            pl.col("datetime") <= pl.lit(predict_datetime)
+        ).group_by("vt_symbol").last()
 
-            # 获取有效的股票列表
-            valid_symbols = latest_df["vt_symbol"].to_list()
-            valid_names = [symbol_names.get(s, s) for s in valid_symbols]
+        if len(latest_df) == 0:
+            raise RuntimeError(
+                f"没有可用的预测数据 (截至 {predict_date})\n"
+                f"请确保:\n"
+                f"  1. 已下载至少90天的历史数据（用于计算Alpha158因子）\n"
+                f"  2. 预测日期在已下载数据范围内"
+            )
 
-            self._log(f"预测数据准备完成: {len(X)}只股票, {len(feature_cols)}个特征")
+        # 提取特征
+        base_cols = ["datetime", "vt_symbol", "open_price", "high_price",
+                     "low_price", "close_price", "volume", "turnover"]
+        feature_cols = [col for col in latest_df.columns if col not in base_cols]
 
-            return X, valid_symbols, valid_names
+        if not feature_cols:
+            raise RuntimeError(
+                f"未能计算出任何因子特征\n"
+                f"请检查 Alpha158 计算器是否正常工作\n"
+                f"可能需要更多的历史数据来计算因子"
+            )
 
-        except Exception as e:
-            self._log(f"加载预测数据失败: {e}，使用模拟数据")
-            return self._generate_mock_prediction_data(symbols, symbol_names)
+        X = latest_df.select(feature_cols).to_numpy()
 
-    def _generate_mock_prediction_data(
-        self,
-        symbols: List[str],
-        symbol_names: dict
-    ) -> tuple:
-        """生成模拟预测数据（备用方案）
+        # 获取有效的股票列表
+        valid_symbols = latest_df["vt_symbol"].to_list()
+        valid_names = [symbol_names.get(s, s) for s in valid_symbols]
 
-        Args:
-            symbols: 股票代码列表
-            symbol_names: 股票名称映射
-
-        Returns:
-            (X, symbols, names) 元组
-        """
-        # 过滤有效的股票
-        valid_symbols = []
-        valid_names = []
-
-        for symbol in symbols:
-            if symbol in symbol_names:
-                valid_symbols.append(symbol)
-                valid_names.append(symbol_names[symbol])
-
-        # 生成模拟数据
-        n_samples = len(valid_symbols)
-        n_features = 20
-
-        X = np.random.randn(n_samples, n_features)
+        self._log(f"预测数据准备完成: {len(X)}只股票, {len(feature_cols)}个特征")
 
         return X, valid_symbols, valid_names
 
@@ -585,102 +560,83 @@ class ChinaMlGuiEngine(BaseEngine):
 
         Returns:
             特征DataFrame
+
+        Raises:
+            RuntimeError: 当数据加载失败时
         """
-        try:
-            # 尝试使用真实数据计算因子
-            from ..dataset import ChinaDataLoader, Alpha158Calculator
+        # 尝试使用真实数据计算因子
+        from ..dataset import ChinaDataLoader, Alpha158Calculator
 
-            self._log("计算Alpha 158因子...")
+        self._log("计算Alpha 158因子...")
 
-            # 数据加载器
-            loader = ChinaDataLoader()
-            factor_calc = Alpha158Calculator()
+        # 数据加载器
+        loader = ChinaDataLoader()
+        factor_calc = Alpha158Calculator()
 
-            # 计算数据起始日期（需要足够的历史数据计算因子）
-            calc_start_date = start_date - timedelta(days=90)
+        # 计算数据起始日期（需要足够的历史数据计算因子）
+        calc_start_date = start_date - timedelta(days=90)
 
-            # 加载K线数据
-            df = loader.load_bars(
-                symbols=symbols,
-                start_date=calc_start_date,
-                end_date=end_date,
-                interval="1d"
+        # 加载K线数据
+        df = loader.load_bars(
+            symbols=symbols,
+            start_date=calc_start_date,
+            end_date=end_date,
+            interval="1d"
+        )
+
+        if len(df) == 0:
+            raise RuntimeError(
+                f"本地数据库中没有K线数据\n"
+                f"请先下载历史数据:\n"
+                f"  1. 打开「A股数据」模块\n"
+                f"  2. 点击「下载历史数据」\n"
+                f"  3. 选择股票代码和日期范围\n"
+                f"  4. 确保下载范围包含 {calc_start_date} 到 {end_date}\n"
+                f"当前请求的股票: {', '.join(symbols[:5])}{'...' if len(symbols) > 5 else ''}"
             )
 
-            if len(df) == 0:
-                self._log("未能加载K线数据，返回默认因子列表")
-                return self._get_default_features()
+        # 计算因子
+        df = factor_calc.calculate_all(df)
 
-            # 计算因子
-            df = factor_calc.calculate_all(df)
+        # 提取特征列
+        base_cols = ["datetime", "vt_symbol", "open_price", "high_price",
+                     "low_price", "close_price", "volume", "turnover", "label"]
+        feature_cols = [col for col in df.columns if col not in base_cols]
 
-            # 提取特征列
-            base_cols = ["datetime", "vt_symbol", "open_price", "high_price",
-                         "low_price", "close_price", "volume", "turnover", "label"]
-            feature_cols = [col for col in df.columns if col not in base_cols]
+        if not feature_cols:
+            raise RuntimeError(
+                f"未能计算出任何因子特征\n"
+                f"请确保:\n"
+                f"  1. 已下载至少90天的历史数据（用于计算Alpha158因子）\n"
+                f"  2. 日期范围包含 {start_date} 到 {end_date}"
+            )
 
-            if not feature_cols:
-                self._log("未计算出任何特征，返回默认因子列表")
-                return self._get_default_features()
+        # 计算每个因子的类型
+        features_data = []
+        for col in feature_cols:
+            ftype = self._infer_factor_type(col)
+            # 使用最后一行的数据作为示例
+            last_row = df.select(pl.col(col).last()).row(0)
+            importance = abs(float(last_row[0])) if last_row[0] is not None else 0.0
+            correlation = min(importance, 0.99)
 
-            # 计算每个因子的类型
-            features_data = []
-            for col in feature_cols:
-                ftype = self._infer_factor_type(col)
-                # 使用最后一行的数据作为示例
-                last_row = df.select(pl.col(col).last()).row(0)
-                importance = abs(float(last_row[0])) if last_row[0] is not None else 0.0
-                correlation = min(importance, 0.99)
+            features_data.append({
+                "factor_name": col,
+                "factor_type": ftype,
+                "importance": importance,
+                "correlation": correlation
+            })
 
-                features_data.append({
-                    "factor_name": col,
-                    "factor_type": ftype,
-                    "importance": importance,
-                    "correlation": correlation
-                })
+        # 按重要性排序
+        features_data.sort(key=lambda x: x["importance"], reverse=True)
 
-            # 按重要性排序
-            features_data.sort(key=lambda x: x["importance"], reverse=True)
+        result_df = pl.DataFrame(features_data)
 
-            result_df = pl.DataFrame(features_data)
+        self.feature_data = result_df
 
-            self.feature_data = result_df
+        self._log(f"因子计算完成，共{len(features_data)}个因子")
 
-            self._log(f"因子计算完成，共{len(features_data)}个因子")
-
-            return result_df
-
-        except Exception as e:
-            self._log(f"计算因子失败: {e}，返回默认因子列表")
-            return self._get_default_features()
-
-    def _get_default_features(self) -> pl.DataFrame:
-        """获取默认因子列表（备用）
-
-        Returns:
-            默认因子DataFrame
-        """
-        features = [
-            ("Return_5d", "动量", 0.85, 0.65),
-            ("Return_10d", "动量", 0.78, 0.58),
-            ("Return_20d", "动量", 0.72, 0.52),
-            ("Volume_Ratio", "成交量", 0.72, 0.45),
-            ("Volume_Change_5d", "成交量", 0.65, 0.40),
-            ("MACD", "技术指标", 0.68, 0.52),
-            ("MACD_Signal", "技术指标", 0.65, 0.48),
-            ("RSI_14", "技术指标", 0.65, 0.38),
-            ("Bollinger_Width", "波动率", 0.62, 0.42),
-            ("ATR_14_Simple", "波动率", 0.58, 0.35),
-            ("ROC_10", "动量", 0.55, 0.30),
-            ("Price_Position_20", "技术指标", 0.52, 0.28),
-        ]
-
-        return pl.DataFrame({
-            "factor_name": [f[0] for f in features],
-            "factor_type": [f[1] for f in features],
-            "importance": [f[2] for f in features],
-            "correlation": [f[3] for f in features],
-        })
+        return result_df
 
     def _infer_factor_type(self, factor_name: str) -> str:
         """根据因子名称推断类型

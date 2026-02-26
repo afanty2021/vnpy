@@ -7,7 +7,7 @@ Tushare数据适配器
 import tushare as ts
 import pandas as pd
 from typing import List, Optional, Dict, Any
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from threading import Lock
 
 from vnpy.trader.object import BarData
@@ -316,22 +316,34 @@ class TushareDataAdapter(BaseDataAdapter):
         if df.empty:
             return None
 
-        # 获取最新的沪股通和深股通数据
-        df = df.sort_values("trade_date", ascending=False)
+        # 获取最新数据（已按日期排序）
+        row = df.iloc[0]
 
-        # 沪股通
-        sh_row = df[df["trade_type"] == "沪股通"].iloc[0] if len(df[df["trade_type"] == "沪股通"]) > 0 else None
-        # 深股通
-        sz_row = df[df["trade_type"] == "深股通"].iloc[0] if len(df[df["trade_type"] == "深股通"]) > 0 else None
+        # 新的Tushare API返回格式：
+        # ggt_ss: 港股通（上海）
+        # ggt_sz: 港股通（深圳）
+        # hgt: 沪港通
+        # sgt: 深港通
+        # north_money: 北向净流入
+        # south_money: 南向净流入
+        # 单位：万元
+
+        # 沪股通 = 沪港通(hgt) - 需要分开计算
+        # 使用北向资金总量数据
+        sh_net = float(row.get("hgt", 0) or 0)  # 沪港通
+        sz_net = float(row.get("sgt", 0) or 0)  # 深港通
+
+        # 北向净流入 = 沪股通 + 深股通
+        north_money = float(row.get("north_money", 0) or 0)
 
         data = NorthboundFlowData(
             trade_date=datetime.strptime(trade_date, "%Y%m%d").date(),
-            sh_net_inflow=float(sh_row.get("net_amount", 0)) / 100000000 if sh_row is not None else 0,
-            sh_buy_volume=float(sh_row.get("buy_amount", 0)) / 100000000 if sh_row is not None else 0,
-            sh_sell_volume=float(sh_row.get("sell_amount", 0)) / 100000000 if sh_row is not None else 0,
-            sz_net_inflow=float(sz_row.get("net_amount", 0)) / 100000000 if sz_row is not None else 0,
-            sz_buy_volume=float(sz_row.get("buy_amount", 0)) / 100000000 if sz_row is not None else 0,
-            sz_sell_volume=float(sz_row.get("sell_amount", 0)) / 100000000 if sz_row is not None else 0,
+            sh_net_inflow=sh_net / 10000,  # 万元转亿元
+            sh_buy_volume=0,  # API不返回详细买卖数据
+            sh_sell_volume=0,
+            sz_net_inflow=sz_net / 10000,  # 万元转亿元
+            sz_buy_volume=0,
+            sz_sell_volume=0,
         )
 
         return data
@@ -429,10 +441,25 @@ class TushareDataAdapter(BaseDataAdapter):
 
     def get_sector_list(self) -> List[SectorData]:
         """获取板块列表（行业分类）"""
+        # 获取最近交易日
+        try:
+            cal_df = self._call_api(
+                "trade_cal",
+                exchange="SSE",
+                start_date=(datetime.now() - timedelta(days=10)).strftime("%Y%m%d"),
+                end_date=datetime.now().strftime("%Y%m%d"),
+                is_open="1"
+            )
+            if cal_df.empty:
+                return []
+            trade_date = cal_df.iloc[-1]["cal_date"]
+        except Exception:
+            # 使用固定日期作为fallback
+            trade_date = "20260213"
+
         df = self._call_api(
             "sw_daily",
-            start_date=datetime.now().strftime("%Y%m%d"),
-            end_date=datetime.now().strftime("%Y%m%d")
+            trade_date=trade_date
         )
 
         if df.empty:

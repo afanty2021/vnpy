@@ -280,9 +280,11 @@ class ChinaCapitalWidget(QtWidgets.QWidget):
 
         if self.gui_engine:
             flows = self.gui_engine.get_capital_flows()
+            if not flows:
+                self.show_status(_("暂无资金流水数据，请执行交易或导入历史数据"))
         else:
-            # 使用mock数据作为fallback
-            flows = self._get_mock_flows()
+            # 数据服务未初始化时提示用户
+            self.show_status(_("资金流水服务未初始化，请确保已启动A股资金管理模块"))
 
         # 更新表格
         self.cash_flow_table.setRowCount(len(flows))
@@ -329,14 +331,6 @@ class ChinaCapitalWidget(QtWidgets.QWidget):
 
         self.cash_flow_table.resizeColumnsToContents()
         self.show_status(_("资金流水已更新，共{}条记录").format(len(flows)))
-
-    def _get_mock_flows(self) -> List[dict]:
-        """获取mock数据作为fallback"""
-        return [
-            {"trade_time": "09:30:00", "flow_type": "转入", "amount": 100000.00, "description": "初始资金", "balance": 100000.00},
-            {"trade_time": "10:15:00", "flow_type": "买入", "amount": -15000.00, "description": "买入平安银行", "balance": 85000.00},
-            {"trade_time": "14:20:00", "flow_type": "卖出", "amount": 20000.00, "description": "卖出贵州茅台", "balance": 105000.00},
-        ]
 
     def refresh_risk_data(self) -> None:
         """刷新风险数据"""

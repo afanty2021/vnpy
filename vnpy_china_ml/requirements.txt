@@ -1,0 +1,21 @@
+# A股机器学习模块依赖
+
+# 核心数据处理
+numpy>=1.24.0
+pandas>=2.0.0
+polars>=0.20.0
+
+# 机器学习
+scikit-learn>=1.4.0
+scipy>=1.12.0
+
+# 数据服务
+vnpy_china_data
+
+# 监控
+vnpy_china_monitor
+
+# A股交易相关
+vnpy
+vnpy_ctastrategy
+vnpy_algotrading

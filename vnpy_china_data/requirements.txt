@@ -1,0 +1,17 @@
+# A股数据服务模块依赖
+
+# 数据库
+pymysql>=1.0.0
+
+# 缓存
+redis>=4.0.0
+
+# 数据处理
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Tushare数据接口
+tushare>=1.4.0
+
+# A股交易相关
+vnpy

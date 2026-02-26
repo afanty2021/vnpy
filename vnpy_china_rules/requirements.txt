@@ -1,0 +1,12 @@
+# A股交易规则模块依赖
+
+# 数据处理
+pandas>=2.0.0
+numpy>=1.24.0
+
+# A股数据服务
+vnpy_china_data
+
+# A股交易相关
+vnpy
+vnpy_ctastrategy

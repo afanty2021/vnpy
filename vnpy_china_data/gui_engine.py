@@ -62,9 +62,13 @@ class ChinaDataGuiEngine(BaseEngine):
             龙虎榜数据列表
         """
         if not self.data_service:
-            # 返回mock数据用于演示
-            self.main_engine.write_log("警告：数据服务未初始化，使用mock数据。请配置Tushare token获取真实数据。", "ChinaDataApp")
-            return self._get_mock_dragon_tiger_data(trade_date or date.today())
+            # 数据服务未初始化，返回空列表并提示用户
+            self.main_engine.write_log(
+                "错误：A股数据服务未初始化，请配置Tushare token或QMT RPC连接\n"
+                "配置方式：1)设置环境变量 TUSHARE_TOKEN 或 2)启动QMT客户端",
+                "ChinaDataApp"
+            )
+            return []
 
         if trade_date is None:
             trade_date = date.today()
@@ -74,14 +78,18 @@ class ChinaDataGuiEngine(BaseEngine):
             data = self.data_service.get_dragon_tiger_data(trade_date)
 
             if not data:
-                self.main_engine.write_log("未查询到龙虎榜数据，可能是：1)非交易日 2)Tushare token未配置 3)网络问题。使用mock数据。", "ChinaDataApp")
-                return self._get_mock_dragon_tiger_data(trade_date)
+                self.main_engine.write_log(
+                    f"未查询到 {trade_date} 的龙虎榜数据\n"
+                    f"可能原因：1)非交易日 2)Tushare token未配置 3)网络问题",
+                    "ChinaDataApp"
+                )
+                return []
 
             self.main_engine.write_log(f"查询完成，共{len(data)}条记录", "ChinaDataApp")
             return data
         except Exception as e:
-            self.main_engine.write_log(f"查询龙虎榜数据失败：{e}，使用mock数据", "ChinaDataApp")
-            return self._get_mock_dragon_tiger_data(trade_date)
+            self.main_engine.write_log(f"查询龙虎榜数据失败：{e}", "ChinaDataApp")
+            return []
 
     def query_northbound_flow(self, trade_date: Optional[date] = None) -> Optional[Any]:
         """查询北向资金流向
@@ -93,9 +101,13 @@ class ChinaDataGuiEngine(BaseEngine):
             北向资金流向数据
         """
         if not self.data_service:
-            # 返回mock数据用于演示
-            self.main_engine.write_log("警告：数据服务未初始化，使用mock数据。请配置Tushare token获取真实数据。", "ChinaDataApp")
-            return self._get_mock_northbound_flow(trade_date or date.today())
+            # 数据服务未初始化，返回空并提示用户
+            self.main_engine.write_log(
+                "错误：A股数据服务未初始化，请配置Tushare token或QMT RPC连接\n"
+                "配置方式：1)设置环境变量 TUSHARE_TOKEN 或 2)启动QMT客户端",
+                "ChinaDataApp"
+            )
+            return None
 
         if trade_date is None:
             trade_date = date.today()
@@ -106,12 +118,15 @@ class ChinaDataGuiEngine(BaseEngine):
             if data:
                 self.main_engine.write_log(f"查询完成，净流入：{data.total_net_inflow:.2f}亿元", "ChinaDataApp")
             else:
-                self.main_engine.write_log("未查询到北向资金数据，可能是：1)非交易日 2)Tushare token未配置 3)网络问题。使用mock数据。", "ChinaDataApp")
-                return self._get_mock_northbound_flow(trade_date)
+                self.main_engine.write_log(
+                    f"未查询到 {trade_date} 的北向资金数据\n"
+                    f"可能原因：1)非交易日 2)Tushare token未配置 3)网络问题",
+                    "ChinaDataApp"
+                )
             return data
         except Exception as e:
-            self.main_engine.write_log(f"查询北向资金流向失败：{e}，使用mock数据", "ChinaDataApp")
-            return self._get_mock_northbound_flow(trade_date)
+            self.main_engine.write_log(f"查询北向资金流向失败：{e}", "ChinaDataApp")
+            return None
 
     def get_data_service_status(self) -> Dict[str, Any]:
         """获取数据服务状态
@@ -130,54 +145,6 @@ class ChinaDataGuiEngine(BaseEngine):
             status["service_type"] = type(self.data_service).__name__
 
         return status
-
-    def _get_mock_dragon_tiger_data(self, trade_date: date) -> List[Any]:
-        """获取mock龙虎榜数据用于演示"""
-        # 创建简单的数据对象
-        class DragonTigerRecord:
-            def __init__(self, symbol, name, trade_date, close_price, change_pct,
-                        institution_net_buy, institution_count, broker_net_buy,
-                        total_buy, turnover_rate, reason):
-                self.symbol = symbol
-                self.name = name
-                self.trade_date = trade_date
-                self.close_price = close_price
-                self.change_pct = change_pct
-                self.institution_net_buy = institution_net_buy
-                self.institution_count = institution_count
-                self.broker_net_buy = broker_net_buy
-                self.total_buy = total_buy
-                self.turnover_rate = turnover_rate
-                self.reason = reason
-
-        return [
-            DragonTigerRecord("000001", "平安银行", trade_date, 15.50, 5.23,
-                             15000000, 3, 8000000, 30000000, 8.5, "涨幅偏离值达7%"),
-            DragonTigerRecord("600519", "贵州茅台", trade_date, 1850.00, 2.15,
-                             50000000, 5, 20000000, 80000000, 1.2, "当日涨幅偏离值达7%"),
-            DragonTigerRecord("300750", "宁德时代", trade_date, 220.50, -3.12,
-                             -20000000, 2, -15000000, 50000000, 6.8, "当日跌幅偏离值达7%"),
-        ]
-
-    def _get_mock_northbound_flow(self, trade_date: date) -> Any:
-        """获取mock北向资金数据用于演示"""
-        from vnpy_china_data.models.northbound import NorthboundFlowData
-
-        # 创建mock数据：沪股通净流入10亿，深股通净流入5亿
-        sh_buy = 300.0  # 300亿
-        sh_sell = 290.0  # 290亿
-        sz_buy = 250.0  # 250亿
-        sz_sell = 245.0  # 245亿
-
-        return NorthboundFlowData(
-            trade_date=trade_date,
-            sh_net_inflow=sh_buy - sh_sell,  # 10亿
-            sh_buy_volume=sh_buy,
-            sh_sell_volume=sh_sell,
-            sz_net_inflow=sz_buy - sz_sell,  # 5亿
-            sz_buy_volume=sz_buy,
-            sz_sell_volume=sz_sell,
-        )
 
 
 __all__ = ["ChinaDataGuiEngine"]

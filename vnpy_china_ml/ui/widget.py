@@ -33,16 +33,20 @@ class ChinaMlWidget(QtWidgets.QWidget):
 
         self.init_ui()
 
-        # 初始化时加载真实模型数据
+        # 初始化时加载模型和特征数据（不阻塞启动）
         if self.gui_engine:
             self.refresh_models()
-            # 计算特征数据
-            self.gui_engine.calculate_features(
-                symbols=["000001.SZ", "000002.SZ", "600000.SH", "600036.SH", "600519.SH"],
-                start_date=date.today().replace(day=1),
-                end_date=date.today()
-            )
-            self._update_feature_table_from_engine()
+            # 尝试计算特征数据（失败不阻塞）
+            try:
+                self.gui_engine.calculate_features(
+                    symbols=["000001.SZ", "000002.SZ", "600000.SH", "600036.SH", "600519.SH"],
+                    start_date=date.today().replace(day=1),
+                    end_date=date.today()
+                )
+                self._update_feature_table_from_engine()
+            except Exception as e:
+                # 特征计算失败不影响界面启动
+                self.show_status(_("提示：请先下载历史数据以使用预测功能"))
 
     def init_ui(self) -> None:
         """初始化UI"""
@@ -370,20 +374,33 @@ class ChinaMlWidget(QtWidgets.QWidget):
         if not self.gui_engine:
             return
 
-        model_id = self.gui_engine.train_model(
-            model_type=model_type,
-            model_name=model_name,
-            train_start=start_date,
-            train_end=end_date,
-            lookback_days=60,
-            forward_days=5
-        )
+        try:
+            model_id = self.gui_engine.train_model(
+                model_type=model_type,
+                model_name=model_name,
+                train_start=start_date,
+                train_end=end_date,
+                lookback_days=60,
+                forward_days=5
+            )
 
-        if model_id:
-            self.show_status(_(f"{model_type.value}模型训练完成"))
-            self.refresh_models()
-        else:
-            self.show_status(_("模型训练失败"))
+            if model_id:
+                self.show_status(_(f"{model_type.value}模型训练完成"))
+                self.refresh_models()
+            else:
+                self.show_status(_("模型训练失败"))
+
+        except RuntimeError as e:
+            # 显示详细错误信息
+            error_msg = str(e)
+            QtWidgets.QMessageBox.warning(
+                self,
+                _("训练失败"),
+                _("无法训练模型：\n\n{error}\n\n请先下载历史数据后再试").format(error=error_msg)
+            )
+            self.show_status(_("训练失败 - 请先下载历史数据"))
+        except Exception as e:
+            self.show_status(_(f"模型训练失败: {e}"))
 
         self.train_progress.setValue(0)
 
@@ -398,13 +415,22 @@ class ChinaMlWidget(QtWidgets.QWidget):
         current_row = self.model_table.currentRow()
         if current_row >= 0 and current_row in self._model_ids:
             model_id = self._model_ids[current_row]
-            importance_dict = self.gui_engine.get_feature_importance(model_id)
+            try:
+                importance_dict = self.gui_engine.get_feature_importance(model_id)
 
-            if importance_dict:
-                self._update_feature_table_from_importance(importance_dict)
-                self.show_status(_("特征重要性已更新"))
-            else:
-                self.show_status(_("无法获取特征重要性"))
+                if importance_dict:
+                    self._update_feature_table_from_importance(importance_dict)
+                    self.show_status(_("特征重要性已更新"))
+                else:
+                    self.show_status(_("无法获取特征重要性"))
+            except RuntimeError as e:
+                error_msg = str(e)
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    _("获取特征重要性失败"),
+                    _("无法获取特征重要性：\n\n{error}").format(error=error_msg)
+                )
+                self.show_status(_("特征重要性获取失败"))
         else:
             self.show_status(_("请先选择一个模型"))
 
@@ -515,18 +541,30 @@ class ChinaMlWidget(QtWidgets.QWidget):
 
     def _do_prediction(self, model_id: str, symbols: list, predict_date: date) -> None:
         """执行预测"""
-        predictions = self.gui_engine.predict(
-            model_id=model_id,
-            symbols=symbols,
-            predict_date=predict_date
-        )
+        try:
+            predictions = self.gui_engine.predict(
+                model_id=model_id,
+                symbols=symbols,
+                predict_date=predict_date
+            )
 
-        if predictions:
-            self.predictions = predictions
-            self._update_prediction_table()
-            self.show_status(_(f"预测完成，共{len(predictions)}只股票"))
-        else:
-            self.show_status(_("预测失败"))
+            if predictions:
+                self.predictions = predictions
+                self._update_prediction_table()
+                self.show_status(_(f"预测完成，共{len(predictions)}只股票"))
+            else:
+                self.show_status(_("预测失败"))
+        except RuntimeError as e:
+            # 显示详细错误信息
+            error_msg = str(e)
+            QtWidgets.QMessageBox.warning(
+                self,
+                _("预测失败"),
+                _("无法进行预测：\n\n{error}\n\n请先下载历史数据后再试").format(error=error_msg)
+            )
+            self.show_status(_("预测失败 - 请先下载历史数据"))
+        except Exception as e:
+            self.show_status(_(f"预测失败: {e}"))
 
     def refresh_predictions(self) -> None:
         """刷新预测结果"""
@@ -542,19 +580,13 @@ class ChinaMlWidget(QtWidgets.QWidget):
         self.prediction_table.setRowCount(len(self.predictions))
 
         for row, pred in enumerate(self.predictions):
-            # 提取股票名称（从model_name中提取）
-            display_name = pred.symbol
-            if "(" in pred.model_name:
-                name = pred.model_name.split("(")[-1].rstrip(")")
-                display_name = f"{pred.symbol}\n{name}"
-
-            self.prediction_table.setItem(row, 0, QtWidgets.QTableWidgetItem(pred.symbol))
-
             # 股票名称
             if "(" in pred.model_name:
                 stock_name = pred.model_name.split("(")[-1].rstrip(")")
             else:
-                stock_name = ""
+                stock_name = pred.model_name
+
+            self.prediction_table.setItem(row, 0, QtWidgets.QTableWidgetItem(pred.symbol))
             self.prediction_table.setItem(row, 1, QtWidgets.QTableWidgetItem(stock_name))
 
             # 方向（带颜色）
