@@ -78,7 +78,12 @@ class MySQLDatabaseLayer:
             是否连接成功
         """
         import logging
+        import traceback
         logger = logging.getLogger("vnpy_china_data")
+
+        # 记录调用栈以便追踪问题
+        stack = traceback.format_stack()
+
         try:
             self._connection = pymysql.connect(**self.config)
             self._connected = True
@@ -87,10 +92,12 @@ class MySQLDatabaseLayer:
         except (OperationalError, DatabaseError) as e:
             self._connected = False
             logger.warning(f"MySQL连接失败: {e}")
+            logger.warning(f"调用栈:\n{''.join(stack[-5:])}")
             return False
         except Exception as e:
             self._connected = False
             logger.warning(f"MySQL连接异常: {e}")
+            logger.warning(f"调用栈:\n{''.join(stack[-5:])}")
             return False
 
     def close(self) -> None:
