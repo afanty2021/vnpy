@@ -47,13 +47,19 @@ class DataPreloader:
     负责从数据服务批量加载历史数据。
     """
 
-    def __init__(self, data_service: Optional[Any] = None):
+    def __init__(
+        self,
+        data_service: Optional[Any] = None,
+        event_engine: Optional[Any] = None
+    ):
         """初始化预加载器
 
         Args:
             data_service: A股数据服务实例
+            event_engine: 事件引擎实例
         """
         self.data_service = data_service
+        self.event_engine = event_engine
         self.config: Optional[PreloadConfig] = None
         self.progress: float = 0.0
 
@@ -136,13 +142,19 @@ class DataUpdateScheduler:
     负责定时从数据服务获取最新数据。
     """
 
-    def __init__(self, data_service: Optional[Any] = None):
+    def __init__(
+        self,
+        data_service: Optional[Any] = None,
+        event_engine: Optional[Any] = None
+    ):
         """初始化调度器
 
         Args:
             data_service: A股数据服务实例
+            event_engine: 事件引擎实例
         """
         self.data_service = data_service
+        self.event_engine = event_engine
         self.config: Optional[UpdateConfig] = None
         self.running: bool = False
 
