@@ -236,9 +236,8 @@ class ChinaDataWidget(QtWidgets.QWidget):
         """添加日志"""
         self.log_text.append(message)
         # 滚动到底部
-        cursor = self.log_text.textCursor()
-        cursor.movePosition(cursor.End)
-        self.log_text.setTextCursor(cursor)
+        scrollbar = self.log_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
 
     def create_dragon_tiger_tab(self) -> QtWidgets.QWidget:
         """创建龙虎榜标签页"""
