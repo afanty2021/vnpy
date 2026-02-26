@@ -234,7 +234,7 @@ class ChinaDataWidget(QtWidgets.QWidget):
 
     def append_log(self, message: str) -> None:
         """添加日志"""
-        self.log_text.appendPlainText(message)
+        self.log_text.append(message)
         # 滚动到底部
         cursor = self.log_text.textCursor()
         cursor.movePosition(cursor.End)
