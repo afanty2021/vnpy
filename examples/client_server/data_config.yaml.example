@@ -1,21 +1,29 @@
 # A股数据服务模块配置
 #
 # 此文件定义了数据服务的相关配置，包括Tushare API和QMT RPC连接
+# 配置文件位置: .vntrader_china/config/data_{environment}.yaml
+# {environment} 可以是: development（开发）、testing（测试）、production（生产）
 
 # Tushare配置
-tushare_token: ""  # 从环境变量 TUSHARE_TOKEN 读取
+tushare_token: ""  # 从环境变量 TUSHARE_TOKEN 读取，或在此填入
 tushare_rate_limit: 200  # API调用频率限制（次/分钟）
 tushare_retry_times: 3  # 重试次数
 tushare_retry_delay: 1  # 重试延迟（秒）
 
-# QMT配置
-qmt_path: "D:/国金证券QMT交易端/userdata_mini/"  # QMT客户端路径（Windows端使用）
-qmt_account_id: ""  # QMT资金账号
+# QMT配置（Windows服务端使用）
+qmt_path: "D:/国金证券QMT交易端/userdata_mini/"  # QMT客户端路径（必须是 userdata_mini 子目录）
+qmt_account_id: ""  # QMT资金账号（必填）
+qmt_session_id: 0  # QMT会话ID（可选，多会话时使用）
+qmt_password: ""  # QMT交易密码（可选，某些场景需要）
 
 # QMT RPC配置（Mac/Linux客户端使用）
 qmt_use_rpc: true  # 是否使用RPC模式连接QMT
-qmt_rpc_req_address: "tcp://192.168.2.168:2014"  # QMT RPC请求地址
-qmt_rpc_sub_address: "tcp://192.168.2.168:4102"  # QMT RPC订阅地址
+qmt_rpc_req_address: "tcp://192.168.2.168:2014"  # QMT RPC请求地址（客户端连接服务端）
+qmt_rpc_sub_address: "tcp://192.168.2.168:4102"  # QMT RPC订阅地址（客户端连接服务端）
+
+# RPC服务端配置（Windows服务端使用）
+rpc_server_rep_address: "tcp://0.0.0.0:2014"  # RPC服务端监听地址（REP模式）
+rpc_server_pub_address: "tcp://0.0.0.0:4102"  # RPC服务端监听地址（PUB模式）
 
 # 缓存配置
 cache_bar_ttl: 300  # K线缓存TTL（秒）
