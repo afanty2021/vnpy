@@ -15,7 +15,7 @@
 ### 已安装的包
 - vnpy (核心框架)
 - vnpy_tushare (Tushare数据接口)
-- vnpy_qmt (QMT证券交易接口)
+- vnpy_qmt (QMT证券交易接口) - **已应用补丁** (见 patches/ 目录)
 
 ### QMT 配置
 - **QMT 账号**: ******
@@ -256,6 +256,24 @@ rpc_client.connect("tcp://127.0.0.1:2014", "tcp://127.0.0.1:4102")
 - **国际市场**：Interactive Brokers (IB)、TAP
 
 ## 变更记录 (Changelog)
+
+### 2026-02-27
+- 🔧 **vnpy_qmt 补丁**（外部包修复）：
+  - 创建 `patches/` 目录跟踪外部依赖包修复
+  - 添加 vnpy_qmt 历史数据下载修复补丁
+  - 修复 Interval 枚举引用错误（MINUTE_5/15/30 不存在）
+  - 添加两步数据下载流程（download_history_data2 → get_local_data）
+  - 创建自动部署脚本 `patches/deploy_vnpy_qmt_fix.py`
+- 📝 **miniQMT 调研报告**（提交b623fb40）：
+  - 添加 `docs/reports/miniQMT历史数据下载问题调研报告.md`
+  - 记录问题根本原因、修复方案和测试结果
+  - 确认 A 股和香港本地股票历史数据可用
+  - 港股通（SHHK/SZHK）暂不支持
+- ✅ **QMT 测试脚本**（提交6680c06f）：
+  - 添加 `test_qmt_simple.py` - A股基础测试
+  - 添加 `test_qmt_history.py` - QMT 接口测试
+  - 添加 `test_hk_stock_connect.py` - 港股通综合测试
+  - 添加 `test_xtdata_direct.py` - API 直接测试
 
 ### 2026-01-18
 - 🐛 **Bug修复**（提交fe2697a8, PR#3721）：
