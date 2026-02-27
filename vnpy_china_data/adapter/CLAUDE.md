@@ -7,6 +7,7 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #7557 | 11:38 AM | 🔴 | Added gateway_name to BarData construction | ~188 |
 | #7512 | 11:11 AM | 🔴 | Fixed Interval enum handling in QMT adapter | ~274 |
 | #7511 | " | 🟣 | Implemented miniQMT historical data download in vnpy_qmt_adapter | ~250 |
 | #7510 | " | 🔵 | Analyzed RPC QMT adapter architecture | ~284 |

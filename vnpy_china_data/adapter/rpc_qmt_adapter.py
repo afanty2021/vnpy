@@ -167,13 +167,15 @@ class RpcQmtDataAdapter(BaseDataAdapter):
             # 例如：将 "0700.SHHK" 转换为 "0700"
             clean_symbol = symbol.split(".")[0] if "." in symbol else symbol
 
-            req = {
-                "symbol": clean_symbol,
-                "exchange": exchange.value,
-                "start": start,
-                "end": end,
-                "interval": interval.value
-            }
+            # 创建 HistoryRequest 对象
+            from vnpy.trader.object import HistoryRequest
+            req = HistoryRequest(
+                symbol=clean_symbol,
+                exchange=exchange,
+                start=start,
+                end=end,
+                interval=interval
+            )
 
             # MainEngine.query_history 需要 (req, gateway_name) 两个参数
             result = self._rpc_client.query_history(req, "QMT", timeout=60000)

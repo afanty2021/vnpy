@@ -174,6 +174,7 @@ export QMT_ACCOUNT_ID=your_account_id
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #7572 | 12:09 PM | 🔴 | Added .SEHK suffix support in exchange parsing | ~203 |
 | #7542 | 11:31 AM | 🔴 | Fixed duplicate method definition in service.py | ~102 |
 | #7541 | " | 🔴 | Fixed duplicate method and syntax error in service.py | ~167 |
 | #7540 | " | 🔵 | Reviewed HK Stock Connect auto-update mechanism | ~271 |

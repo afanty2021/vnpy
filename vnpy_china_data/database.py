@@ -162,7 +162,7 @@ class MySQLDatabaseLayer:
 
                 sql = """
                 INSERT INTO db_bar_data
-                (symbol, exchange, interval, datetime, open_price, high_price,
+                (symbol, exchange, `interval`, `datetime`, open_price, high_price,
                  low_price, close_price, volume, turnover)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
@@ -231,16 +231,16 @@ class MySQLDatabaseLayer:
                 cursor = self._connection.cursor()
 
                 sql = """
-                SELECT symbol, exchange, interval, datetime,
+                SELECT symbol, exchange, `interval`, `datetime`,
                        open_price, high_price, low_price, close_price,
                        volume, turnover
                 FROM db_bar_data
                 WHERE symbol = %s
                   AND exchange = %s
-                  AND interval = %s
-                  AND datetime >= %s
-                  AND datetime <= %s
-                ORDER BY datetime ASC
+                  AND `interval` = %s
+                  AND `datetime` >= %s
+                  AND `datetime` <= %s
+                ORDER BY `datetime` ASC
                 """
 
                 cursor.execute(sql, (
@@ -258,6 +258,7 @@ class MySQLDatabaseLayer:
                 bars = []
                 for row in results:
                     bars.append(BarData(
+                        gateway_name="MYSQL",
                         symbol=row[0],
                         exchange=Exchange(row[1]),
                         interval=Interval(row[2]),
@@ -303,7 +304,7 @@ class MySQLDatabaseLayer:
                 cursor = self._connection.cursor()
 
                 sql = """
-                SELECT MAX(datetime) as latest_date
+                SELECT MAX(`datetime`) as latest_date
                 FROM db_bar_data
                 WHERE symbol = %s
                   AND exchange = %s
@@ -926,3 +927,270 @@ class MySQLDatabaseLayer:
         except Exception as e:
             logger.error(f"获取港股通更新信息异常: {e}", exc_info=True)
             return None
+
+    # ========== 表创建和管理 ==========
+
+    def create_bar_data_table(self) -> bool:
+        """创建K线数据表
+
+        Returns:
+            是否创建成功
+        """
+        if not self._ensure_connection():
+            return False
+
+        try:
+            with self._lock:
+                cursor = self._connection.cursor()
+
+                sql = """
+                CREATE TABLE IF NOT EXISTS db_bar_data (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '自增主键',
+                    symbol VARCHAR(32) NOT NULL COMMENT '股票代码（不含交易所后缀）',
+                    exchange VARCHAR(16) NOT NULL COMMENT '交易所代码',
+                    `interval` VARCHAR(8) NOT NULL COMMENT 'K线周期',
+                    `datetime` DATETIME(3) NOT NULL COMMENT 'K线时间戳',
+                    open_price DECIMAL(15, 4) NOT NULL COMMENT '开盘价',
+                    high_price DECIMAL(15, 4) NOT NULL COMMENT '最高价',
+                    low_price DECIMAL(15, 4) NOT NULL COMMENT '最低价',
+                    close_price DECIMAL(15, 4) NOT NULL COMMENT '收盘价',
+                    volume DECIMAL(20, 2) NOT NULL COMMENT '成交量',
+                    turnover DECIMAL(25, 4) DEFAULT 0 COMMENT '成交额',
+                    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+                    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+
+                    UNIQUE KEY uk_bar (symbol, exchange, `interval`, `datetime`),
+                    KEY idx_symbol_interval_time (symbol, `interval`, `datetime`),
+                    KEY idx_exchange_time (exchange, `datetime`),
+                    KEY idx_datetime (`datetime`),
+                    KEY idx_covering (symbol, exchange, `interval`, `datetime`, close_price, volume)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                COMMENT='股票K线数据表';
+                """
+
+                cursor.execute(sql)
+                self._connection.commit()
+                cursor.close()
+
+                logger.info("K线数据表创建成功: db_bar_data")
+                return True
+
+        except (OperationalError, DatabaseError) as e:
+            logger.error(f"创建K线数据表失败: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"创建K线数据表异常: {e}", exc_info=True)
+            return False
+
+    def create_stock_info_table(self) -> bool:
+        """创建股票基本信息表
+
+        Returns:
+            是否创建成功
+        """
+        if not self._ensure_connection():
+            return False
+
+        try:
+            with self._lock:
+                cursor = self._connection.cursor()
+
+                sql = """
+                CREATE TABLE IF NOT EXISTS db_stock_info (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '自增主键',
+                    symbol VARCHAR(32) NOT NULL COMMENT '股票代码',
+                    name VARCHAR(64) NOT NULL COMMENT '股票名称',
+                    exchange VARCHAR(16) NOT NULL COMMENT '交易所代码',
+                    industry VARCHAR(64) COMMENT '所属行业',
+                    area VARCHAR(32) COMMENT '所属地域',
+                    market VARCHAR(32) COMMENT '市场类型',
+                    list_date DATE COMMENT '上市日期',
+                    is_st TINYINT(1) DEFAULT 0 COMMENT '是否ST股票',
+                    status VARCHAR(16) DEFAULT 'L' COMMENT '上市状态',
+                    market_cap DECIMAL(20, 4) COMMENT '总市值',
+                    circulating_cap DECIMAL(20, 4) COMMENT '流通市值',
+                    created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+                    updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+
+                    UNIQUE KEY uk_symbol (symbol),
+                    KEY idx_exchange_market (exchange, market),
+                    KEY idx_industry (industry),
+                    KEY idx_status (status),
+                    KEY idx_list_date (list_date)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                COMMENT='股票基本信息表';
+                """
+
+                cursor.execute(sql)
+                self._connection.commit()
+                cursor.close()
+
+                logger.info("股票信息表创建成功: db_stock_info")
+                return True
+
+        except (OperationalError, DatabaseError) as e:
+            logger.error(f"创建股票信息表失败: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"创建股票信息表异常: {e}", exc_info=True)
+            return False
+
+    def create_all_tables(self) -> bool:
+        """创建所有数据表
+
+        Returns:
+            是否全部创建成功
+        """
+        logger.info("开始创建数据库表...")
+
+        results = {
+            "db_bar_data": self.create_bar_data_table(),
+            "db_stock_info": self.create_stock_info_table(),
+        }
+
+        success_count = sum(1 for v in results.values() if v)
+        total_count = len(results)
+
+        logger.info(f"数据库表创建完成: {success_count}/{total_count} 成功")
+
+        for table, success in results.items():
+            status = "✓" if success else "✗"
+            logger.info(f"  {status} {table}")
+
+        return all(results.values())
+
+    def drop_bar_data_table(self) -> bool:
+        """删除K线数据表（谨慎使用）
+
+        Returns:
+            是否删除成功
+        """
+        if not self._ensure_connection():
+            return False
+
+        try:
+            with self._lock:
+                cursor = self._connection.cursor()
+
+                sql = "DROP TABLE IF EXISTS db_bar_data"
+                cursor.execute(sql)
+                self._connection.commit()
+                cursor.close()
+
+                logger.warning("K线数据表已删除: db_bar_data")
+                return True
+
+        except (OperationalError, DatabaseError) as e:
+            logger.error(f"删除K线数据表失败: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"删除K线数据表异常: {e}", exc_info=True)
+            return False
+
+    def get_table_info(self, table_name: str) -> Optional[Dict[str, Any]]:
+        """获取表信息
+
+        Args:
+            table_name: 表名
+
+        Returns:
+            表信息字典，包含行数、大小等
+        """
+        if not self._ensure_connection():
+            return None
+
+        try:
+            with self._lock:
+                cursor = self._connection.cursor(DictCursor)
+
+                sql = """
+                SELECT
+                    table_name,
+                    table_rows,
+                    ROUND((data_length + index_length) / 1024 / 1024, 2) AS size_mb,
+                    ROUND((data_length + index_length) / 1024 / 1024 / 1024, 2) AS size_gb,
+                    ROUND(index_length / 1024 / 1024, 2) AS index_mb,
+                    engine,
+                    table_collation
+                FROM information_schema.TABLES
+                WHERE table_schema = %s AND table_name = %s
+                """
+
+                cursor.execute(sql, (self.config["database"], table_name))
+                result = cursor.fetchone()
+                cursor.close()
+
+                return result
+
+        except (OperationalError, DatabaseError) as e:
+            logger.error(f"获取表信息失败: {e}", exc_info=True)
+            return None
+        except Exception as e:
+            logger.error(f"获取表信息异常: {e}", exc_info=True)
+            return None
+
+    def get_database_stats(self) -> Dict[str, Any]:
+        """获取数据库统计信息
+
+        Returns:
+            数据库统计信息
+        """
+        if not self._ensure_connection():
+            return {}
+
+        try:
+            with self._lock:
+                cursor = self._connection.cursor()
+
+                # 获取所有表的大小信息
+                sql = """
+                SELECT
+                    table_name,
+                    COALESCE(ROUND((data_length + index_length) / 1024 / 1024, 2), 0) AS size_mb
+                FROM information_schema.TABLES
+                WHERE table_schema = %s
+                    AND table_name LIKE 'db_%%'
+                ORDER BY (data_length + index_length) DESC
+                """
+
+                cursor.execute(sql, (self.config["database"],))
+                size_rows = cursor.fetchall()
+
+                # 使用 COUNT(*) 获取精确行数
+                tables = []
+                for table_name, size_mb in size_rows:
+                    try:
+                        count_sql = f"SELECT COUNT(*) FROM `{table_name}`"
+                        cursor.execute(count_sql)
+                        row_count = cursor.fetchone()[0]
+                    except Exception:
+                        row_count = 0
+
+                    tables.append({
+                        "table_name": table_name,
+                        "table_rows": row_count,
+                        "size_mb": size_mb,
+                        "table_comment": None
+                    })
+
+                cursor.close()
+
+                # 汇总统计
+                total_rows = sum(t["table_rows"] for t in tables)
+                total_size_mb = sum(t["size_mb"] for t in tables)
+
+                return {
+                    "database": self.config["database"],
+                    "table_count": len(tables),
+                    "total_rows": total_rows,
+                    "total_size_mb": round(total_size_mb, 2),
+                    "total_size_gb": round(total_size_mb / 1024, 2),
+                    "tables": tables
+                }
+
+        except (OperationalError, DatabaseError) as e:
+            logger.error(f"获取数据库统计失败：{e}")
+            return {}
+        except Exception as e:
+            logger.error(f"获取数据库统计异常: {e}", exc_info=True)
+            return {}
