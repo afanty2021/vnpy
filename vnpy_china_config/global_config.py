@@ -198,6 +198,48 @@ class RiskGlobalConfig(BaseModel):
         return v
 
 
+class QmtConfig(BaseModel):
+    """QMT 交易接口配置
+
+    统一管理 QMT/miniQMT 交易接口连接配置。
+
+    Attributes:
+        account_id: QMT 交易账号
+        mini_path: miniQMT 路径（必须是 userdata_mini 子目录）
+        session_id: 会话ID（可选，用于多会话）
+        password: 交易密码（可选，某些场景需要）
+
+    Example:
+        ```python
+        qmt_config = QmtConfig(
+            account_id="40218291",
+            mini_path="D:/国金证券QMT交易端/userdata_mini/"
+        )
+        ```
+    """
+
+    account_id: str = ""
+    mini_path: str = ""
+    session_id: int = 0
+    password: str = ""
+
+    @field_validator("mini_path")
+    @classmethod
+    def validate_mini_path(cls, v: str) -> str:
+        """验证 miniQMT 路径"""
+        if not v:
+            return v
+        # 检查路径是否包含 userdata_mini
+        if "userdata_mini" not in v and "USERDATA_MINI" not in v.upper():
+            import warnings
+            warnings.warn(
+                f"miniQMT 路径可能不正确: {v}\n"
+                "正确路径应包含 userdata_mini 子目录，例如:\n"
+                "  D:/国金证券QMT交易端/userdata_mini/"
+            )
+        return v
+
+
 class GlobalConfig(BaseConfig):
     """全局配置
 
@@ -209,6 +251,7 @@ class GlobalConfig(BaseConfig):
         database: 数据库配置
         logging: 日志配置
         rpc: RPC 配置
+        qmt: QMT 交易接口配置
         risk: 风控全局参数
         work_dir: 工作目录
         data_dir: 数据目录
@@ -227,6 +270,7 @@ class GlobalConfig(BaseConfig):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     rpc: RpcConfig = Field(default_factory=RpcConfig)
+    qmt: QmtConfig = Field(default_factory=QmtConfig)
     risk: RiskGlobalConfig = Field(default_factory=RiskGlobalConfig)
     work_dir: Path = Field(default_factory=lambda: Path(".vntrader_china"))
     data_dir: Path = Field(default_factory=lambda: Path("data"))

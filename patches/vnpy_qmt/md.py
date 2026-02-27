@@ -268,7 +268,8 @@ class MD:
                     stock_list=[qmt_code],
                     period=period,
                     start_time=start_time,
-                    end_time=end_time
+                    end_time=end_time,
+                    dividend_type='front'  # 前复权
                 )
             elif hasattr(xtquant.xtdata, 'get_market_data_ex'):
                 # 备用方案：使用 get_market_data_ex

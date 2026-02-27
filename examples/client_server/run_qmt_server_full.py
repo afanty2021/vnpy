@@ -3,8 +3,8 @@
 VeighNa RPC服务端 - 完整交易接口版
 需要vnpy_rpcservice包
 
-使用统一的 data_config.yaml 配置文件管理 QMT 和 RPC 配置，避免硬编码敏感信息。
-配置文件位置: .vntrader_china/config/data_{environment}.yaml
+使用统一的 global_development.yaml 配置文件管理所有配置，避免硬编码敏感信息。
+配置文件位置: .vntrader_china/config/global_{environment}.yaml
 """
 
 import sys
@@ -31,7 +31,7 @@ except ImportError:
 # 尝试导入配置管理器
 try:
     from vnpy_china_config.loader import ConfigManager
-    from vnpy_china_config.module_configs.data_config import DataModuleConfig
+    from vnpy_china_config.global_config import GlobalConfig
     HAS_CONFIG = True
 except ImportError:
     print("警告: 未安装vnpy_china_config，使用默认配置")
@@ -44,13 +44,13 @@ def load_config():
     Returns:
         tuple: (QMT_SETTING, RPC_SETTING)
 
-    从 data_config.yaml 读取配置：
-    - qmt_path: QMT 客户端路径
-    - qmt_account_id: QMT 资金账号
-    - qmt_session_id: QMT 会话ID（可选）
-    - qmt_password: QMT 交易密码（可选）
-    - rpc_server_rep_address: RPC服务端监听地址（REP模式）
-    - rpc_server_pub_address: RPC服务端监听地址（PUB模式）
+    从 global_development.yaml 读取配置：
+    - qmt.account_id: QMT 资金账号
+    - qmt.mini_path: miniQMT 路径
+    - qmt.session_id: QMT 会话ID（可选）
+    - qmt.password: QMT 交易密码（可选）
+    - rpc.rep_address: RPC 服务端监听地址（REP模式）
+    - rpc.pub_address: RPC 服务端监听地址（PUB模式）
     """
     if not HAS_CONFIG:
         # 默认配置
@@ -62,31 +62,31 @@ def load_config():
             "sub_address": "tcp://0.0.0.0:4102",
         }
 
-    # 从配置文件加载
+    # 从全局配置文件加载
     manager = ConfigManager()
-    config = manager.load_module_config("data", DataModuleConfig)
+    config = manager.load_global_config()
 
     # 构建 QMT_SETTING
     qmt_setting = {
-        "交易账号": config.qmt_account_id or "",
-        "mini路径": str(config.qmt_path) if config.qmt_path else "",
+        "交易账号": config.qmt.account_id or "",
+        "mini路径": config.qmt.mini_path or "",
     }
 
     # 可选字段
-    if config.qmt_session_id:
-        qmt_setting["session_id"] = config.qmt_session_id
-    if config.qmt_password:
-        qmt_setting["密码"] = config.qmt_password
+    if config.qmt.session_id:
+        qmt_setting["session_id"] = config.qmt.session_id
+    if config.qmt.password:
+        qmt_setting["密码"] = config.qmt.password
 
-    # 构建 RPC_SETTING（使用服务端监听地址）
+    # 构建 RPC_SETTING（使用全局 RPC 配置）
     rpc_setting = {
-        "req_address": config.rpc_server_rep_address,
-        "sub_address": config.rpc_server_pub_address,
+        "req_address": config.rpc.rep_address,
+        "sub_address": config.rpc.pub_address,
     }
 
     # 支持环境变量覆盖
-    rpc_setting["req_address"] = os.getenv("QMT_RPC_SERVER_REP_ADDRESS", rpc_setting["req_address"])
-    rpc_setting["sub_address"] = os.getenv("QMT_RPC_SERVER_PUB_ADDRESS", rpc_setting["sub_address"])
+    rpc_setting["req_address"] = os.getenv("QMT_RPC_REP_ADDRESS", rpc_setting["req_address"])
+    rpc_setting["sub_address"] = os.getenv("QMT_RPC_PUB_ADDRESS", rpc_setting["sub_address"])
 
     return qmt_setting, rpc_setting
 
@@ -131,18 +131,16 @@ def main():
     if not QMT_SETTING.get("交易账号") or not QMT_SETTING.get("mini路径"):
         print("\n错误: QMT 配置不完整!")
         print("请在配置文件中设置以下必填项:")
-        print("  - qmt_account_id: QMT 资金账号")
-        print("  - qmt_path: QMT 客户端路径")
+        print("  - qmt.account_id: QMT 资金账号")
+        print("  - qmt.mini_path: QMT 客户端路径")
 
         if HAS_CONFIG:
             manager = ConfigManager()
-            print(f"\n配置文件位置: {manager.config_path / 'data_development.yaml'}")
+            print(f"\n配置文件位置: {manager.config_path / 'global_development.yaml'}")
             print("\n配置示例:")
-            print("qmt_account_id: \"YOUR_ACCOUNT_ID\"")
-            print("qmt_path: \"D:/国金证券QMT交易端/userdata_mini/\"")
-            print("\n或者复制配置示例:")
-            print("  cp examples/client_server/data_config.yaml.example \\")
-            print("     .vntrader_china/config/data_development.yaml")
+            print("qmt:")
+            print("  account_id: \"YOUR_ACCOUNT_ID\"")
+            print("  mini_path: \"D:/国金证券QMT交易端/userdata_mini/\"")
         return
 
     # 连接QMT
