@@ -103,6 +103,18 @@ class ChinaDataWidget(QtWidgets.QWidget):
         refresh_btn.clicked.connect(self.refresh_symbols)
         config_layout.addWidget(refresh_btn, 0, 4)
 
+        # 更新港股通名单按钮
+        update_hk_btn = QtWidgets.QPushButton(_("更新港股通名单"))
+        update_hk_btn.clicked.connect(self.update_hk_connect_stocks)
+        update_hk_btn.setToolTip(_("从交易所网站获取最新的港股通股票名单"))
+        update_hk_btn.setStyleSheet("padding: 5px; background-color: #e3f2fd;")
+        config_layout.addWidget(update_hk_btn, 0, 5)
+
+        # 港股通状态标签
+        self.hk_status_label = QtWidgets.QLabel(_("港股通名单：未检查"))
+        self.hk_status_label.setStyleSheet("color: #666; font-size: 11px; padding: 2px;")
+        config_layout.addWidget(self.hk_status_label, 1, 1, 1, 4)
+
         # 日期范围
         config_layout.addWidget(QtWidgets.QLabel(_("开始日期：")), 2, 0)
         self.start_date_edit = QtWidgets.QDateEdit()
@@ -186,6 +198,83 @@ class ChinaDataWidget(QtWidgets.QWidget):
         else:
             self.symbols_input.clear()
             self.show_status(_(f"未获取到股票列表"))
+
+        # 如果是港股通范围，检查更新状态
+        if scope in ["HK_SH", "HK_SZ", "HK_ALL"]:
+            self.check_hk_connect_status()
+
+    def update_hk_connect_stocks(self) -> None:
+        """更新港股通股票名单"""
+        if not self.gui_engine:
+            self.show_status(_("错误：GUI引擎未初始化"))
+            return
+
+        self.show_status(_("正在更新港股通名单..."))
+        self.append_log(_("开始从交易所网站爬取港股通股票名单..."))
+
+        # 在后台执行更新（避免阻塞UI）
+        from threading import Thread
+
+        def do_update():
+            result = self.gui_engine.update_hk_connect_stocks()
+
+            # 更新完成后在主线程更新UI
+            from QtCore import QMetaObject, Qt, Q_ARG
+            QMetaObject.invokeMethod(
+                self,
+                "_on_hk_connect_updated",
+                Qt.QueuedConnection,
+                Q_ARG(object, result)
+            )
+
+        thread = Thread(target=do_update, daemon=True)
+        thread.start()
+
+    def _on_hk_connect_updated(self, result: dict) -> None:
+        """港股通名单更新完成回调"""
+        if result.get("success"):
+            self.append_log(
+                _(f"港股通名单更新成功：总计 {result['count']} 只，"
+                  f"沪港通 {result['sh_count']} 只，深港通 {result['sz_count']} 只")
+            )
+            self.show_status(_(f"港股通名单已更新：{result['count']} 只"))
+
+            # 刷新港股通状态
+            self.check_hk_connect_status()
+
+            # 如果当前选择的是港股通范围，刷新股票列表
+            scope = self.scope_combo.currentData()
+            if scope in ["HK_SH", "HK_SZ", "HK_ALL"]:
+                self.refresh_symbols()
+        else:
+            error = result.get("error", "未知错误")
+            self.append_log(_(f"港股通名单更新失败: {error}"))
+            self.show_status(_(f"更新失败: {error}"))
+
+    def check_hk_connect_status(self) -> None:
+        """检查港股通名单更新状态"""
+        if not self.gui_engine:
+            return
+
+        update_info = self.gui_engine.get_hk_connect_update_info()
+
+        if update_info and update_info.get("exists"):
+            days = update_info.get("days_since_update", 0)
+            total = update_info.get("total_count", 0)
+            sh_count = update_info.get("sh_count", 0)
+            sz_count = update_info.get("sz_count", 0)
+
+            if days >= 7:
+                status_text = _(f"港股通名单：{days}天前更新（共{total}只，需更新）")
+                self.hk_status_label.setStyleSheet("color: #f57c00; font-size: 11px; padding: 2px;")
+            else:
+                status_text = _(f"港股通名单：{days}天前更新（共{total}只）")
+                self.hk_status_label.setStyleSheet("color: #666; font-size: 11px; padding: 2px;")
+
+            self.hk_status_label.setText(status_text)
+        else:
+            self.hk_status_label.setText(_("港股通名单：未初始化"))
+            self.hk_status_label.setStyleSheet("color: #f44336; font-size: 11px; padding: 2px;")
 
     def start_download(self) -> None:
         """开始下载历史数据"""

@@ -139,11 +139,194 @@ class QMTDataAdapter(BaseDataAdapter):
     ) -> List[BarData]:
         """获取K线数据
 
-        Note: QMT主要用于实时数据，历史数据建议使用Tushare
+        使用 miniQMT 的两步下载流程：
+        1. 调用 download_history_data2 异步下载数据到本地
+        2. 等待下载完成
+        3. 使用 get_local_data 读取本地数据
+
+        Note: 建议在盘后时段使用，避免干扰实时数据
         """
-        # 如果连接了QMT，可以尝试获取
-        # 这里简化处理，返回空列表
-        return []
+        import time
+        import logging
+
+        logger = logging.getLogger("vnpy_china_data")
+
+        if not self._connected:
+            logger.debug("QMT未连接，无法获取历史数据")
+            return []
+
+        try:
+            from xtquant import xtdata
+
+            # 转换为QMT格式代码
+            qmt_code = self._convert_to_qmt_code(symbol, exchange)
+            if not qmt_code:
+                logger.warning(f"无法转换股票代码: {symbol}.{exchange.value}")
+                return []
+
+            # 转换周期
+            period = self._interval_to_period(interval)
+            if not period:
+                logger.warning(f"不支持的K线周期: {interval.value}")
+                return []
+
+            # 格式化时间
+            start_time = start.strftime("%Y%m%d")
+            end_time = end.strftime("%Y%m%d")
+
+            logger.debug(f"QMT正在下载数据: {qmt_code}, period={period}, start={start_time}, end={end_time}")
+
+            # 第1步：异步下载数据到本地
+            if hasattr(xtdata, 'download_history_data2'):
+                xtdata.download_history_data2(
+                    stock_list=[qmt_code],
+                    period=period,
+                    start_time=start_time,
+                    end_time=end_time
+                )
+                # 等待异步下载完成（建议2-5秒）
+                time.sleep(3)
+            else:
+                logger.warning("xtdata不支持download_history_data2方法")
+                return []
+
+            # 第2步：读取本地数据
+            if hasattr(xtdata, 'get_local_data'):
+                data_list = xtdata.get_local_data(
+                    field_list=['time', 'open', 'high', 'low', 'close', 'volume', 'amount'],
+                    stock_list=[qmt_code],
+                    period=period,
+                    start_time=start_time,
+                    end_time=end_time
+                )
+            else:
+                logger.warning("xtdata不支持get_local_data方法")
+                return []
+
+            # 第3步：转换为BarData列表
+            bars: List[BarData] = []
+
+            if data_list is None or len(data_list) == 0:
+                logger.debug(f"QMT未获取到数据: {qmt_code}")
+                return []
+
+            # 处理DataFrame数据
+            if hasattr(data_list, 'iterrows'):
+                for _, row in data_list.iterrows():
+                    bar = BarData(
+                        gateway_name="QMT",
+                        symbol=symbol,
+                        exchange=exchange,
+                        interval=interval,
+                        datetime=self._parse_qmt_time(row.get('time')),
+                        open_price=float(row.get('open', 0)),
+                        high_price=float(row.get('high', 0)),
+                        low_price=float(row.get('low', 0)),
+                        close_price=float(row.get('close', 0)),
+                        volume=float(row.get('volume', 0)),
+                        turnover=float(row.get('amount', 0)),
+                    )
+                    bars.append(bar)
+
+            logger.debug(f"QMT获取历史数据: {qmt_code}, 共{len(bars)}条")
+            return bars
+
+        except ImportError:
+            logger.warning("xtdata模块未安装，无法获取QMT历史数据")
+            return []
+        except Exception as e:
+            logger.warning(f"QMT获取历史数据失败: {e}")
+            return []
+
+    def _convert_to_qmt_code(self, symbol: str, exchange: Exchange) -> Optional[str]:
+        """将VeighNa格式代码转换为QMT格式
+
+        重要：港股通股票（SHHK/SZHK）统一转换为香港本地交易所（HK），
+        因为港股通股票本身就是在香港联合交易所上市的。
+
+        Args:
+            symbol: 股票代码（不含交易所后缀）
+            exchange: 交易所枚举
+
+        Returns:
+            QMT格式代码（如 "000001.SZ", "00700.HK"）
+
+        Examples:
+            >>> adapter._convert_to_qmt_code("000001", Exchange.SZSE)
+            "000001.SZ"
+            >>> adapter._convert_to_qmt_code("00700", Exchange.SHHK)
+            "00700.HK"
+            >>> adapter._convert_to_qmt_code("00700", Exchange.SEHK)
+            "00700.HK"
+        """
+        # A股交易所映射
+        exchange_suffix = {
+            Exchange.SSE: "SH",
+            Exchange.SZSE: "SZ",
+        }
+
+        # 港股（包括港股通）统一使用香港本地交易所
+        if exchange in (Exchange.SEHK, Exchange.SHHK, Exchange.SZHK):
+            return f"{symbol}.HK"
+
+        # A股
+        suffix = exchange_suffix.get(exchange)
+        if suffix:
+            return f"{symbol}.{suffix}"
+
+        return None
+
+    def _interval_to_period(self, interval: Interval) -> Optional[str]:
+        """将VeighNa周期转换为QMT周期
+
+        Args:
+            interval: K线周期枚举
+
+        Returns:
+            QMT周期字符串（如 "1d", "1h", "1m"）
+
+        Examples:
+            >>> adapter._interval_to_period(Interval.DAILY)
+            "1d"
+            >>> adapter._interval_to_period(Interval.HOUR)
+            "1h"
+        """
+        period_map = {
+            Interval.MINUTE: "1m",
+            Interval.HOUR: "1h",
+            Interval.DAILY: "1d",
+            Interval.WEEKLY: "1w",
+        }
+        return period_map.get(interval)
+
+    def _parse_qmt_time(self, time_value) -> datetime:
+        """解析QMT返回的时间值
+
+        Args:
+            time_value: 时间值（可能是字符串、时间戳等）
+
+        Returns:
+            datetime对象
+        """
+        if isinstance(time_value, datetime):
+            return time_value
+        elif isinstance(time_value, str):
+            # 尝试多种格式
+            formats = [
+                "%Y%m%d %H:%M:%S",
+                "%Y-%m-%d %H:%M:%S",
+                "%Y%m%d",
+                "%Y-%m-%d",
+            ]
+            for fmt in formats:
+                try:
+                    return datetime.strptime(time_value, fmt)
+                except ValueError:
+                    continue
+            # 如果都失败，返回当前时间
+            return datetime.now()
+        else:
+            return datetime.now()
 
     def get_tick_data(
         self,
@@ -1033,43 +1216,46 @@ class RealtimeBarGenerator:
         self._last_tick = tick
 
     def _is_new_bar(self, current_time: datetime, bar_time: datetime) -> bool:
-        """判断是否新K线"""
+        """判断是否新K线
+
+        注意：vnpy的Interval枚举只包含基础值（MINUTE, HOUR, DAILY等），
+        不包含MINUTE_5、MINUTE_15等细分周期。如需支持多周期，
+        请通过字符串方式传递周期信息。
+        """
         if self.interval == Interval.MINUTE:
             return current_time.minute != bar_time.minute
-        elif self.interval == Interval.MINUTE:
-            return (current_time - bar_time).seconds >= 300
-        elif self.interval == Interval.MINUTE5:
-            return (current_time - bar_time).seconds >= 900
-        elif self.interval == Interval.MINUTE_30:
-            return (current_time - bar_time).seconds >= 1800
+        elif self.interval == Interval.HOUR:
+            return current_time.hour != bar_time.hour
+        elif self.interval == Interval.DAILY:
+            return current_time.date() != bar_time.date()
 
         return False
 
     def _get_bar_time(self, tick_time: datetime) -> datetime:
-        """获取K线时间"""
+        """获取K线时间
+
+        注意：vnpy的Interval枚举只包含基础值。
+        """
         if self.interval == Interval.MINUTE:
             return tick_time.replace(second=0, microsecond=0)
-        elif self.interval == Interval.MINUTE:
-            minute = (tick_time.minute // 5) * 5
-            return tick_time.replace(minute=minute, second=0, microsecond=0)
-        elif self.interval == Interval.MINUTE5:
-            minute = (tick_time.minute // 15) * 15
-            return tick_time.replace(minute=minute, second=0, microsecond=0)
-        elif self.interval == Interval.MINUTE_30:
-            minute = (tick_time.minute // 30) * 30
-            return tick_time.replace(minute=minute, second=0, microsecond=0)
+        elif self.interval == Interval.HOUR:
+            return tick_time.replace(minute=0, second=0, microsecond=0)
+        elif self.interval == Interval.DAILY:
+            return tick_time.replace(hour=0, minute=0, second=0, microsecond=0)
 
         return tick_time
 
     @staticmethod
     def _get_interval_seconds(interval: Interval) -> int:
-        """获取周期秒数"""
+        """获取周期秒数
+
+        注意：vnpy的Interval枚举只包含基础值。
+        """
         mapping = {
             Interval.MINUTE: 60,
-            Interval.MINUTE: 300,
-            Interval.MINUTE5: 900,
-            Interval.MINUTE_30: 1800,
-            Interval.HOUR_1: 3600,
+            Interval.HOUR: 3600,
+            Interval.DAILY: 86400,
+            Interval.WEEKLY: 604800,
         }
         return mapping.get(interval, 60)
 

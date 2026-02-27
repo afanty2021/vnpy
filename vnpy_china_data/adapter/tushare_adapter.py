@@ -490,12 +490,17 @@ class TushareDataAdapter(BaseDataAdapter):
     # ========== 工具方法 ==========
 
     def _get_exchange(self, ts_code: str) -> Exchange:
-        """从ts_code获取交易所"""
+        """从ts_code获取交易所
+
+        支持港股通交易所映射。Tushare 对所有港股（沪港通/深港通/香港本地）
+        都使用 .HK 后缀，因此默认映射为 SEHK（香港交易所）。
+        """
         suffix = ts_code.split(".")[-1]
         exchange_map = {
             "SH": Exchange.SSE,
             "SZ": Exchange.SZSE,
-            "BJ": Exchange.BSE
+            "BJ": Exchange.BSE,
+            "HK": Exchange.SEHK  # Tushare 港股统一使用 .HK
         }
         return exchange_map.get(suffix, Exchange.SZSE)
 

@@ -162,8 +162,13 @@ class RpcQmtDataAdapter(BaseDataAdapter):
         try:
             # 调用远程 RPC 的 query_history 方法
             # VeighNa RPC 服务会自动将请求转发到 QMT 网关
+
+            # 去除 symbol 的交易所后缀（QMT 网关期望纯代码）
+            # 例如：将 "0700.SHHK" 转换为 "0700"
+            clean_symbol = symbol.split(".")[0] if "." in symbol else symbol
+
             req = {
-                "symbol": symbol,
+                "symbol": clean_symbol,
                 "exchange": exchange.value,
                 "start": start,
                 "end": end,

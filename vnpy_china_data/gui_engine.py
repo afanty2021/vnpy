@@ -57,6 +57,57 @@ class ChinaDataGuiEngine(BaseEngine):
         # 数据服务已在__init__中初始化
         pass
 
+    # ==================== 港股通名单管理 ====================
+
+    def update_hk_connect_stocks(self) -> Dict[str, Any]:
+        """手动更新港股通股票名单
+
+        从上交所和深交所网站爬取最新的港股通股票名单，
+        并存储到数据库中。
+
+        Returns:
+            更新结果字典，包含 success, count, sh_count, sz_count 等
+
+        Examples:
+            >>> result = engine.update_hk_connect_stocks()
+            >>> if result['success']:
+            ...     print(f"更新成功：沪港通 {result['sh_count']} 只，深港通 {result['sz_count']} 只")
+        """
+        if not self.data_service:
+            return {
+                "success": False,
+                "error": "数据服务未初始化"
+            }
+
+        self.main_engine.write_log("正在更新港股通股票名单...", "ChinaDataApp")
+
+        result = self.data_service.update_hk_connect_stocks()
+
+        if result["success"]:
+            self.main_engine.write_log(
+                f"港股通名单更新成功：总计 {result['count']} 只，"
+                f"沪港通 {result['sh_count']} 只，深港通 {result['sz_count']} 只",
+                "ChinaDataApp"
+            )
+        else:
+            self.main_engine.write_log(
+                f"港股通名单更新失败: {result.get('error', '未知错误')}",
+                "ChinaDataApp"
+            )
+
+        return result
+
+    def get_hk_connect_update_info(self) -> Optional[Dict[str, Any]]:
+        """获取港股通名单更新信息
+
+        Returns:
+            更新信息字典，包含 last_updated, days_since_update, total_count 等
+        """
+        if not self.data_service:
+            return None
+
+        return self.data_service.get_hk_connect_update_info()
+
     # ==================== 历史数据下载 ====================
 
     def download_history_data(
@@ -69,7 +120,7 @@ class ChinaDataGuiEngine(BaseEngine):
         """下载历史数据
 
         Args:
-            symbols: 股票代码列表（如 ["000001.SZ", "600000.SH"]）
+            symbols: 股票代码列表（如 ["000001.SZ", "600000.SH", "00700.SEHK"]）
             start_date: 开始日期
             end_date: 结束日期
             interval: K线周期
@@ -108,9 +159,16 @@ class ChinaDataGuiEngine(BaseEngine):
                     # 解析股票代码和交易所
                     exchange = self._parse_exchange(symbol)
 
-                    # 下载数据
+                    # 提取纯代码（去除交易所后缀）
+                    # 例如："00700.SEHK" -> "00700"
+                    if "." in symbol:
+                        code = symbol.split(".")[0]
+                    else:
+                        code = symbol
+
+                    # 下载数据（使用纯代码和交易所枚举）
                     bars = self.data_service.download_bar_data(
-                        symbol=symbol,
+                        symbol=code,  # 使用纯代码，不含交易所后缀
                         exchange=exchange,
                         interval=interval,
                         start=start_date,
@@ -217,40 +275,52 @@ class ChinaDataGuiEngine(BaseEngine):
     def get_hk_symbols(self, hk_type: str) -> List[str]:
         """获取港股通股票代码
 
+        重要：港股通股票本身在香港联合交易所上市，
+        历史数据下载时需要使用 Exchange.SEHK（香港本地）后缀。
+
         Args:
             hk_type: 港股通类型 (HK_SH/HK_SZ/HK_ALL)
 
         Returns:
-            港股代码列表
+            港股代码列表（使用 SEHK 后缀用于下载）
+
+        Examples:
+            >>> symbols = engine.get_hk_symbols("HK_ALL")
+            >>> print(symbols[:5])  # ['00700.SEHK', '01810.SEHK', ...]
         """
         try:
-            # 从数据服务获取港股通股票列表
-            # 需要数据服务提供 get_hk_stock_list 方法
-            hk_list = self.data_service.get_hk_stock_list(hk_type)
+            # 从数据库获取港股通股票列表
+            channel_map = {
+                "HK_SH": "SHHK",   # 沪港通
+                "HK_SZ": "SZHK",   # 深港通
+                "HK_ALL": None,    # 全部
+            }
 
-            if not hk_list:
+            channel = channel_map.get(hk_type)
+            symbols = self.data_service.database.get_hk_connect_symbols(
+                channel=channel,
+                status="active"
+            )
+
+            if not symbols:
                 self.main_engine.write_log(f"未获取到{hk_type}港股通股票", "ChinaDataApp")
                 return []
 
-            # 转换为股票代码格式
-            symbols = []
-            for stock in hk_list:
-                ts_code = stock.get("ts_code", "")
-                if ts_code and ts_code.endswith(".HK"):
-                    symbols.append(ts_code)
+            # symbols 已经是 "00700.HK" 格式
+            # 需要转换为 "00700.SEHK" 格式用于显示
+            display_symbols = [s.replace(".HK", ".SEHK") for s in symbols]
 
             self.main_engine.write_log(
-                f"获取{hk_type}港股通股票：共 {len(symbols)} 只",
+                f"获取{hk_type}港股通股票：共 {len(display_symbols)} 只",
                 "ChinaDataApp"
             )
 
-            return symbols
+            return display_symbols
 
         except AttributeError:
-            # 数据服务尚未实现港股通方法，返回空列表
+            # 数据库方法不存在
             self.main_engine.write_log(
-                f"警告：数据服务暂不支持港股通股票查询，"
-                f"请联系数据服务提供商添加 get_hk_stock_list 方法",
+                f"警告：港股通数据库表尚未创建，请先运行数据更新",
                 "ChinaDataApp"
             )
             return []
@@ -340,18 +410,38 @@ class ChinaDataGuiEngine(BaseEngine):
     def _parse_exchange(self, symbol: str) -> Exchange:
         """从股票代码解析交易所
 
+        重要：港股通股票（.SHHK/.SZHK）在历史数据下载时
+        需要转换为香港本地交易所（.SEHK），因为港股通股票
+        本身就是在香港联合交易所上市的。
+
         Args:
-            symbol: 股票代码（如 "000001.SZ" 或 "000001.SZSE"）
+            symbol: 股票代码（如 "000001.SZ", "0700.SHHK", "0700.SEHK"）
 
         Returns:
-            交易所枚举
+            交易所枚举（港股通统一返回 SEHK）
         """
-        if symbol.endswith(".SH") or ".SH" in symbol:
+        # 港股通：沪港通 -> 转换为香港本地交易所
+        if symbol.endswith(".SHHK") or ".SHHK" in symbol:
+            # 注意：历史数据下载使用 SEHK（香港本地）
+            return Exchange.SEHK
+        # 港股通：深港通 -> 转换为香港本地交易所
+        elif symbol.endswith(".SZHK") or ".SZHK" in symbol:
+            # 注意：历史数据下载使用 SEHK（香港本地）
+            return Exchange.SEHK
+        # 香港本地：.SEHK（显示格式）
+        elif symbol.endswith(".SEHK") or ".SEHK" in symbol:
+            return Exchange.SEHK
+        # 香港本地：.HK
+        elif symbol.endswith(".HK") or ".HK" in symbol:
+            return Exchange.SEHK
+        # A股：上海证券交易所
+        elif symbol.endswith(".SH") or ".SH" in symbol:
             return Exchange.SSE
+        # A股：深圳证券交易所
         elif symbol.endswith(".SZ") or ".SZ" in symbol:
             return Exchange.SZSE
         else:
-            # 默认判断
+            # 默认判断（A 股）
             if symbol.startswith("6"):
                 return Exchange.SSE
             else:

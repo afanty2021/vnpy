@@ -130,12 +130,21 @@ class BaseDataAdapter(ABC):
         """转换symbol为tushare格式
 
         Args:
-            symbol: 股票代码
+            symbol: 股票代码（可能包含交易所后缀，如 "0700.SHHK"）
             exchange: 交易所
 
         Returns:
             tushare格式代码
         """
+        # 如果 symbol 已包含交易所后缀，先去除
+        if "." in symbol:
+            symbol = symbol.split(".")[0]
+
+        # 港股通交易所都映射为 "HK"
+        if exchange in (Exchange.SHHK, Exchange.SZHK, Exchange.SEHK):
+            return f"{symbol}.HK"
+
+        # A股交易所映射
         suffix_map = {
             Exchange.SSE: "SH",
             Exchange.SZSE: "SZ",

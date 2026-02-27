@@ -139,6 +139,11 @@ class ChinaDataService(
             self.qmt_adapter.connect()
 
             self._connected = True
+
+            # 检查港股通名单是否需要更新
+            if data_config.HK_CONNECT_AUTO_UPDATE:
+                self._check_and_update_hk_connect_stocks()
+
             return True
 
         except Exception as e:
@@ -581,6 +586,128 @@ class ChinaDataService(
 
         return data
 
+    def update_hk_connect_stocks(self) -> Dict[str, Any]:
+        """更新港股通股票名单
+
+        从上交所和深交所网站爬取最新的港股通股票名单，
+        并存储到数据库中。
+
+        Returns:
+            更新结果字典，包含 success, count, sh_count, sz_count 等
+
+        Examples:
+            >>> service = ChinaDataService()
+            >>> service.connect()
+            >>> result = service.update_hk_connect_stocks()
+            >>> print(f"更新成功：沪港通 {result['sh_count']} 只，深港通 {result['sz_count']} 只")
+        """
+        import logging
+        logger = logging.getLogger("vnpy_china_data")
+
+        result = {
+            "success": False,
+            "count": 0,
+            "sh_count": 0,
+            "sz_count": 0,
+            "error": None
+        }
+
+        try:
+            # 确保港股通名单表存在
+            if not self.database.create_hk_connect_table():
+                result["error"] = "创建港股通名单表失败"
+                return result
+
+            # 爬取港股通股票名单
+            from ..crawler import crawl_hk_connect_stocks
+            stocks = crawl_hk_connect_stocks()
+
+            if not stocks:
+                result["error"] = "未爬取到港股通股票名单"
+                return result
+
+            # 保存到数据库
+            if self.database.save_hk_connect_stocks(stocks):
+                result["success"] = True
+                result["count"] = len(stocks)
+                result["sh_count"] = len([s for s in stocks if s.channel == "SHHK"])
+                result["sz_count"] = len([s for s in stocks if s.channel == "SZHK"])
+
+                logger.info(
+                    f"港股通名单更新成功：总计 {result['count']} 只，"
+                    f"沪港通 {result['sh_count']} 只，深港通 {result['sz_count']} 只"
+                )
+            else:
+                result["error"] = "保存港股通名单到数据库失败"
+
+        except Exception as e:
+            result["error"] = str(e)
+            logger.error(f"更新港股通名单失败: {e}")
+
+        return result
+
+    def _check_and_update_hk_connect_stocks(self) -> None:
+        """检查并自动更新港股通名单
+
+        在连接数据源后自动调用，检查港股通名单是否需要更新。
+        如果数据过期或不存在，则自动更新。
+        """
+        import logging
+        logger = logging.getLogger("vnpy_china_data")
+
+        try:
+            # 获取更新信息
+            update_info = self.database.get_hk_connect_update_info()
+
+            if not update_info:
+                logger.debug("无法获取港股通名单更新信息")
+                return
+
+            # 检查是否需要更新
+            needs_update = (
+                not update_info["exists"] or  # 数据不存在
+                update_info["days_since_update"] >= data_config.HK_CONNECT_UPDATE_DAYS  # 数据过期
+            )
+
+            if needs_update:
+                if data_config.HK_CONNECT_UPDATE_ON_START:
+                    logger.info("港股通名单数据过期，正在自动更新...")
+                    result = self.update_hk_connect_stocks()
+                    if result["success"]:
+                        logger.info(f"港股通名单自动更新成功：{result['count']} 只")
+                    else:
+                        logger.warning(f"港股通名单自动更新失败: {result.get('error')}")
+                else:
+                    logger.warning(
+                        f"港股通名单已过期（{update_info['days_since_update']} 天），"
+                        f"请手动更新：调用 update_hk_connect_stocks() 方法"
+                    )
+            else:
+                logger.debug(
+                    f"港股通名单数据正常（{update_info['days_since_update']} 天前更新），"
+                    f"共 {update_info['total_count']} 只股票"
+                )
+
+        except Exception as e:
+            logger.debug(f"检查港股通名单更新状态失败: {e}")
+
+    def get_hk_connect_update_info(self) -> Optional[Dict[str, Any]]:
+        """获取港股通名单更新信息
+
+        提供给外部调用，用于显示更新状态或判断是否需要更新。
+
+        Returns:
+            更新信息字典，包含 last_updated, days_since_update, total_count 等
+
+        Examples:
+            >>> service = ChinaDataService()
+            >>> service.connect()
+            >>> info = service.get_hk_connect_update_info()
+            >>> if info['days_since_update'] > 7:
+            ...     service.update_hk_connect_stocks()
+        """
+        return self.database.get_hk_connect_update_info()
+
     def get_hk_sh_symbols(self, date: str = None) -> List[str]:
         """获取沪港通标的股票列表
 
@@ -747,6 +874,49 @@ class ChinaDataService(
         logger.info(f"港股通标的总数: {len(all_symbols)} (沪港通: {len(sh_symbols)}, 深港通: {len(sz_symbols)})")
 
         return all_symbols
+
+    def get_hk_stock_list(self, hk_type: str, date: str = None) -> List[dict]:
+        """获取港股通标的股票列表（桥接方法）
+
+        根据港股通类型返回对应标的列表，返回格式兼容 GUI 引擎。
+
+        Args:
+            hk_type: 港股通类型 ("HK_SH"/"HK_SZ"/"HK_ALL")
+            date: 交易日期（格式：YYYYMMDD），None 表示获取最新列表
+
+        Returns:
+            字典列表，每个字典包含 ts_code 字段：[{"ts_code": "0700.HK"}, ...]
+
+        Examples:
+            >>> service = ChinaDataService()
+            >>> service.connect()
+            >>> # 沪港通
+            >>> sh_list = service.get_hk_stock_list("HK_SH")
+            >>> # 深港通
+            >>> sz_list = service.get_hk_stock_list("HK_SZ")
+            >>> # 全部港股通
+            >>> all_list = service.get_hk_stock_list("HK_ALL")
+        """
+        import logging
+        logger = logging.getLogger("vnpy_china_data")
+
+        # 根据 hk_type 调用对应方法
+        if hk_type == "HK_SH":
+            symbols = self.get_hk_sh_symbols(date)
+        elif hk_type == "HK_SZ":
+            symbols = self.get_hk_sz_symbols(date)
+        elif hk_type == "HK_ALL":
+            symbols = self.get_hk_all_symbols(date)
+        else:
+            logger.warning(f"不支持的港股通类型: {hk_type}")
+            return []
+
+        # 转换为字典列表格式（兼容 GUI 引擎）
+        # 保留原始后缀 (.SHHK/.SZHK)，以便 GUI 引擎正确解析交易所
+        result = [{"ts_code": symbol} for symbol in symbols]
+
+        logger.info(f"获取 {hk_type} 港股通标的: {len(result)} 只")
+        return result
 
     # ========== 港股通交易日历 ==========
     def _get_hk_sh_trading_calendar(self, start_date: str = None, end_date: str = None) -> set:

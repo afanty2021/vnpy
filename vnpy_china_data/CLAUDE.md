@@ -169,4 +169,27 @@ export QMT_ACCOUNT_ID=your_account_id
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
 | #7129 | 4:23 PM | 🟣 | ChinaDataApp created for vnpy_china_data GUI integration | ~149 |
+
+### Feb 27, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #7542 | 11:31 AM | 🔴 | Fixed duplicate method definition in service.py | ~102 |
+| #7541 | " | 🔴 | Fixed duplicate method and syntax error in service.py | ~167 |
+| #7540 | " | 🔵 | Reviewed HK Stock Connect auto-update mechanism | ~271 |
+| #7536 | 11:30 AM | 🟣 | Added HK Stock Connect stock list management to GUI engine | ~239 |
+| #7535 | 11:29 AM | 🟣 | Implemented auto-update trigger for HK Connect stock list | ~241 |
+| #7533 | " | 🟣 | Added HK Stock Connect update tracking method | ~222 |
+| #7532 | 11:28 AM | 🔵 | Reviewed data module configuration | ~201 |
+| #7531 | 11:26 AM | ✅ | Exported HK Stock Connect crawler and model classes | ~203 |
+| #7530 | " | 🔵 | Reviewed vnpy_china_data module exports | ~204 |
+| #7529 | 11:25 AM | 🟣 | Added HK Stock Connect stock list update functionality | ~271 |
+| #7528 | " | 🔵 | Reviewed get_hk_stock_list bridge method | ~259 |
+| #7526 | " | 🟣 | Modified exchange parsing for HK Stock Connect downloads | ~285 |
+| #7525 | " | ✅ | Updated HK Stock Connect symbol retrieval logic | ~267 |
+| #7524 | " | 🔵 | Found existing HK stock symbol methods in GUI engine | ~259 |
+| #7523 | 11:24 AM | 🟣 | Added HK Connect stock list database operations | ~261 |
+| #7522 | " | 🔵 | Examined GUI engine historical data download function | ~255 |
+| #7521 | " | 🔵 | Analyzed MySQL database layer for stock list storage | ~270 |
+| #7515 | 11:12 AM | 🔵 | Analyzed data service layer architecture | ~254 |
 </claude-mem-context>

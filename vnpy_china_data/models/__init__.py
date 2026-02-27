@@ -9,6 +9,7 @@ from .dragon_tiger import DragonTigerData
 from .northbound import NorthboundFlowData
 from .sector import SectorData, SectorStock
 from .money_flow import MoneyFlowData
+from .hk_connect import HkConnectStock
 
 __all__ = [
     "StockInfo",
@@ -17,4 +18,5 @@ __all__ = [
     "SectorData",
     "SectorStock",
     "MoneyFlowData",
+    "HkConnectStock",
 ]

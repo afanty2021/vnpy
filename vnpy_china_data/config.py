@@ -27,6 +27,11 @@ class DataConfig:
     QMT_RECONNECT_INTERVAL: int = 30  # QMT重连间隔（秒）
     QMT_TICK_BUFFER_SIZE: int = 1000  # Tick缓冲区大小
 
+    # 港股通名单更新配置
+    HK_CONNECT_UPDATE_DAYS: int = 7  # 港股通名单更新周期（天）
+    HK_CONNECT_AUTO_UPDATE: bool = True  # 是否自动检查更新
+    HK_CONNECT_UPDATE_ON_START: bool = False  # 启动时是否自动更新
+
 
 # 模块级配置实例
 data_config = DataConfig()

@@ -674,3 +674,255 @@ class MySQLDatabaseLayer:
 
         results = self._execute_sql(sql, tuple(params) if params else None, fetch_all=True)
         return results if results else []
+
+    # ========== 港股通股票名单操作 ==========
+
+    def create_hk_connect_table(self) -> bool:
+        """创建港股通股票名单表
+
+        Returns:
+            是否创建成功
+        """
+        if not self._ensure_connection():
+            return False
+
+        try:
+            with self._lock:
+                cursor = self._connection.cursor()
+
+                sql = """
+                CREATE TABLE IF NOT EXISTS db_hk_connect_stocks (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    symbol VARCHAR(16) NOT NULL COMMENT '股票代码（不含交易所后缀）',
+                    name VARCHAR(64) NOT NULL COMMENT '股票名称',
+                    channel VARCHAR(8) NOT NULL COMMENT '交易通道：SHHK/SZHK',
+                    channel_type VARCHAR(4) NOT NULL COMMENT '通道类型：SH/SZ',
+                    category VARCHAR(16) COMMENT '分类：沪港通/深港通',
+                    industry VARCHAR(64) COMMENT '行业分类',
+                    status VARCHAR(16) DEFAULT 'active' COMMENT '状态：active/suspended',
+                    list_date DATE COMMENT '纳入港股通日期',
+                    source VARCHAR(16) DEFAULT 'sse' COMMENT '数据来源：sse/szse',
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+                    UNIQUE KEY uk_symbol_channel (symbol, channel),
+                    KEY idx_channel (channel),
+                    KEY idx_status (status),
+                    KEY idx_updated_at (updated_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='港股通股票名单';
+                """
+
+                cursor.execute(sql)
+                self._connection.commit()
+                cursor.close()
+                return True
+
+        except (OperationalError, DatabaseError) as e:
+            logger.error(f"创建港股通名单表失败: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"创建港股通名单表异常: {e}", exc_info=True)
+            return False
+
+    def save_hk_connect_stocks(self, stocks: List) -> bool:
+        """批量保存港股通股票名单
+
+        Args:
+            stocks: HkConnectStock 对象列表
+
+        Returns:
+            是否保存成功
+        """
+        if not stocks:
+            return True
+
+        if not self._ensure_connection():
+            return False
+
+        try:
+            with self._lock:
+                cursor = self._connection.cursor()
+
+                sql = """
+                INSERT INTO db_hk_connect_stocks
+                (symbol, name, channel, channel_type, category, industry, status, list_date, source)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    name = VALUES(name),
+                    category = VALUES(category),
+                    industry = VALUES(industry),
+                    status = VALUES(status),
+                    list_date = VALUES(list_date),
+                    source = VALUES(source),
+                    updated_at = CURRENT_TIMESTAMP
+                """
+
+                values = []
+                for stock in stocks:
+                    # 支持字典和对象两种格式
+                    if isinstance(stock, dict):
+                        values.append((
+                            stock.get("symbol"),
+                            stock.get("name"),
+                            stock.get("channel"),
+                            stock.get("channel_type"),
+                            stock.get("category"),
+                            stock.get("industry"),
+                            stock.get("status", "active"),
+                            stock.get("list_date"),
+                            stock.get("source", "sse"),
+                        ))
+                    else:
+                        # HkConnectStock 对象
+                        values.append((
+                            stock.symbol,
+                            stock.name,
+                            stock.channel,
+                            stock.channel_type,
+                            stock.category,
+                            stock.industry,
+                            stock.status,
+                            stock.list_date,
+                            stock.source,
+                        ))
+
+                cursor.executemany(sql, values)
+                self._connection.commit()
+                cursor.close()
+                return True
+
+        except (OperationalError, DatabaseError) as e:
+            logger.error(f"保存港股通名单失败: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"保存港股通名单异常: {e}", exc_info=True)
+            return False
+
+    def get_hk_connect_stocks(
+        self,
+        channel: Optional[str] = None,
+        status: str = "active"
+    ) -> List[Dict[str, Any]]:
+        """获取港股通股票名单
+
+        Args:
+            channel: 交易通道筛选（None表示全部，SHHK表示沪港通，SZHK表示深港通）
+            status: 状态筛选（默认 active）
+
+        Returns:
+            股票信息字典列表
+        """
+        if not self._ensure_connection():
+            return []
+
+        try:
+            with self._lock:
+                cursor = self._connection.cursor(DictCursor)
+
+                conditions = ["status = %s"]
+                params = [status]
+
+                if channel:
+                    conditions.append("channel = %s")
+                    params.append(channel)
+
+                where_clause = " AND ".join(conditions)
+
+                sql = f"""
+                SELECT symbol, name, channel, channel_type, category,
+                       industry, status, list_date, source, updated_at
+                FROM db_hk_connect_stocks
+                WHERE {where_clause}
+                ORDER BY symbol ASC
+                """
+
+                cursor.execute(sql, tuple(params))
+                results = cursor.fetchall()
+                cursor.close()
+
+                return results if results else []
+
+        except (OperationalError, DatabaseError) as e:
+            logger.error(f"获取港股通名单失败: {e}", exc_info=True)
+            return []
+        except Exception as e:
+            logger.error(f"获取港股通名单异常: {e}", exc_info=True)
+            return []
+
+    def get_hk_connect_symbols(
+        self,
+        channel: Optional[str] = None,
+        status: str = "active"
+    ) -> List[str]:
+        """获取港股通股票代码列表（用于历史数据下载）
+
+        注意：返回的代码使用 SEHK（香港本地）后缀，
+        因为港股通股票本身就是在香港联合交易所上市的。
+
+        Args:
+            channel: 交易通道筛选（None表示全部）
+            status: 状态筛选（默认 active）
+
+        Returns:
+            QMT格式代码列表（如 ["00700.HK", "01810.HK"]）
+        """
+        stocks = self.get_hk_connect_stocks(channel, status)
+        return [f"{s['symbol']}.HK" for s in stocks]
+
+    def get_hk_connect_update_info(self) -> Optional[Dict[str, Any]]:
+        """获取港股通名单更新信息
+
+        Returns:
+            更新信息字典，包含 last_updated, days_since_update, needs_update 等
+        """
+        if not self._ensure_connection():
+            return None
+
+        try:
+            with self._lock:
+                cursor = self._connection.cursor(DictCursor)
+
+                sql = """
+                SELECT
+                    MAX(updated_at) as last_updated,
+                    COUNT(*) as total_count,
+                    SUM(CASE WHEN channel = 'SHHK' THEN 1 ELSE 0 END) as sh_count,
+                    SUM(CASE WHEN channel = 'SZHK' THEN 1 ELSE 0 END) as sz_count
+                FROM db_hk_connect_stocks
+                WHERE status = 'active'
+                """
+
+                cursor.execute(sql)
+                result = cursor.fetchone()
+                cursor.close()
+
+                if result and result.get("last_updated"):
+                    from datetime import datetime, timedelta
+
+                    last_updated = result["last_updated"]
+                    days_since = (datetime.now() - last_updated).days
+
+                    return {
+                        "last_updated": last_updated,
+                        "days_since_update": days_since,
+                        "total_count": result["total_count"],
+                        "sh_count": result["sh_count"] or 0,
+                        "sz_count": result["sz_count"] or 0,
+                        "exists": True,
+                    }
+                else:
+                    # 数据不存在
+                    return {
+                        "last_updated": None,
+                        "days_since_update": 999,
+                        "total_count": 0,
+                        "sh_count": 0,
+                        "sz_count": 0,
+                        "exists": False,
+                    }
+
+        except (OperationalError, DatabaseError) as e:
+            logger.error(f"获取港股通更新信息失败: {e}", exc_info=True)
+            return None
+        except Exception as e:
+            logger.error(f"获取港股通更新信息异常: {e}", exc_info=True)
+            return None

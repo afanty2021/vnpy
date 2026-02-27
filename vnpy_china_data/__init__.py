@@ -8,6 +8,7 @@ vnpy_china_data - A股数据服务模块
 - 龙虎榜数据
 - 北向资金数据
 - 板块数据
+- 港股通股票名单
 """
 
 from .service import ChinaDataService, get_data_service
@@ -19,7 +20,9 @@ from .models import (
     DragonTigerData,
     NorthboundFlowData,
     SectorData,
+    HkConnectStock,
 )
+from .crawler import HkConnectCrawler, crawl_hk_connect_stocks
 
 # GUI应用
 from .app import ChinaDataApp
@@ -38,6 +41,9 @@ __all__ = [
     "DragonTigerData",
     "NorthboundFlowData",
     "SectorData",
+    "HkConnectStock",
+    "HkConnectCrawler",
+    "crawl_hk_connect_stocks",
     # GUI应用
     "ChinaDataApp",
     "ChinaDataGuiEngine",
