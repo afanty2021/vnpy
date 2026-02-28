@@ -232,7 +232,22 @@ class RpcQmtDataAdapter(BaseDataAdapter):
             return result if result else []
 
         except Exception as e:
-            logger.warning(f"RPC QMT 获取历史数据失败: {e}，系统将使用 Tushare")
+            error_msg = str(e)
+
+            # 错误分类：不同错误类型使用不同日志级别
+            if "Operation cannot be accomplished in current state" in error_msg:
+                # QMT 不支持的股票代码（如新上市港股）
+                logger.debug(
+                    f"QMT 不支持该股票代码 ({symbol}.{exchange.value})，"
+                    f"可能是新上市股票或数据源未覆盖。系统将使用 Tushare。"
+                )
+            elif "timeout" in error_msg.lower() or "超时" in error_msg:
+                logger.warning(f"RPC QMT 查询超时 ({symbol})，系统将使用 Tushare")
+            elif "连接" in error_msg or "connect" in error_msg.lower():
+                logger.warning(f"RPC QMT 连接异常 ({symbol})，系统将使用 Tushare")
+            else:
+                logger.warning(f"RPC QMT 获取历史数据失败 ({symbol}): {e}，系统将使用 Tushare")
+
             return []
 
     def _is_trading_time(self) -> bool:

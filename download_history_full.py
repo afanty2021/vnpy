@@ -185,6 +185,7 @@ def main():
     print("=" * 70)
 
     result = {"success": 0, "failed": 0, "total_bars": 0, "skipped": len(downloaded)}
+    failed_stocks = []  # 记录失败的股票
     start_time = time.time()
 
     for i, (code, exchange, name) in enumerate(to_download, 1):
@@ -207,6 +208,12 @@ def main():
             result["total_bars"] += bar_count
         else:
             result["failed"] += 1
+            # 记录失败的股票
+            failed_stocks.append({
+                "code": code,
+                "exchange": exchange.value,
+                "name": name
+            })
 
         # 限流
         time.sleep(0.1)
@@ -220,6 +227,41 @@ def main():
     print(f"  本次下载成功：{result['success']} 只")
     print(f"  本次下载失败：{result['failed']} 只")
     print(f"  新增 K 线数：{result['total_bars']:,} 条")
+
+    # 失败股票统计
+    if failed_stocks:
+        print(f"\n失败股票详情 ({len(failed_stocks)} 只):")
+        print("-" * 70)
+
+        # 按交易所分组统计
+        by_exchange: Dict[str, List[Dict]] = {}
+        for stock in failed_stocks:
+            exch = stock["exchange"]
+            if exch not in by_exchange:
+                by_exchange[exch] = []
+            by_exchange[exch].append(stock)
+
+        # 显示每个交易所的失败数量
+        for exch, stocks in sorted(by_exchange.items()):
+            print(f"  {exch}: {len(stocks)} 只")
+
+        # 显示前 20 只失败股票
+        print("\n失败股票列表（前20只）:")
+        for i, stock in enumerate(failed_stocks[:20], 1):
+            print(f"  {i}. {stock['code']}.{stock['exchange']} ({stock['name']})")
+
+        if len(failed_stocks) > 20:
+            print(f"  ... 还有 {len(failed_stocks) - 20} 只")
+
+        # 将失败股票保存到文件
+        failed_file = Path(__file__).parent / "failed_stocks.txt"
+        with open(failed_file, "w", encoding="utf-8") as f:
+            f.write(f"# 批量下载失败股票列表\n")
+            f.write(f"# 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"# 总数: {len(failed_stocks)} 只\n\n")
+            for stock in failed_stocks:
+                f.write(f"{stock['code']}.{stock['exchange']},{stock['name']}\n")
+        print(f"\n失败股票列表已保存到: {failed_file}")
 
     # 数据库统计
     stats = service.database.get_database_stats()
