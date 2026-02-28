@@ -528,12 +528,15 @@ class MlpModel(AlphaModel):
         if reset_model:
             self._last_model_state = None
 
-        # 如果有保存的模型权重，则加载它
-        if self._last_model_state is not None:
+        # 检查是否有保存的模型权重
+        if self._last_model_state is None and not reset_model:
+            if self.fitted:
+                logger.warning("模型权重丢失，将从头开始训练")
+            else:
+                logger.info("模型尚未训练，从头开始训练")
+        elif self._last_model_state is not None:
             self.model.load_state_dict(self._last_model_state)
             logger.info("从上次保存的模型权重继续增量训练")
-        else:
-            logger.info("没有找到保存的模型权重，从头开始训练")
 
         # 保存原始训练轮数
         original_n_epochs = self.n_epochs
@@ -587,8 +590,15 @@ class MlpModel(AlphaModel):
         self.feature_names = state.get("feature_names", [])
         self.best_step = state.get("best_step")
 
-        # 如果有保存的模型状态，加载它
+        # 如果有保存的模型状态，验证架构兼容性并加载
         if self._last_model_state is not None:
+            current_keys = set(self.model.state_dict().keys())
+            saved_keys = set(self._last_model_state.keys())
+            if current_keys != saved_keys:
+                raise ValueError(
+                    f"模型架构不匹配: 当前模型 {len(current_keys)} 个参数, "
+                    f"保存模型 {len(saved_keys)} 个参数"
+                )
             self.model.load_state_dict(self._last_model_state)
 
 
