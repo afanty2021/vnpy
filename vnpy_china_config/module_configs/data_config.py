@@ -58,12 +58,8 @@ class DataModuleConfig(BaseConfig):
     update_start_time: str = "08:00"
     update_end_time: str = "20:00"
 
-    # QMT配置 - 从全局配置读取
-    qmt_use_rpc: bool = False
-    qmt_rpc_req_address: str = "tcp://127.0.0.1:2014"
-    qmt_rpc_sub_address: str = "tcp://127.0.0.1:4102"
-    qmt_path: str = ""
-    qmt_account_id: str = ""
+    # 注意：QMT 配置已移至 GlobalConfig.QmtConfig 统一管理
+    # 包括：use_rpc, account_id, mini_path, session_id, password, enabled
 
     @field_validator("tushare_rate_limit")
     @classmethod

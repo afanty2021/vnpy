@@ -100,18 +100,19 @@ class ChinaDataService(
             rate_limit=self.config.tushare_rate_limit
         )
 
-        # 根据配置选择QMT适配器类型
-        if self.config.qmt_use_rpc:
+        # 根据配置选择QMT适配器类型（从全局配置读取）
+        qmt_config = self.global_config.qmt
+        if qmt_config.use_rpc:
             # 使用RPC模式（Mac/Linux客户端）
             self.qmt_adapter = RpcQmtDataAdapter(
-                req_address=self.config.qmt_rpc_req_address,
-                sub_address=self.config.qmt_rpc_sub_address
+                req_address=self.global_config.rpc.rep_address,
+                sub_address=self.global_config.rpc.pub_address
             )
         else:
             # 使用直接模式（Windows本地）
             self.qmt_adapter = QMTDataAdapter(
-                qmt_path=str(self.config.qmt_path),
-                account_id=self.config.qmt_account_id
+                qmt_path=str(qmt_config.mini_path),
+                account_id=qmt_config.account_id
             )
 
         # 运行状态
