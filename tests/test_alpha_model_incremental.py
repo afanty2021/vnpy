@@ -78,5 +78,27 @@ class TestAlphaModelWithIncrementalSupport:
         assert result["epochs"] == 5
 
 
+class TestLassoModelIncremental:
+    """测试 LassoModel 增量训练支持"""
+
+    def test_lasso_supports_incremental_is_false(self):
+        """测试 LassoModel 不支持增量训练"""
+        from vnpy.alpha.model.models.lasso_model import LassoModel
+
+        model = LassoModel()
+        assert model.supports_incremental is False
+
+    def test_lasso_partial_fit_raises_not_implemented(self):
+        """测试 LassoModel 的 partial_fit 方法抛出 NotImplementedError"""
+        from vnpy.alpha.model.models.lasso_model import LassoModel
+
+        model = LassoModel()
+
+        with pytest.raises(NotImplementedError) as exc_info:
+            model.partial_fit(None)
+
+        assert "不支持增量训练" in str(exc_info.value)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
