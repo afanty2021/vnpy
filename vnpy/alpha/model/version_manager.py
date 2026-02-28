@@ -14,6 +14,24 @@ from vnpy.alpha.logger import logger
 from vnpy.alpha.model import AlphaModel, ModelVersion
 
 
+def _load_pickle_file(path: Path) -> AlphaModel | None:
+    """
+    Load a pickle file and return the AlphaModel.
+
+    Args:
+        path: Path to the pickle file
+
+    Returns:
+        AlphaModel instance if loaded successfully, None otherwise
+    """
+    try:
+        with open(path, mode="rb") as f:
+            return pickle.load(f)
+    except (pickle.UnpicklingError, OSError, IOError) as e:
+        logger.error(f"Failed to load pickle file {path}: {e}")
+        return None
+
+
 class ModelVersionManager:
     """
     Model version manager for managing multiple versions of trained models.
@@ -60,7 +78,7 @@ class ModelVersionManager:
             with open(self.versions_file, encoding="UTF-8") as f:
                 versions: dict = json.load(f)
                 return versions
-        except Exception as e:
+        except (json.JSONDecodeError, OSError, IOError) as e:
             logger.error(f"Failed to load versions file: {e}")
             return {}
 
@@ -77,7 +95,7 @@ class ModelVersionManager:
                     indent=4,
                     ensure_ascii=False
                 )
-        except Exception as e:
+        except (OSError, IOError) as e:
             logger.error(f"Failed to save versions file: {e}")
             raise
 
@@ -139,7 +157,7 @@ class ModelVersionManager:
         try:
             with open(version_file, mode="wb") as f:
                 pickle.dump(model, f)
-        except Exception as e:
+        except (pickle.PicklingError, OSError, IOError) as e:
             logger.error(f"Failed to save model version: {e}")
             raise
 
@@ -148,8 +166,12 @@ class ModelVersionManager:
         try:
             with open(current_file, mode="wb") as f:
                 pickle.dump(model, f)
-        except Exception as e:
+        except (pickle.PicklingError, OSError, IOError) as e:
             logger.error(f"Failed to save current model: {e}")
+            # Rollback: delete the version file that was just created
+            if version_file.exists():
+                version_file.unlink()
+            raise
 
         # Update version index
         if name not in self.versions:
@@ -280,7 +302,16 @@ class ModelVersionManager:
         version_file: Path = model_subdir / f"{version_id}.pkl"
 
         if version_file.exists():
-            version_file.unlink()
+            try:
+                version_file.unlink()
+            except OSError as e:
+                logger.error(f"Failed to delete version file {version_file}: {e}")
+                # Restore version to the list since file deletion failed
+                versions_list.insert(
+                    next(i for i, v in enumerate(versions_list) if v["version_id"] > version_id),
+                    version_data
+                )
+                return False
 
         # Update current version if needed
         if self.versions[name]["current_version"] == version_id:
@@ -334,11 +365,9 @@ class ModelVersionManager:
             logger.error(f"Model file not found: {version_file}")
             return False
 
-        try:
-            with open(version_file, mode="rb") as f:
-                model: AlphaModel = pickle.load(f)
-        except Exception as e:
-            logger.error(f"Failed to load model version: {e}")
+        model: AlphaModel | None = _load_pickle_file(version_file)
+        if model is None:
+            logger.error(f"Failed to load model version from {version_file}")
             return False
 
         # Save as current version
@@ -346,7 +375,7 @@ class ModelVersionManager:
         try:
             with open(current_file, mode="wb") as f:
                 pickle.dump(model, f)
-        except Exception as e:
+        except (pickle.PicklingError, OSError, IOError) as e:
             logger.error(f"Failed to save current model: {e}")
             return False
 
@@ -386,13 +415,7 @@ class ModelVersionManager:
                 logger.error(f"Version file not found: {version_file}")
                 return None
 
-            try:
-                with open(version_file, mode="rb") as f:
-                    model: AlphaModel = pickle.load(f)
-                    return model
-            except Exception as e:
-                logger.error(f"Failed to load model: {e}")
-                return None
+            return _load_pickle_file(version_file)
 
         return self._load_current_model(name)
 
@@ -412,10 +435,4 @@ class ModelVersionManager:
             logger.error(f"Model file not found: {current_file}")
             return None
 
-        try:
-            with open(current_file, mode="rb") as f:
-                model: AlphaModel = pickle.load(f)
-                return model
-        except Exception as e:
-            logger.error(f"Failed to load model: {e}")
-            return None
+        return _load_pickle_file(current_file)
