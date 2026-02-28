@@ -15,6 +15,7 @@ from vnpy.trader.utility import extract_vt_symbol
 from .logger import logger
 from .dataset import AlphaDataset, to_datetime
 from .model import AlphaModel
+from .model.version_manager import ModelVersionManager
 
 
 class AlphaLab:
@@ -47,6 +48,9 @@ class AlphaLab:
         ]:
             if not path.exists():
                 path.mkdir(parents=True)
+
+        # Initialize version manager
+        self.version_manager = ModelVersionManager(self.model_path)
 
     def save_bar_data(self, bars: list[BarData]) -> None:
         """Save bar data"""
