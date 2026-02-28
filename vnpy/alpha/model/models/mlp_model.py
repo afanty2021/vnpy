@@ -30,7 +30,11 @@ class MlpModel(AlphaModel):
     4. Support for early stopping and overfitting prevention
     5. Support for MSE loss function
     6. Optional Adam or SGD optimizer
+    7. Support for incremental training (warm_start)
     """
+
+    # 支持增量训练
+    supports_incremental: bool = True
 
     def __init__(
         self,
@@ -86,6 +90,9 @@ class MlpModel(AlphaModel):
         self.fitted: bool = False
         self.feature_names: list[str] = []
         self.best_step: int | None = None
+
+        # 用于增量训练的状态保存
+        self._last_model_state: dict[str, torch.Tensor] | None = None
 
         # Set random seed for reproducibility
         if seed is not None:
@@ -220,6 +227,9 @@ class MlpModel(AlphaModel):
         # Load best model parameters
         if best_params:
             self.model.load_state_dict(best_params)
+
+        # 保存模型状态用于增量训练
+        self._last_model_state = copy.deepcopy(self.model.state_dict())
 
     def _train_step(
         self,
@@ -488,6 +498,108 @@ class MlpModel(AlphaModel):
         df = df.set_index('Feature')
 
         return df
+
+    def partial_fit(
+        self,
+        dataset: AlphaDataset,
+        n_epochs: int = 50,
+        reset_model: bool = False
+    ) -> dict:
+        """
+        增量训练模型
+
+        使用保存的模型权重继续训练，实现增量学习。
+
+        Parameters
+        ----------
+        dataset : AlphaDataset
+            包含特征和标签的数据集
+        n_epochs : int
+            增量训练的轮数，默认为 50
+        reset_model : bool
+            是否重置模型，True 时清空已有模型重新训练，默认为 False
+
+        Returns
+        -------
+        dict
+            训练结果，包含 status 和 method 信息
+        """
+        # 如果需要重置模型，则清空已有模型状态
+        if reset_model:
+            self._last_model_state = None
+
+        # 检查是否有保存的模型权重
+        if self._last_model_state is None and not reset_model:
+            if self.fitted:
+                logger.warning("模型权重丢失，将从头开始训练")
+            else:
+                logger.info("模型尚未训练，从头开始训练")
+        elif self._last_model_state is not None:
+            self.model.load_state_dict(self._last_model_state)
+            logger.info("从上次保存的模型权重继续增量训练")
+
+        # 保存原始训练轮数
+        original_n_epochs = self.n_epochs
+        self.n_epochs = n_epochs
+
+        # 创建评估结果字典
+        evaluation_results: dict = {}
+
+        # 执行训练
+        self.fit(dataset, evaluation_results)
+
+        # 恢复原始训练轮数
+        self.n_epochs = original_n_epochs
+
+        # 保存最新的模型状态
+        self._last_model_state = copy.deepcopy(self.model.state_dict())
+
+        return {
+            "status": "success",
+            "method": "incremental" if self._last_model_state else "full",
+            "fitted": self.fitted
+        }
+
+    def get_training_state(self) -> dict:
+        """
+        获取训练状态用于序列化
+
+        Returns
+        -------
+        dict
+            训练状态字典，包含模型权重、优化器状态等
+        """
+        return {
+            "model_state": self._last_model_state,
+            "fitted": self.fitted,
+            "feature_names": self.feature_names,
+            "best_step": self.best_step
+        }
+
+    def set_training_state(self, state: dict) -> None:
+        """
+        从序列化的状态恢复模型
+
+        Parameters
+        ----------
+        state : dict
+            训练状态字典
+        """
+        self._last_model_state = state.get("model_state")
+        self.fitted = state.get("fitted", False)
+        self.feature_names = state.get("feature_names", [])
+        self.best_step = state.get("best_step")
+
+        # 如果有保存的模型状态，验证架构兼容性并加载
+        if self._last_model_state is not None:
+            current_keys = set(self.model.state_dict().keys())
+            saved_keys = set(self._last_model_state.keys())
+            if current_keys != saved_keys:
+                raise ValueError(
+                    f"模型架构不匹配: 当前模型 {len(current_keys)} 个参数, "
+                    f"保存模型 {len(saved_keys)} 个参数"
+                )
+            self.model.load_state_dict(self._last_model_state)
 
 
 class AverageMeter:

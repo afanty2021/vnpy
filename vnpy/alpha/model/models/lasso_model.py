@@ -13,6 +13,9 @@ from vnpy.alpha import (
 class LassoModel(AlphaModel):
     """LASSO regression learning algorithm"""
 
+    # 不支持增量训练
+    supports_incremental: bool = False
+
     def __init__(
         self,
         alpha: float = 0.0005,
