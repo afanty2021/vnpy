@@ -223,6 +223,12 @@ class RpcQmtDataAdapter(BaseDataAdapter):
 
             # MainEngine.query_history 需要 (req, gateway_name) 两个参数
             result = self._rpc_client.query_history(req, "QMT", timeout=60000)
+
+            # 成功获取数据后更新心跳时间戳（防止心跳超时）
+            if result:
+                from time import time as current_time
+                self._last_heartbeat_ms = int(current_time() * 1000)
+
             return result if result else []
 
         except Exception as e:
@@ -629,7 +635,7 @@ class CustomRpcClient(RpcClient):
     HEARTBEAT_TOLERANCE_MS = 30000  # 30秒
     POLL_INTERVAL_MS = 1000
     FAST_POLL_INTERVAL_MS = 100
-    WARNING_COOLDOWN_MS = 5000
+    WARNING_COOLDOWN_MS = 60000  # 60秒（减少日志输出频率）
 
     def __init__(self):
         """初始化"""
@@ -678,7 +684,7 @@ class CustomRpcClient(RpcClient):
         time_since_warning = current_ms - self._last_warning_ms
         if time_since_warning >= self.WARNING_COOLDOWN_MS:
             self._last_warning_ms = current_ms
-            logger.warning(f"RPC心跳超时，已触发断线处理。当前状态: {self.connection_info}")
+            logger.debug(f"RPC心跳超时，已触发断线处理。当前状态: {self.connection_info}")
             self.on_disconnected()
 
     def run(self) -> None:
