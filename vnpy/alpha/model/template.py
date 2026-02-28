@@ -49,7 +49,7 @@ class AlphaModel(metaclass=ABCMeta):
         """
         if not self.supports_incremental:
             raise NotImplementedError(f"{self.__class__.__name__} 不支持增量训练")
-        raise NotImplementedError(f"{self.__class__.__name__} 必须实现 partial_fit() 方法")
+        # 子类需要重写此方法以支持增量训练
 
     # 新增：训练状态序列化
     def get_training_state(self) -> dict:
