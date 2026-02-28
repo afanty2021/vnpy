@@ -17,6 +17,14 @@ from .logger import logger
 from .dataset import AlphaDataset, to_datetime, Segment
 from .model import AlphaModel, ModelVersion
 from .model.version_manager import ModelVersionManager
+from .monitor import (
+    PerformanceTracker,
+    PerformanceMetric,
+    ModelPerformanceSnapshot,
+    MetricCategory,
+    DEFAULT_ALERT_RULES,
+)
+from .monitor.metrics import TradingStatistics
 
 
 class AlphaLab:
@@ -52,6 +60,9 @@ class AlphaLab:
 
         # Initialize version manager
         self.version_manager = ModelVersionManager(self.model_path)
+
+        # Initialize performance trackers
+        self.performance_trackers: dict[str, PerformanceTracker] = {}
 
     def save_bar_data(self, bars: list[BarData]) -> None:
         """Save bar data"""
@@ -761,3 +772,248 @@ class AlphaLab:
             logger.error(f"Failed to delete model {name} version {version_id}")
 
         return result
+
+    # Performance monitoring methods
+
+    def get_performance_tracker(
+        self,
+        model_name: str,
+    ) -> PerformanceTracker:
+        """
+        获取或创建模型性能追踪器
+
+        Args:
+            model_name: 模型名称
+
+        Returns:
+            性能追踪器实例
+        """
+        if model_name not in self.performance_trackers:
+            self.performance_trackers[model_name] = PerformanceTracker(
+                model_name=model_name,
+                lab_path=str(self.lab_path),
+            )
+        return self.performance_trackers[model_name]
+
+    def run_backtest_with_tracking(
+        self,
+        model_name: str,
+        backtest_result: dict[str, any],
+        alert_rules: list | None = None,
+    ) -> list:
+        """
+        运行回测并追踪性能
+
+        Args:
+            model_name: 模型名称
+            backtest_result: 回测结果字典
+            alert_rules: 自定义预警规则 (可选)
+
+        Returns:
+            触发的预警列表
+        """
+        tracker = self.get_performance_tracker(model_name)
+        rules = alert_rules or DEFAULT_ALERT_RULES
+
+        # 创建性能快照
+        now: datetime = datetime.now()
+
+        # 构建指标字典
+        metrics_dict: dict[str, float] = backtest_result.get("metrics", {}).copy()
+
+        # 计算标准指标
+        returns = backtest_result.get("returns", [])
+        if returns and len(returns) > 0:
+            import numpy as np
+
+            returns_array = np.array(returns)
+
+            # 基本收益指标
+            metrics_dict["total_return"] = float(np.sum(returns_array))
+            metrics_dict["avg_return"] = float(np.mean(returns_array))
+            metrics_dict["std_return"] = float(np.std(returns_array))
+
+            # 夏普比率
+            if len(returns_array) > 1:
+                std_dev = float(np.std(returns_array))
+                metrics_dict["sharpe_ratio"] = (
+                    float(np.mean(returns_array) / std_dev) if std_dev > 0 else 0.0
+                )
+
+            # 最大回撤
+            cumulative = np.cumsum(returns_array)
+            running_max = np.maximum.accumulate(cumulative)
+            drawdown = cumulative - running_max
+            metrics_dict["max_drawdown"] = float(np.min(drawdown))
+
+        # IC 指标 (如果有预测和目标)
+        predictions = backtest_result.get("predictions")
+        targets = backtest_result.get("targets")
+        if predictions is not None and targets is not None:
+            try:
+                from scipy.stats import pearsonr, spearmanr
+
+                ic, _ = pearsonr(predictions, targets)
+                metrics_dict["ic"] = float(ic)
+
+                rank_ic, _ = spearmanr(predictions, targets)
+                metrics_dict["rank_ic"] = float(rank_ic)
+            except Exception:
+                metrics_dict["ic"] = 0.0
+                metrics_dict["rank_ic"] = 0.0
+
+        # 获取历史基准
+        baseline_metrics: dict[str, float] = {}
+        for metric_name in ["sharpe_ratio", "max_drawdown", "ic", "total_return"]:
+            baseline = tracker.get_metric_baseline(metric_name, percentile=50.0)
+            if baseline is not None:
+                baseline_metrics[metric_name] = baseline
+
+        # 创建性能指标对象
+        return_metrics: dict[str, PerformanceMetric] = {}
+        risk_metrics: dict[str, PerformanceMetric] = {}
+        efficiency_metrics: dict[str, PerformanceMetric] = {}
+        prediction_metrics: dict[str, PerformanceMetric] = {}
+
+        # 分类指标
+        metric_categories: dict[str, tuple[dict, MetricCategory]] = {
+            "total_return": (return_metrics, MetricCategory.RETURN),
+            "avg_return": (return_metrics, MetricCategory.RETURN),
+            "std_return": (return_metrics, MetricCategory.RETURN),
+            "max_drawdown": (risk_metrics, MetricCategory.RISK),
+            "downside_risk": (risk_metrics, MetricCategory.RISK),
+            "sharpe_ratio": (efficiency_metrics, MetricCategory.EFFICIENCY),
+            "information_ratio": (efficiency_metrics, MetricCategory.EFFICIENCY),
+            "ic": (prediction_metrics, MetricCategory.PREDICTION),
+            "rank_ic": (prediction_metrics, MetricCategory.PREDICTION),
+            "excess_return": (efficiency_metrics, MetricCategory.EFFICIENCY),
+        }
+
+        for metric_name, metric_value in metrics_dict.items():
+            if metric_name in metric_categories:
+                metrics_dict_cat, category = metric_categories[metric_name]
+                metrics_dict_cat[metric_name] = PerformanceMetric(
+                    name=metric_name,
+                    value=metric_value,
+                    category=category,
+                    timestamp=now,
+                    baseline=baseline_metrics.get(metric_name),
+                )
+
+        # 交易统计
+        trading_stats = None
+        if "trading_stats" in backtest_result:
+            stats_data = backtest_result["trading_stats"]
+            trading_stats = TradingStatistics(
+                total_trades=stats_data.get("total_trades", 0),
+                long_trades=stats_data.get("long_trades", 0),
+                short_trades=stats_data.get("short_trades", 0),
+                winning_trades=stats_data.get("winning_trades", 0),
+                losing_trades=stats_data.get("losing_trades", 0),
+                avg_return=stats_data.get("avg_return", 0.0),
+                avg_hold_time=stats_data.get("avg_hold_time"),
+                turnover_rate=stats_data.get("turnover_rate", 0.0),
+            )
+
+        # 创建性能快照
+        snapshot = ModelPerformanceSnapshot(
+            model_name=model_name,
+            timestamp=now,
+            return_metrics=return_metrics,
+            risk_metrics=risk_metrics,
+            efficiency_metrics=efficiency_metrics,
+            prediction_metrics=prediction_metrics,
+            trading_stats=trading_stats,
+            metadata=backtest_result.get("metadata", {}),
+        )
+
+        # 记录性能并检查预警
+        triggered_alerts = tracker.record_performance(snapshot, rules)
+
+        logger.info(
+            f"Recorded performance for model {model_name}, "
+            f"triggered {len(triggered_alerts)} alerts"
+        )
+
+        return triggered_alerts
+
+    def get_model_performance(
+        self,
+        model_name: str,
+        limit: int | None = None,
+    ) -> list[ModelPerformanceSnapshot]:
+        """
+        获取模型历史性能数据
+
+        Args:
+            model_name: 模型名称
+            limit: 返回记录数限制
+
+        Returns:
+            历史快照列表
+        """
+        tracker = self.get_performance_tracker(model_name)
+        return tracker.get_performance_history(limit=limit)
+
+    def get_active_alerts(
+        self,
+        model_name: str,
+    ) -> list:
+        """
+        获取模型的活跃预警
+
+        Args:
+            model_name: 模型名称
+
+        Returns:
+            活跃预警列表
+        """
+        tracker = self.get_performance_tracker(model_name)
+        return tracker.get_active_alerts()
+
+    def acknowledge_alert(
+        self,
+        model_name: str,
+        alert_id: int,
+        user: str = "system",
+    ) -> bool:
+        """
+        确认模型预警
+
+        Args:
+            model_name: 模型名称
+            alert_id: 预警ID
+            user: 确认人
+
+        Returns:
+            是否成功
+        """
+        tracker = self.get_performance_tracker(model_name)
+        return tracker.acknowledge_alert(alert_id, user)
+
+    def generate_performance_report(
+        self,
+        model_name: str,
+        days: int = 30,
+    ) -> dict:
+        """
+        生成模型性能报告
+
+        Args:
+            model_name: 模型名称
+            days: 报告天数
+
+        Returns:
+            性能报告字典
+        """
+        tracker = self.get_performance_tracker(model_name)
+        return tracker.generate_performance_report(days=days)
+
+    def list_performance_trackers(self) -> list[str]:
+        """
+        列出所有性能追踪器
+
+        Returns:
+            模型名称列表
+        """
+        return list(self.performance_trackers.keys())
