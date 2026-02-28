@@ -1,6 +1,7 @@
 import json
 import shelve
 import pickle
+import time
 from pathlib import Path
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -14,7 +15,7 @@ from vnpy.trader.utility import extract_vt_symbol
 
 from .logger import logger
 from .dataset import AlphaDataset, to_datetime
-from .model import AlphaModel
+from .model import AlphaModel, ModelVersion
 from .model.version_manager import ModelVersionManager
 
 
@@ -482,3 +483,265 @@ class AlphaLab:
     def list_all_signals(self) -> list[str]:
         """List all signals"""
         return [file.stem for file in self.model_path.glob("*.parquet")]
+
+    def train_model_incremental(
+        self,
+        model_name: str,
+        dataset: AlphaDataset,
+        model_type: str = "lgb",
+        num_boost_round: int = 100,
+        incremental: bool | None = None
+    ) -> tuple[AlphaModel, ModelVersion]:
+        """
+        智能增量训练：自动检测是否增量
+
+        Args:
+            model_name: 模型名称
+            dataset: 训练数据集
+            model_type: 模型类型 ("lgb", "lasso", "mlp")
+            num_boost_round: 增量训练的轮数（仅增量模式有效）
+            incremental: 是否使用增量模式
+                - True: 强制增量训练
+                - False: 强制完整重训练
+                - None (默认): 自动检测
+
+        Returns:
+            tuple[AlphaModel, ModelVersion]: 训练好的模型和版本信息
+        """
+        from .model.models import LgbModel, LassoModel, MlpModel
+        import time
+
+        # 检查是否存在现有模型
+        existing_version: ModelVersion | None = self.version_manager.get_current_version(model_name)
+        existing_model: AlphaModel | None = None
+
+        if existing_version:
+            existing_model = self.version_manager.load_model(model_name)
+
+        # 确定训练模式
+        use_incremental: bool
+        if incremental is not None:
+            use_incremental = incremental
+        elif existing_model is not None and existing_model.supports_incremental:
+            use_incremental = True
+        else:
+            use_incremental = False
+
+        # 创建模型实例
+        model: AlphaModel
+        if model_type == "lgb":
+            model = LgbModel(dataset)
+        elif model_type == "lasso":
+            model = LassoModel(dataset)
+        elif model_type == "mlp":
+            model = MlpModel(dataset)
+        else:
+            raise ValueError(f"Unknown model type: {model_type}")
+
+        # 训练模型
+        training_start: float = time.time()
+
+        if use_incremental and existing_model and model.supports_incremental:
+            # 增量训练
+            logger.info(f"Starting incremental training for model {model_name}")
+
+            # 恢复已有模型状态
+            if existing_model.get_training_state():
+                model.set_training_state(existing_model.get_training_state())
+
+            # 执行增量训练
+            result: dict = model.partial_fit(dataset, num_boost_round=num_boost_round)
+            logger.info(f"Incremental training completed: {result}")
+        else:
+            # 完整重训练
+            logger.info(f"Starting full training for model {model_name}")
+            model.train_model(model_type)
+
+        training_duration: float = time.time() - training_start
+
+        # 获取训练统计信息
+        train_loss: float | None = None
+        valid_loss: float | None = None
+
+        if hasattr(model, 'model') and model.model is not None:
+            try:
+                valid_loss = model.model.best_score.get("valid_0", {}).get("l2")
+            except (AttributeError, KeyError):
+                pass
+
+        # 创建版本信息
+        train_period = dataset.data_periods.get("train", ("", ""))
+        valid_period = dataset.data_periods.get("valid", ("", ""))
+
+        version: ModelVersion = ModelVersion(
+            version_id="",  # 将由 version_manager 生成
+            created_at=datetime.now(),
+            train_period=train_period,
+            valid_period=valid_period,
+            n_samples=len(dataset.df) if dataset.df is not None else 0,
+            training_duration=training_duration,
+            train_loss=train_loss,
+            valid_loss=valid_loss,
+            is_incremental=use_incremental,
+            base_version=existing_version.version_id if use_incremental and existing_version else None,
+            description=f"{'增量' if use_incremental else '完整'}训练 - {model_type}",
+            tags=[model_type, "incremental" if use_incremental else "full"]
+        )
+
+        # 保存模型和版本
+        self.version_manager.create_version(model_name, version, model)
+
+        return model, version
+
+    def save_model_with_version(
+        self,
+        name: str,
+        model: AlphaModel,
+        dataset: AlphaDataset,
+        description: str = "",
+        tags: list[str] | None = None
+    ) -> ModelVersion:
+        """
+        保存模型并创建版本记录
+
+        Args:
+            name: 模型名称
+            model: AlphaModel 实例
+            dataset: 训练数据集
+            description: 版本描述
+            tags: 版本标签列表
+
+        Returns:
+            ModelVersion: 创建的版本信息
+        """
+        # 获取训练统计信息
+        train_loss: float | None = None
+        valid_loss: float | None = None
+        n_samples: int = 0
+
+        if hasattr(model, 'model') and model.model is not None:
+            try:
+                valid_loss = model.model.best_score.get("valid_0", {}).get("l2")
+            except (AttributeError, KeyError):
+                pass
+
+        if dataset.df is not None:
+            n_samples = len(dataset.df)
+
+        # 检查是否为增量训练（只有存在基础版本时才启用增量模式）
+        base_version: ModelVersion | None = self.version_manager.get_current_version(name)
+        is_incremental: bool = model.supports_incremental and base_version is not None
+
+        # 获取训练周期信息
+        train_period = dataset.data_periods.get("train", ("", ""))
+        valid_period = dataset.data_periods.get("valid", ("", ""))
+
+        # 创建版本信息
+        version: ModelVersion = ModelVersion(
+            version_id="",
+            created_at=datetime.now(),
+            train_period=train_period,
+            valid_period=valid_period,
+            n_samples=n_samples,
+            training_duration=0.0,
+            train_loss=train_loss,
+            valid_loss=valid_loss,
+            is_incremental=is_incremental,
+            base_version=base_version.version_id if base_version else None,
+            description=description,
+            tags=tags or []
+        )
+
+        # 保存模型
+        self.version_manager.create_version(name, version, model)
+
+        logger.info(f"Saved model {name} with version {version.version_id}")
+        return version
+
+    def load_model_version(
+        self,
+        name: str,
+        version_id: str | None = None
+    ) -> tuple[AlphaModel, ModelVersion]:
+        """
+        加载指定版本
+
+        Args:
+            name: 模型名称
+            version_id: 版本 ID，None 表示加载当前版本
+
+        Returns:
+            tuple[AlphaModel, ModelVersion]: 模型实例和版本信息
+
+        Raises:
+            ValueError: 如果模型或版本不存在
+        """
+        # 获取版本信息
+        version: ModelVersion | None
+        if version_id:
+            version = self.version_manager.get_version(name, version_id)
+        else:
+            version = self.version_manager.get_current_version(name)
+
+        if not version:
+            raise ValueError(f"Model version not found: {name}" + (f" ({version_id})" if version_id else ""))
+
+        # 加载模型
+        model: AlphaModel | None = self.version_manager.load_model(name, version_id)
+        if not model:
+            raise ValueError(f"Failed to load model: {name}")
+
+        logger.info(f"Loaded model {name} version {version.version_id}")
+        return model, version
+
+    def rollback_model(self, name: str, version_id: str) -> bool:
+        """
+        回滚到指定版本
+
+        Args:
+            name: 模型名称
+            version_id: 要回滚到的版本 ID
+
+        Returns:
+            bool: 回滚是否成功
+        """
+        result: bool = self.version_manager.rollback(name, version_id)
+
+        if result:
+            logger.info(f"Rolled back model {name} to version {version_id}")
+        else:
+            logger.error(f"Failed to rollback model {name} to version {version_id}")
+
+        return result
+
+    def list_model_versions(self, name: str) -> list[ModelVersion]:
+        """
+        列出模型的所有版本
+
+        Args:
+            name: 模型名称
+
+        Returns:
+            list[ModelVersion]: 版本列表（按创建时间倒序）
+        """
+        return self.version_manager.list_versions(name)
+
+    def delete_model_version(self, name: str, version_id: str) -> bool:
+        """
+        删除指定版本
+
+        Args:
+            name: 模型名称
+            version_id: 要删除的版本 ID
+
+        Returns:
+            bool: 删除是否成功
+        """
+        result: bool = self.version_manager.delete_version(name, version_id)
+
+        if result:
+            logger.info(f"Deleted model {name} version {version_id}")
+        else:
+            logger.error(f"Failed to delete model {name} version {version_id}")
+
+        return result
