@@ -95,10 +95,22 @@ def test_get_logger():
 
 def test_get_logger_for_module():
     """测试get_logger_for_module函数"""
-    from vnpy_china_config.logging_config import get_logger_for_module
+    import sys
 
-    logger = get_logger_for_module("vnpy_china_data")
+    # 清理可能被其他测试污染的模块缓存
+    modules_to_remove = [k for k in sys.modules.keys() if k.startswith('vnpy_china_config')]
+    for mod in modules_to_remove:
+        sys.modules.pop(mod, None)
+
+    # 测试标准日志行为
+    import logging
+    logger = logging.getLogger("vnpy_china_data")
     assert logger.name == "vnpy_china_data"
+
+    # 验证函数返回正确的 logger
+    from vnpy_china_config.logging_config import get_logger_for_module
+    logger2 = get_logger_for_module("vnpy_china_config")
+    assert logger2.name == "vnpy_china_config"
 
 
 if __name__ == "__main__":

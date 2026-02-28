@@ -2,7 +2,43 @@
 
 import sys
 import types
+import pytest
 from unittest.mock import Mock
+
+# 保存原始的 sys.modules 状态（测试隔离）
+_original_modules = {}
+
+
+def pytest_configure(config):
+    """在所有测试前保存 sys.modules 状态"""
+    global _original_modules
+    # 需要保存的模块键
+    keys_to_save = [
+        'vnpy', 'vnpy.rpc', 'vnpy.trader', 'vnpy.trader.object', 'vnpy.trader.constant',
+        'vnpy.event', 'vnpy_china_config', 'vnpy_china_config.logging_config',
+        'vnpy_china_data', 'vnpy_china_data.adapter', 'vnpy_china_data.adapter.base'
+    ]
+    for key in keys_to_save:
+        if key in sys.modules:
+            _original_modules[key] = sys.modules[key]
+
+
+def pytest_unconfigure(config):
+    """在所有测试后恢复 sys.modules 状态"""
+    global _original_modules
+    # 清理测试创建的模块
+    keys_to_remove = [
+        'vnpy', 'vnpy.rpc', 'vnpy.trader', 'vnpy.trader.object', 'vnpy.trader.constant',
+        'vnpy.event', 'vnpy_china_config', 'vnpy_china_config.logging_config',
+        'vnpy_china_data', 'vnpy_china_data.adapter', 'vnpy_china_data.adapter.base'
+    ]
+    for key in keys_to_remove:
+        sys.modules.pop(key, None)
+
+    # 恢复原始模块
+    for key, module in _original_modules.items():
+        sys.modules[key] = module
+    _original_modules.clear()
 
 # 创建一个真正的RpcClient基类（只是用于测试）
 class RpcClientBase:

@@ -30,15 +30,15 @@ def test_database_config_enabled_field():
 def test_global_config_cross_module_dependencies():
     """测试GlobalConfig的跨模块依赖验证"""
 
-    # 测试1: 正常情况 - 不应该有任何警告或错误
+    # 测试1: 开发环境 - 设置有效密码后不应该有警告
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         config = GlobalConfig(
             environment=Environment.DEVELOPMENT,
-            database=DatabaseConfig(enabled=True),
+            database=DatabaseConfig(enabled=True, mysql_password="valid_password"),
             qmt=QmtConfig(enabled=False)
         )
-        # 开发环境不应该有警告
+        # 设置有效密码后，开发环境不应该有警告
         assert len(w) == 0
 
     # 测试2: 生产环境 - 未启用数据库应该有警告
@@ -54,13 +54,18 @@ def test_global_config_cross_module_dependencies():
         assert any("数据库" in msg for msg in warning_messages)
 
     # 测试3: 生产环境 - QMT启用但无密码应该有警告
+    # 注意：由于QmtConfig在enabled=True时会验证路径存在性，
+    # 这里使用unittest.mock来模拟路径检查
+    from unittest.mock import patch
+
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        config_prod_qmt = GlobalConfig(
-            environment=Environment.PRODUCTION,
-            database=DatabaseConfig(enabled=True),
-            qmt=QmtConfig(enabled=True, account_id="test", mini_path="D:/test/userdata_mini/", password="")
-        )
+        with patch.object(Path, 'exists', return_value=True):
+            config_prod_qmt = GlobalConfig(
+                environment=Environment.PRODUCTION,
+                database=DatabaseConfig(enabled=True, mysql_password="valid_password"),
+                qmt=QmtConfig(enabled=True, account_id="test", mini_path="D:/test/userdata_mini/", password="")
+            )
         # 应该有密码警告
         warning_messages = [str(warning.message) for warning in w]
         assert any("密码" in msg for msg in warning_messages)
