@@ -264,6 +264,10 @@ class QmtConfig(BaseModel):
     session_id: int = 0
     password: str = ""
     enabled: bool = False  # 默认禁用，避免未配置时启动
+    use_rpc: bool = Field(
+        default=False,
+        description="是否使用RPC模式连接远程QMT服务"
+    )
 
     @field_validator("account_id", "mini_path")
     @classmethod
@@ -276,18 +280,20 @@ class QmtConfig(BaseModel):
         """验证QMT必填字段
 
         仅在enabled=True时验证必填，允许预配置但未启用的场景。
+        RPC模式下mini_path可以为空。
         """
-        # 如果启用QMT，则account_id和mini_path必须非空
+        # 如果启用QMT，则account_id必须非空
         if self.enabled:
             if not self.account_id:
                 raise ValueError(
                     "account_id 在启用QMT时不能为空。"
                     "请设置有效的account_id值，或设置enabled=False。"
                 )
-            if not self.mini_path:
+            # RPC模式下mini_path可以为空
+            if not self.use_rpc and not self.mini_path:
                 raise ValueError(
                     "mini_path 在启用QMT时不能为空。"
-                    "请设置有效的mini_path值，或设置enabled=False。"
+                    "请设置有效的mini_path值，或设置use_rpc: true使用RPC模式。"
                 )
         return self
 
@@ -317,12 +323,12 @@ class QmtConfig(BaseModel):
     def validate_qmt_config(self) -> "QmtConfig":
         """QMT配置整体验证
 
-        验证路径有效性（如果启用）。
+        验证路径有效性（如果启用且不使用RPC模式）。
 
         注意：必填字段验证已在 validate_required_qmt_fields 中完成。
         """
-        if self.enabled:
-            # 检查路径是否存在
+        if self.enabled and not self.use_rpc:
+            # 检查路径是否存在（非RPC模式需要本地路径）
             mini_dir = Path(self.mini_path)
             if not mini_dir.exists():
                 raise ValueError(
@@ -330,7 +336,8 @@ class QmtConfig(BaseModel):
                     f"请确认路径正确或创建该目录。\n"
                     f"正确路径示例：\n"
                     f"  Windows: D:/国金证券QMT交易端/userdata_mini/\n"
-                    f"  macOS/Linux: /opt/QMT/userdata_mini/"
+                    f"  macOS/Linux: /opt/QMT/userdata_mini/\n"
+                    f"或设置 use_rpc: true 使用RPC模式连接远程QMT"
                 )
 
         return self
