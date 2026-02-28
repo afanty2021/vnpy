@@ -12,6 +12,9 @@ from vnpy.alpha.model import AlphaModel
 class LgbModel(AlphaModel):
     """LightGBM ensemble learning algorithm"""
 
+    # 支持增量训练
+    supports_incremental: bool = True
+
     def __init__(
         self,
         learning_rate: float = 0.1,
@@ -49,6 +52,7 @@ class LgbModel(AlphaModel):
         self.log_evaluation_period: int = log_evaluation_period
 
         self.model: lgb.Booster | None = None
+        self._last_model: lgb.Booster | None = None  # 保存上次模型用于增量训练
 
     def _prepare_data(self, dataset: AlphaDataset) -> list[lgb.Dataset]:
         """
@@ -168,3 +172,83 @@ class LgbModel(AlphaModel):
                 figsize=(10, 20)
             )
             ax.set_title(f"Feature Importance ({importance_type})")
+
+    def partial_fit(
+        self,
+        dataset: AlphaDataset,
+        num_boost_round: int = 100,
+        reset_model: bool = False
+    ) -> dict:
+        """
+        增量训练模型
+
+        使用 LightGBM 的 init_model 参数实现增量训练，可以在已有模型基础上继续训练。
+
+        Parameters
+        ----------
+        dataset : AlphaDataset
+            包含特征和标签的数据集
+        num_boost_round : int
+            增量训练的轮数，默认为 100
+        reset_model : bool
+            是否重置模型，True 时清空已有模型重新训练，默认为 False
+
+        Returns
+        -------
+        dict
+            训练结果，包含 status 和 method 信息
+        """
+        # 如果需要重置模型，则清空已有模型
+        if reset_model:
+            self._last_model = None
+
+        # 准备训练数据
+        ds: list[lgb.Dataset] = self._prepare_data(dataset)
+
+        # 执行增量训练
+        self.model = lgb.train(
+            self.params,
+            ds[0],
+            num_boost_round=num_boost_round,
+            init_model=self._last_model,  # 关键：从已有模型继续训练
+            valid_sets=ds,
+            valid_names=["train", "valid"],
+            callbacks=[
+                lgb.early_stopping(self.early_stopping_rounds),
+                lgb.log_evaluation(self.log_evaluation_period)
+            ]
+        )
+
+        # 保存当前模型用于下次增量训练
+        self._last_model = self.model
+
+        return {
+            "status": "success",
+            "method": "incremental" if self._last_model is not None else "full"
+        }
+
+    def get_training_state(self) -> dict:
+        """
+        获取训练状态用于序列化
+
+        Returns
+        -------
+        dict
+            训练状态字典，包含模型对象
+        """
+        return {
+            "last_model": self._last_model,
+            "model": self.model
+        }
+
+    def set_training_state(self, state: dict) -> None:
+        """
+        从序列化的状态恢复模型
+
+        Parameters
+        ----------
+        state : dict
+            训练状态字典
+        """
+        self._last_model = state.get("last_model")
+        self.model = state.get("model")
