@@ -9,13 +9,26 @@ from typing import List, Optional, Dict, Any, Callable
 from datetime import datetime, date, time
 from threading import Thread, Event, Lock
 from collections import defaultdict
+from enum import Enum
+import logging
 
 from vnpy.trader.object import BarData, TickData
 from vnpy.trader.constant import Exchange, Interval
 from vnpy.event import EventEngine
 from vnpy.rpc import RpcClient
 
+from vnpy_china_config.logging_config import get_logger
 from .base import BaseDataAdapter
+
+logger = get_logger(__name__)
+
+
+class ConnectionState(Enum):
+    """连接状态枚举"""
+    DISCONNECTED = "disconnected"
+    CONNECTING = "connecting"
+    CONNECTED = "connected"
+    RECONNECTING = "reconnecting"
 
 
 class RpcQmtDataAdapter(BaseDataAdapter):
@@ -83,11 +96,11 @@ class RpcQmtDataAdapter(BaseDataAdapter):
             time.sleep(0.5)
 
             self._connected = True
-            print(f"RPC QMT适配器已连接: {self.req_address}")
+            logger.info(f"RPC QMT适配器已连接: {self.req_address}")
             return True
 
         except Exception as e:
-            print(f"RPC QMT连接失败: {e}")
+            logger.error(f"RPC QMT连接失败: {e}", exc_info=True)
             self._connected = False
             return False
 
@@ -109,6 +122,39 @@ class RpcQmtDataAdapter(BaseDataAdapter):
         self._subscribed_symbols.clear()
         self._tick_cache.clear()
         self._connected = False
+
+    def get_connection_status(self) -> Dict[str, Any]:
+        """获取RPC连接状态
+
+        Returns:
+            连接状态信息字典，包含：
+            - state: 连接状态
+            - connected: 是否已连接
+            - time_since_heartbeat_ms: 距离上次心跳的时间（毫秒）
+            - is_timeout: 是否超时
+        """
+        if not self._rpc_client:
+            return {
+                "state": "not_initialized",
+                "connected": False,
+            }
+
+        return self._rpc_client.connection_info
+
+    def is_healthy(self) -> bool:
+        """检查连接是否健康
+
+        Returns:
+            bool: True表示连接健康，False表示异常
+        """
+        if not self._connected:
+            return False
+
+        if not self._rpc_client:
+            return False
+
+        info = self._rpc_client.connection_info
+        return not info.get("is_timeout", True)
 
     def _start_reconnect_thread(self) -> None:
         """启动重连线程"""
@@ -144,8 +190,6 @@ class RpcQmtDataAdapter(BaseDataAdapter):
         2. 盘后时段可以充分利用 QMT 的历史数据补充功能
         3. Tushare 作为备用数据源，随时可用
         """
-        import logging
-        logger = logging.getLogger("vnpy_china_data")
 
         # 检查是否在交易时段
         if self._is_trading_time():
@@ -258,7 +302,7 @@ class RpcQmtDataAdapter(BaseDataAdapter):
             return True
 
         except Exception as e:
-            print(f"RPC订阅失败: {e}")
+            logger.error(f"RPC订阅失败: {e}", exc_info=True)
             return False
 
     def unsubscribe(self, symbols: List[str]) -> bool:
@@ -276,7 +320,7 @@ class RpcQmtDataAdapter(BaseDataAdapter):
             return True
 
         except Exception as e:
-            print(f"RPC取消订阅失败: {e}")
+            logger.error(f"RPC取消订阅失败: {e}", exc_info=True)
             return False
 
     def register_callback(
@@ -299,7 +343,7 @@ class RpcQmtDataAdapter(BaseDataAdapter):
                 bar: BarData = data
                 self._on_bar(bar)
         except Exception as e:
-            print(f"处理RPC回调失败: {e}")
+            logger.error(f"处理RPC回调失败: {e}", exc_info=True)
 
     def _on_tick(self, tick: TickData) -> None:
         """处理Tick数据"""
@@ -318,7 +362,7 @@ class RpcQmtDataAdapter(BaseDataAdapter):
                 try:
                     callback(tick)
                 except Exception as e:
-                    print(f"回调执行失败: {e}")
+                    logger.error(f"回调执行失败: {e}", exc_info=True)
 
             # 发布事件
             if self.event_engine:
@@ -484,7 +528,7 @@ class RpcQmtDataAdapter(BaseDataAdapter):
             return sector_list
 
         except Exception as e:
-            print(f"获取板块列表失败: {e}")
+            logger.error(f"获取板块列表失败: {e}", exc_info=True)
             return []
 
     def get_sector_index(
@@ -509,7 +553,7 @@ class RpcQmtDataAdapter(BaseDataAdapter):
                     return [BarData(**d) if isinstance(d, dict) else d for d in result]
             return []
         except Exception as e:
-            print(f"RPC获取板块指数失败: {e}")
+            logger.error(f"RPC获取板块指数失败: {e}", exc_info=True)
             return []
 
     # ========== 港股通数据 ==========
@@ -532,7 +576,7 @@ class RpcQmtDataAdapter(BaseDataAdapter):
             >>> print(symbols[:5])  # ['0700.SHHK', '09988.SHHK', ...]
         """
         if not self._connected or not self._rpc_client:
-            print("RPC QMT 未连接，无法获取沪港通标的列表")
+            logger.warning("RPC QMT 未连接，无法获取沪港通标的列表")
             return []
 
         try:
@@ -541,7 +585,7 @@ class RpcQmtDataAdapter(BaseDataAdapter):
                 return result
             return []
         except Exception as e:
-            print(f"RPC获取沪港通标的列表失败: {e}")
+            logger.error(f"RPC获取沪港通标的列表失败: {e}", exc_info=True)
             return []
 
     def get_hk_sz_symbols(self, date: str = None) -> List[str]:
@@ -562,7 +606,7 @@ class RpcQmtDataAdapter(BaseDataAdapter):
             >>> print(symbols[:5])  # ['0700.SZHK', '09988.SZHK', ...]
         """
         if not self._connected or not self._rpc_client:
-            print("RPC QMT 未连接，无法获取深港通标的列表")
+            logger.warning("RPC QMT 未连接，无法获取深港通标的列表")
             return []
 
         try:
@@ -571,7 +615,7 @@ class RpcQmtDataAdapter(BaseDataAdapter):
                 return result
             return []
         except Exception as e:
-            print(f"RPC获取深港通标的列表失败: {e}")
+            logger.error(f"RPC获取深港通标的列表失败: {e}", exc_info=True)
             return []
 
 
@@ -581,54 +625,88 @@ class CustomRpcClient(RpcClient):
     继承自vnpy.rpc.RpcClient，添加可配置的callback功能。
     """
 
+    # 心跳配置常量（毫秒）
+    HEARTBEAT_TOLERANCE_MS = 30000  # 30秒
+    POLL_INTERVAL_MS = 1000
+    FAST_POLL_INTERVAL_MS = 100
+    WARNING_COOLDOWN_MS = 5000
+
     def __init__(self):
         """初始化"""
         super().__init__()
         self.callback = None
+
+        # 心跳时间跟踪（毫秒）
+        self._last_heartbeat_ms: int = 0
+        self._last_warning_ms: int = 0
+
+        # 连接状态
+        self._connection_state: ConnectionState = ConnectionState.DISCONNECTED
+
+    @property
+    def connection_info(self) -> Dict[str, Any]:
+        """返回连接状态信息（用于调试）"""
+        return {
+            "state": self._connection_state.value,
+            "last_heartbeat_ms": self._last_heartbeat_ms,
+            "last_warning_ms": self._last_warning_ms,
+            "active": getattr(self, "_active", False),
+        }
+
+    def _check_heartbeat(self, current_ms: int) -> bool:
+        """检查心跳是否正常
+
+        Args:
+            current_ms: 当前时间（毫秒）
+
+        Returns:
+            True 表示心跳正常，False 表示超时
+        """
+        if self._last_heartbeat_ms == 0:
+            self._last_heartbeat_ms = current_ms
+            return True
+
+        time_since_heartbeat = current_ms - self._last_heartbeat_ms
+        return time_since_heartbeat <= self.HEARTBEAT_TOLERANCE_MS
+
+    def _handle_disconnection(self, current_ms: int) -> None:
+        """处理连接断开事件（带冷却时间）
+
+        Args:
+            current_ms: 当前时间（毫秒）
+        """
+        time_since_warning = current_ms - self._last_warning_ms
+        if time_since_warning >= self.WARNING_COOLDOWN_MS:
+            self._last_warning_ms = current_ms
+            logger.warning(f"RPC心跳超时，已触发断线处理。当前状态: {self.connection_info}")
+            self.on_disconnected()
 
     def run(self) -> None:
         """运行RPC客户端循环"""
         from time import time as current_time
         import zmq
 
-        # 心跳容忍时间（秒）
-        HEARTBEAT_TOLERANCE: int = 30
-        pull_tolerance: int = HEARTBEAT_TOLERANCE * 1000
-
-        # 确保类型正确（调试信息）
-        assert isinstance(HEARTBEAT_TOLERANCE, int), f"HEARTBEAT_TOLERANCE必须是int，当前类型: {type(HEARTBEAT_TOLERANCE)}"
+        # 设置连接状态为已连接
+        self._connection_state = ConnectionState.CONNECTED
 
         while self._active:
+            # 获取当前时间（秒）并转换为毫秒
             now = current_time()
-            assert isinstance(now, float), f"now必须是float，当前类型: {type(now)}"
+            current_ms = int(now * 1000)
 
-            # 检查是否真正超时（基于上次收到消息的时间）
-            time_since_last_ping = (now - self._last_received_ping) * 1000
-            if time_since_last_ping > pull_tolerance:
-                # 只有在真正超过心跳容忍时间时才警告
-                # 然后继续等待新消息
-                if not hasattr(self, '_last_warning_time'):
-                    self.on_disconnected()
-                    self._last_warning_time = now
-                else:
-                    # 确保_last_warning_time是数值类型
-                    last_warning = self._last_warning_time
-                    if isinstance(last_warning, (int, float)):
-                        if (now - last_warning) > HEARTBEAT_TOLERANCE:
-                            self.on_disconnected()
-                            self._last_warning_time = now
-                    else:
-                        # 类型错误，重置并记录
-                        print(f"警告: _last_warning_time类型错误 ({type(last_warning)})，重置为当前时间")
-                        self._last_warning_time = now
+            # 检查心跳是否正常
+            if not self._check_heartbeat(current_ms):
+                self._handle_disconnection(current_ms)
 
-            # 使用较短的轮询间隔，以便更频繁地检查超时状态
-            # 但也允许处理连续的消息流
-            short_poll_timeout = min(1000, pull_tolerance - int(time_since_last_ping))
-            if short_poll_timeout < 100:
-                short_poll_timeout = 100
+            # 计算轮询超时时间
+            if self._last_heartbeat_ms > 0:
+                time_since_heartbeat = current_ms - self._last_heartbeat_ms
+                poll_timeout = min(self.POLL_INTERVAL_MS, self.HEARTBEAT_TOLERANCE_MS - time_since_heartbeat)
+                poll_timeout = max(poll_timeout, self.FAST_POLL_INTERVAL_MS)
+            else:
+                poll_timeout = self.POLL_INTERVAL_MS
 
-            if not self._socket_sub.poll(short_poll_timeout):
+            if not self._socket_sub.poll(poll_timeout):
                 continue
 
             # Receive data from subscribe socket
@@ -636,7 +714,7 @@ class CustomRpcClient(RpcClient):
                 topic, data = self._socket_sub.recv_pyobj(flags=zmq.NOBLOCK)
 
                 # 收到任何消息都更新心跳时间戳
-                self._last_received_ping = current_time()
+                self._last_heartbeat_ms = int(current_time() * 1000)
 
                 if topic == "heartbeat":
                     pass  # 心跳消息
@@ -647,6 +725,9 @@ class CustomRpcClient(RpcClient):
             except zmq.ZMQError as e:
                 # 接收错误，忽略并继续
                 pass
+
+        # 关闭连接时设置状态
+        self._connection_state = ConnectionState.DISCONNECTED
 
         # Close socket
         self._socket_req.close()

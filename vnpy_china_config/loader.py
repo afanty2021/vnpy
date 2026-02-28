@@ -13,6 +13,18 @@ from .base import BaseConfig, Environment
 
 T = TypeVar("T", bound=BaseConfig)
 
+# 项目标识文件（用于验证是否是有效的vnpy_china项目）
+PROJECT_INDICATORS = [
+    "setup.py",           # Python项目标准文件
+    "setup.cfg",          # 另一种项目配置
+    "pyproject.toml",     # 现代Python项目文件
+    "requirements.txt",   # 依赖文件
+    ".vntrader_china",    # vnpy_china配置目录本身
+    "vnpy",               # vnpy核心模块（如果是子目录）
+    "CLAUDE.md",          # AI项目文档
+    "README.md",          # 项目说明文档
+]
+
 
 class ConfigManager:
     """配置管理器（单例模式）
@@ -77,64 +89,148 @@ class ConfigManager:
             self._configs: Dict[str, BaseConfig] = {}
             self._config_path: Path = self._find_config_path()
             self._environment: Environment = self._detect_environment()
+            self._project_root: Path = self._detect_project_root()
             self._initialized = True
+
+    def _is_valid_project_directory(self, dir_path: Path) -> bool:
+        """验证是否是有效的项目目录
+
+        检查目录中是否包含项目标识文件。
+
+        Args:
+            dir_path: 待验证的目录路径
+
+        Returns:
+            bool: True表示是有效的项目目录
+        """
+        # 首先检查目录是否存在
+        if not dir_path.exists():
+            return False
+
+        if not dir_path.is_dir():
+            return False
+
+        # 检查是否有任何项目标识文件
+        for indicator in PROJECT_INDICATORS:
+            if (dir_path / indicator).exists():
+                return True
+
+        # 检查是否有vnpy_china相关模块
+        try:
+            for child in dir_path.iterdir():
+                if child.is_dir() and child.name.startswith("vnpy_china"):
+                    return True
+        except (PermissionError, FileNotFoundError):
+            # 如果没有权限访问或目录在检查时被删除
+            return False
+
+        return False
+
+    def _has_config_files(self, config_path: Path) -> bool:
+        """检查配置目录是否有配置文件
+
+        Args:
+            config_path: 配置目录路径
+
+        Returns:
+            bool: True表示目录中有配置文件
+        """
+        if not config_path.is_dir():
+            return False
+
+        # 检查是否有任何YAML配置文件
+        for yaml_file in config_path.glob("*.yaml"):
+            if yaml_file.is_file():
+                return True
+
+        return False
 
     def _find_config_path(self) -> Path:
         """查找配置文件路径
 
         按优先级查找：
         1. 当前目录下的 .vntrader_china/config
-        2. 向上递归查找项目根目录
+        2. 向上递归查找项目根目录（带项目标识验证）
         3. 用户主目录下的 .vntrader_china/config（最后才使用）
 
         Returns:
             配置文件路径
         """
-        from pathlib import Path
+        current_path = Path.cwd()
 
-        # 尝试当前目录
-        config_path = Path(".vntrader_china/config")
-        if config_path.exists():
+        # 1. 尝试当前目录
+        config_path = current_path / ".vntrader_china/config"
+        if config_path.exists() and self._has_config_files(config_path):
             return config_path
 
-        # 尝试向上查找项目根目录（包含 .vntrader_china 的目录）
-        # 优先使用项目目录下的配置，而不是用户主目录
-        current_path = Path.cwd()
-        original_path = current_path
+        # 2. 向上查找项目根目录（带项目标识验证）
         project_config_path = None
+        search_path = current_path
 
         for _ in range(10):  # 最多向上查找10层
-            check_path = current_path / ".vntrader_china/config"
-            if check_path.exists():
-                # 检查是否有配置文件（而不是空目录）
-                if (check_path / "global_development.yaml").exists():
-                    project_config_path = check_path
-                    break
-                # 或者有 global_production.yaml
-                if (check_path / "global_production.yaml").exists():
-                    project_config_path = check_path
-                    break
-                # 或者有 global_testing.yaml
-                if (check_path / "global_testing.yaml").exists():
-                    project_config_path = check_path
-                    break
+            check_path = search_path / ".vntrader_china/config"
 
-            parent = current_path.parent
-            if parent == current_path:  # 到达根目录
+            if check_path.exists() and self._has_config_files(check_path):
+                # 验证这是否是有效的项目目录
+                if self._is_valid_project_directory(search_path):
+                    project_config_path = check_path
+                    break
+                else:
+                    # 跳过非项目目录的配置
+                    pass
+
+            parent = search_path.parent
+            if parent == search_path:  # 到达根目录
                 break
-            current_path = parent
+            search_path = parent
 
         # 如果找到项目配置，优先使用
         if project_config_path:
             return project_config_path
 
-        # 使用用户主目录（作为最后的fallback）
+        # 3. 使用用户主目录（作为最后的fallback）
         home_config = Path.home() / ".vntrader_china/config"
-        if home_config.exists():
+        if home_config.exists() and self._has_config_files(home_config):
             return home_config
 
         # 默认使用当前目录（稍后会创建）
-        return Path(".vntrader_china/config")
+        return current_path / ".vntrader_china/config"
+
+    def _detect_project_root(self) -> Path:
+        """检测项目根目录
+
+        向上查找包含项目标识的目录。
+
+        Returns:
+            项目根目录路径
+        """
+        search_path = Path.cwd()
+
+        for _ in range(10):
+            if self._is_valid_project_directory(search_path):
+                return search_path
+
+            parent = search_path.parent
+            if parent == search_path:  # 到达根目录
+                break
+            search_path = parent
+
+        # 默认返回当前目录
+        return Path.cwd()
+
+    def get_config_info(self) -> Dict[str, str]:
+        """获取配置信息（用于调试）
+
+        Returns:
+            配置信息字典
+        """
+        return {
+            "environment": self._environment.value,
+            "config_path": str(self._config_path),
+            "project_root": str(self._detect_project_root()),
+            "config_exists": str(self._config_path.exists()),
+            "has_config_files": str(self._has_config_files(self._config_path) if self._config_path.exists() else False),
+        }
 
     def _detect_environment(self) -> Environment:
         """自动检测运行环境
@@ -166,6 +262,11 @@ class ConfigManager:
         """获取配置文件路径"""
         return self._config_path
 
+    @property
+    def project_root(self) -> Path:
+        """获取项目根目录"""
+        return self._project_root
+
     def set_environment(self, env: Union[Environment, str]) -> None:
         """设置运行环境
 
@@ -193,21 +294,38 @@ class ConfigManager:
 
         Returns:
             全局配置对象
+
+        Raises:
+            ValueError: 配置文件验证失败时抛出，包含友好的错误信息
         """
         if not force_reload and "global" in self._configs:
             return self._configs["global"]
 
         from .global_config import GlobalConfig
+        import logging
 
+        logger = logging.getLogger(__name__)
         config_file = self._config_path / f"global_{self._environment.value}.yaml"
 
         if config_file.exists():
-            config = GlobalConfig.from_file(config_file)
+            try:
+                config = GlobalConfig.from_file(config_file)
+            except Exception as e:
+                # 配置验证失败，提供友好错误信息
+                raise ValueError(
+                    f"配置文件 {config_file} 验证失败:\n{e}\n\n"
+                    f"请检查配置文件格式和必填字段。\n"
+                    f"配置文件路径: {config_file.absolute()}"
+                )
         else:
             # 创建默认配置并保存
             config = GlobalConfig()
             config.environment = self._environment
             config.to_file(config_file)
+            logger.warning(
+                f"配置文件不存在，已创建默认配置: {config_file}\n"
+                f"请根据需要修改配置。"
+            )
 
         self._configs["global"] = config
         return config
@@ -333,6 +451,47 @@ class ConfigManager:
     def clear_cache(self) -> None:
         """清除配置缓存"""
         self._configs.clear()
+
+    def validate_config_for_feature(self, feature: str) -> None:
+        """验证功能所需配置
+
+        在使用特定功能前调用，确保配置正确。
+
+        Args:
+            feature: 功能名称（qmt, database, rpc_server等）
+
+        Raises:
+            ValueError: 配置不满足要求
+
+        Example:
+            ```python
+            manager = ConfigManager()
+            config = manager.load_global_config()
+
+            # 启动QMT前验证
+            manager.validate_config_for_feature("qmt")
+
+            # 启动数据库前验证
+            manager.validate_config_for_feature("database")
+            ```
+        """
+        config = self.get_config("global")
+        if config is None:
+            raise ValueError(
+                "全局配置未加载，请先调用 load_global_config()。\n"
+                "示例:\n"
+                "  manager = ConfigManager()\n"
+                "  config = manager.load_global_config()\n"
+                "  manager.validate_config_for_feature('qmt')"
+            )
+
+        if hasattr(config, 'validate_for_use'):
+            config.validate_for_use(feature)
+        else:
+            # 向后兼容旧版本配置
+            if feature == "qmt":
+                if not config.qmt.enabled:
+                    raise ValueError("QMT功能未启用")
 
     @classmethod
     def reset_instance(cls) -> None:

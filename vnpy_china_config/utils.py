@@ -296,3 +296,128 @@ def validate_config_schema(
         "valid": len(errors) == 0,
         "errors": errors,
     }
+
+
+# ============== 配置路径验证函数 ==============
+
+from typing import Tuple, List, Optional
+import yaml
+
+
+# 项目标识文件（用于验证是否是有效的vnpy_china项目）
+_PATH_PROJECT_INDICATORS = [
+    "setup.py",
+    "setup.cfg",
+    "pyproject.toml",
+    "requirements.txt",
+    ".vntrader_china",
+    "vnpy",
+    "CLAUDE.md",
+    "README.md",
+]
+
+
+def is_valid_project_directory(dir_path: Path) -> bool:
+    """验证是否是有效的vnpy_china项目目录
+
+    Args:
+        dir_path: 待验证的目录路径
+
+    Returns:
+        bool: True表示是有效的项目目录
+
+    Example:
+        ```python
+        from vnpy_china_config.utils import is_valid_project_directory
+
+        if is_valid_project_directory(Path.cwd()):
+            print("当前在项目目录中")
+        ```
+    """
+    # 首先检查目录是否存在
+    if not dir_path.exists() or not dir_path.is_dir():
+        return False
+
+    # 检查标识文件
+    for indicator in _PATH_PROJECT_INDICATORS:
+        if (dir_path / indicator).exists():
+            return True
+
+    # 检查vnpy_china模块
+    try:
+        for child in dir_path.iterdir():
+            if child.is_dir() and child.name.startswith("vnpy_china"):
+                return True
+    except (PermissionError, FileNotFoundError):
+        pass
+
+    return False
+
+
+def find_project_root(start_path: Optional[Path] = None, max_levels: int = 10) -> Optional[Path]:
+    """查找项目根目录
+
+    从指定目录开始，向上查找包含项目标识的目录。
+
+    Args:
+        start_path: 起始路径（默认当前目录）
+        max_levels: 最多向上查找层数
+
+    Returns:
+        项目根目录路径，找不到则返回None
+    """
+    if start_path is None:
+        start_path = Path.cwd()
+
+    search_path = start_path
+
+    for _ in range(max_levels):
+        if is_valid_project_directory(search_path):
+            return search_path
+
+        parent = search_path.parent
+        if parent == search_path:  # 到达根目录
+            break
+        search_path = parent
+
+    return None
+
+
+def validate_yaml_file(file_path: Path) -> Tuple[bool, str]:
+    """验证YAML文件格式
+
+    Args:
+        file_path: YAML文件路径
+
+    Returns:
+        (is_valid, error_message): 是否有效和错误信息
+    """
+    if not file_path.exists():
+        return False, f"文件不存在: {file_path}"
+
+    if not file_path.is_file():
+        return False, f"路径不是文件: {file_path}"
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            yaml.safe_load(f)
+        return True, ""
+    except yaml.YAMLError as e:
+        return False, f"YAML格式错误: {e}"
+    except Exception as e:
+        return False, f"读取文件失败: {e}"
+
+
+def list_config_files(config_dir: Path) -> List[Path]:
+    """列出配置目录中的所有YAML文件
+
+    Args:
+        config_dir: 配置目录路径
+
+    Returns:
+        YAML文件路径列表
+    """
+    if not config_dir.is_dir():
+        return []
+
+    return sorted(config_dir.glob("*.yaml"))
