@@ -2,6 +2,7 @@
 
 # 数据库
 pymysql>=1.0.0
+DBUtils>=3.0.0
 
 # 缓存
 redis>=4.0.0
