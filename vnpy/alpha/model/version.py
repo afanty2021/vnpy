@@ -1,0 +1,82 @@
+"""
+Model version data structure for version tracking and incremental training.
+"""
+
+from dataclasses import dataclass, field
+from datetime import datetime as Datetime
+
+
+@dataclass
+class ModelVersion:
+    """
+    Data class for tracking model version information.
+
+    Used to manage model versions during training, including training statistics,
+    incremental training information, and metadata.
+    """
+
+    # Required fields
+    version_id: str                      # v{timestamp}
+    created_at: Datetime
+    train_period: tuple[str, str]        # (start_date, end_date)
+    valid_period: tuple[str, str]       # (start_date, end_date)
+
+    # Training statistics
+    n_samples: int = 0
+    training_duration: float = 0.0      # in seconds
+    train_loss: float | None = None
+    valid_loss: float | None = None
+
+    # Incremental training information
+    is_incremental: bool = False
+    base_version: str | None = None
+
+    # Metadata
+    description: str = ""
+    tags: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        """Validate version data after initialization."""
+        if not self.version_id.startswith("v"):
+            raise ValueError("version_id must start with 'v'")
+
+        if self.is_incremental and not self.base_version:
+            raise ValueError("base_version is required for incremental training")
+
+    def to_dict(self) -> dict:
+        """
+        Convert ModelVersion to dictionary.
+
+        Returns:
+            Dictionary representation of the model version
+        """
+        return {
+            "version_id": self.version_id,
+            "created_at": self.created_at.isoformat(),
+            "train_period": self.train_period,
+            "valid_period": self.valid_period,
+            "n_samples": self.n_samples,
+            "training_duration": self.training_duration,
+            "train_loss": self.train_loss,
+            "valid_loss": self.valid_loss,
+            "is_incremental": self.is_incremental,
+            "base_version": self.base_version,
+            "description": self.description,
+            "tags": self.tags,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ModelVersion":
+        """
+        Create ModelVersion from dictionary.
+
+        Args:
+            data: Dictionary containing version information
+
+        Returns:
+            ModelVersion instance
+        """
+        data = data.copy()
+        if isinstance(data.get("created_at"), str):
+            data["created_at"] = Datetime.fromisoformat(data["created_at"])
+        return cls(**data)
