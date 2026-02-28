@@ -1,7 +1,7 @@
 # vnpy_china_data - A股数据服务模块
 
-> 更新时间：2026-02-24
-> 版本：1.0.0
+> 更新时间：2026-02-28
+> 版本：1.1.0
 
 ## 模块概述
 
@@ -157,6 +157,33 @@ export QMT_ACCOUNT_ID=your_account_id
 - [vnpy_china_interface](../vnpy_china_interface/) - 数据接口定义
 - [vnpy_china_config](../vnpy_china_config/) - 配置管理
 - [vnpy_china_rules](../vnpy_china_rules/) - A股交易规则
+
+## 变更记录
+
+### 2026-02-28 - v1.1.0
+- ⚡️ **性能优化**：使用 DBUtils 连接池重构数据库操作层
+  - 替换原有的直接 PyMySQL 连接为 DBUtils PooledDB 连接池
+  - 提升并发性能，减少连接创建开销
+  - 修复下载脚本断点续传问题（正确使用连接池上下文管理器）
+
+- 🔧 **配置重构**：统一 QMT 配置管理
+  - 将 QMT 配置从 DataModuleConfig 迁移到 GlobalConfig.QmtConfig
+  - 添加 `use_rpc` 字段支持远程 QMT RPC 服务器连接
+  - 简化配置结构，消除重复配置项
+
+### 2026-02-27
+- 🐛 **Bug修复**：
+  - 修复 MySQL 保留关键字问题（datetime, interval 使用反引号转义）
+  - 添加数据库表创建方法 `create_bar_data_table()` 和 `create_stock_info_table()`
+  - 修复 RPC QMT 适配器 HistoryRequest 对象类型问题
+
+### 2026-02-26
+- 🐛 **Bug修复**：
+  - 修复重复方法定义问题
+  - 修复 exchange 解析中的 .SEHK 后缀支持
+
+### 2026-02-25
+- ✨ **新增功能**：ChinaDataApp 用于 GUI 集成
 
 
 <claude-mem-context>
