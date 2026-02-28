@@ -14,7 +14,7 @@ from vnpy.trader.constant import Interval
 from vnpy.trader.utility import extract_vt_symbol
 
 from .logger import logger
-from .dataset import AlphaDataset, to_datetime
+from .dataset import AlphaDataset, to_datetime, Segment
 from .model import AlphaModel, ModelVersion
 from .model.version_manager import ModelVersionManager
 
@@ -508,7 +508,9 @@ class AlphaLab:
         Returns:
             tuple[AlphaModel, ModelVersion]: 训练好的模型和版本信息
         """
-        from .model.models import LgbModel, LassoModel, MlpModel
+        from .model.models.lgb_model import LgbModel
+        from .model.models.lasso_model import LassoModel
+        from .model.models.mlp_model import MlpModel
         import time
 
         # 检查是否存在现有模型
@@ -521,7 +523,12 @@ class AlphaLab:
         # 确定训练模式
         use_incremental: bool
         if incremental is not None:
-            use_incremental = incremental
+            # 用户强制指定模式，但需要检查模型是否支持增量
+            if incremental and existing_model is not None and not existing_model.supports_incremental:
+                # 模型不支持增量，强制使用完整训练
+                use_incremental = False
+            else:
+                use_incremental = incremental
         elif existing_model is not None and existing_model.supports_incremental:
             use_incremental = True
         else:
@@ -530,11 +537,11 @@ class AlphaLab:
         # 创建模型实例
         model: AlphaModel
         if model_type == "lgb":
-            model = LgbModel(dataset)
+            model = LgbModel()
         elif model_type == "lasso":
-            model = LassoModel(dataset)
+            model = LassoModel()
         elif model_type == "mlp":
-            model = MlpModel(dataset)
+            model = MlpModel()
         else:
             raise ValueError(f"Unknown model type: {model_type}")
 
@@ -555,7 +562,7 @@ class AlphaLab:
         else:
             # 完整重训练
             logger.info(f"Starting full training for model {model_name}")
-            model.train_model(model_type)
+            model.fit(dataset)
 
         training_duration: float = time.time() - training_start
 
@@ -571,8 +578,8 @@ class AlphaLab:
                 pass
 
         # 创建版本信息
-        train_period = dataset.data_periods.get("train", ("", ""))
-        valid_period = dataset.data_periods.get("valid", ("", ""))
+        train_period = dataset.data_periods.get(Segment.TRAIN, ("", ""))
+        valid_period = dataset.data_periods.get(Segment.VALID, ("", ""))
 
         version: ModelVersion = ModelVersion(
             version_id="",  # 将由 version_manager 生成
@@ -642,8 +649,8 @@ class AlphaLab:
             is_incremental = model.supports_incremental and base_version is not None
 
         # 获取训练周期信息
-        train_period = dataset.data_periods.get("train", ("", ""))
-        valid_period = dataset.data_periods.get("valid", ("", ""))
+        train_period = dataset.data_periods.get(Segment.TRAIN, ("", ""))
+        valid_period = dataset.data_periods.get(Segment.VALID, ("", ""))
 
         # 创建版本信息
         version: ModelVersion = ModelVersion(
