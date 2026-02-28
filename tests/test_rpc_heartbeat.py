@@ -138,8 +138,8 @@ def test_warning_cooldown():
     client = CustomRpcClient()
     current_ms = int(time_module.time() * 1000)
     client._last_heartbeat_ms = current_ms - 40000
-    # 设置_last_warning_ms为6秒前（超过5秒冷却时间）
-    client._last_warning_ms = current_ms - 6000
+    # 设置_last_warning_ms为61秒前（超过60秒冷却时间）
+    client._last_warning_ms = current_ms - 61000
 
     disconnect_called = []
     client.on_disconnected = lambda: disconnect_called.append(True)
