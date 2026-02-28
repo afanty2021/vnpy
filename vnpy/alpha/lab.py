@@ -565,6 +565,7 @@ class AlphaLab:
 
         if hasattr(model, 'model') and model.model is not None:
             try:
+                train_loss = model.model.best_score.get("train_0", {}).get("l2")
                 valid_loss = model.model.best_score.get("valid_0", {}).get("l2")
             except (AttributeError, KeyError):
                 pass
@@ -599,7 +600,9 @@ class AlphaLab:
         model: AlphaModel,
         dataset: AlphaDataset,
         description: str = "",
-        tags: list[str] | None = None
+        tags: list[str] | None = None,
+        training_duration: float | None = None,
+        is_incremental: bool | None = None
     ) -> ModelVersion:
         """
         保存模型并创建版本记录
@@ -610,6 +613,8 @@ class AlphaLab:
             dataset: 训练数据集
             description: 版本描述
             tags: 版本标签列表
+            training_duration: 训练时长（秒），如果未提供则设置为 None
+            is_incremental: 是否为增量训练，如果未提供则根据基础版本自动判断
 
         Returns:
             ModelVersion: 创建的版本信息
@@ -621,6 +626,7 @@ class AlphaLab:
 
         if hasattr(model, 'model') and model.model is not None:
             try:
+                train_loss = model.model.best_score.get("train_0", {}).get("l2")
                 valid_loss = model.model.best_score.get("valid_0", {}).get("l2")
             except (AttributeError, KeyError):
                 pass
@@ -630,7 +636,10 @@ class AlphaLab:
 
         # 检查是否为增量训练（只有存在基础版本时才启用增量模式）
         base_version: ModelVersion | None = self.version_manager.get_current_version(name)
-        is_incremental: bool = model.supports_incremental and base_version is not None
+
+        # 如果未传入 is_incremental，则根据基础版本自动判断
+        if is_incremental is None:
+            is_incremental = model.supports_incremental and base_version is not None
 
         # 获取训练周期信息
         train_period = dataset.data_periods.get("train", ("", ""))
@@ -643,7 +652,7 @@ class AlphaLab:
             train_period=train_period,
             valid_period=valid_period,
             n_samples=n_samples,
-            training_duration=0.0,
+            training_duration=training_duration,
             train_loss=train_loss,
             valid_loss=valid_loss,
             is_incremental=is_incremental,
