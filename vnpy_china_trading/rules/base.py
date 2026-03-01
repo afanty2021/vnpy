@@ -2,58 +2,16 @@
 """
 风险规则基类
 
-定义风险检查的抽象基类和结果数据类。
+定义风险检查的抽象基类。
 """
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import List, Any
+from typing import Any
+
+from vnpy_china_trading.object import RiskCheckResult
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class RiskCheckResult:
-    """风险检查结果数据类
-
-    Attributes:
-        passed: 是否通过风控检查
-        reasons: 拒绝原因列表
-        warnings: 警告信息列表
-        limit_up: 是否涨停
-        limit_down: 是否跌停
-        t1_restriction: 是否受T+1限制
-        insufficient_capital: 资金是否不足
-        position_limit: 是否达到持仓上限
-    """
-
-    passed: bool
-    reasons: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
-    limit_up: bool = False
-    limit_down: bool = False
-    t1_restriction: bool = False
-    insufficient_capital: bool = False
-    position_limit: bool = False
-
-    def __post_init__(self) -> None:
-        """验证数据有效性"""
-        if not isinstance(self.passed, bool):
-            raise ValueError("passed必须是布尔类型")
-        if not isinstance(self.reasons, list):
-            raise ValueError("reasons必须是列表")
-        if not isinstance(self.warnings, list):
-            raise ValueError("warnings必须是列表")
-
-    @property
-    def message(self) -> str:
-        """获取检查结果的消息描述"""
-        if self.passed:
-            if self.warnings:
-                return f"通过（有警告: {'; '.join(self.warnings)}）"
-            return "通过"
-        return "; ".join(self.reasons) if self.reasons else "未通过"
 
 
 class RiskRule(ABC):
@@ -111,4 +69,4 @@ class RiskRule(ABC):
         return f"{self.__class__.__name__}(name='{self._name}', enabled={self._enabled})"
 
 
-__all__ = ["RiskRule", "RiskCheckResult"]
+__all__ = ["RiskRule"]

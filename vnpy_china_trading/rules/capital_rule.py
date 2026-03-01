@@ -66,7 +66,6 @@ class CapitalRule(RiskRule):
             return RiskCheckResult(passed=False, reasons=["未获取到账户信息"])
 
         available = getattr(account, "available", 0)
-        balance = getattr(account, "balance", 0)
 
         reasons: list[str] = []
         warnings: list[str] = []

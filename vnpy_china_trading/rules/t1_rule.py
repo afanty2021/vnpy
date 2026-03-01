@@ -6,7 +6,7 @@ T+1 风险规则
 """
 
 import logging
-from datetime import datetime, time
+from datetime import datetime
 from typing import Any, List, Optional
 
 from vnpy_china_trading.rules.base import RiskRule, RiskCheckResult

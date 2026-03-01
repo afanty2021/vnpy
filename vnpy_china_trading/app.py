@@ -38,7 +38,9 @@ class ChinaTradingApp(BaseApp):
             main_engine: 主引擎实例
             event_engine: 事件引擎实例
         """
-        super().__init__(main_engine, event_engine)
+        # BaseApp 是抽象基类，没有定义 __init__，直接初始化实例属性
+        self.main_engine = main_engine
+        self.event_engine = event_engine
 
         self.signal_engine: Optional[SignalEngine] = None
         self.risk_engine: Optional[Any] = None
