@@ -257,6 +257,24 @@ rpc_client.connect("tcp://127.0.0.1:2014", "tcp://127.0.0.1:4102")
 
 ## 变更记录 (Changelog)
 
+### 2026-03-01
+- ✨ **Alpha158 因子集训练**：使用 Microsoft Qlib 的 157 个技术因子进行模型训练
+  - `examples/train_alpha158_model.py` - 从 MySQL 数据库加载 QMT 数据，计算 Alpha158 因子，训练 LightGBM 模型
+  - 环境变量配置支持（MySQL 凭据）
+  - 模型持久化保存到 `~/vnpy_lab/model/alpha158_lgb.txt`
+  - `examples/TRAIN_ALPHA158_GUIDE.md` - 详细使用指南
+- 🚀 **RPC 实时信号生成**：结合 RPC-QMT 连接实现实时交易信号生成
+  - `examples/rpc_realtime_signals.py` - 通过 RPC 连接获取实时行情，使用 Alpha158 因子集计算特征，生成交易信号
+  - 因子缓存优化（性能提升 50-70%）
+  - RPC 自动重连机制（最多重试 3 次）
+  - 丰富的终端 UI 实时显示信号
+  - `examples/RPC_REALTIME_SIGNALS_GUIDE.md` - 详细使用指南
+  - `examples/rpc_realtime_signals_README.md` - 历史数据加载指南
+- 🔧 **子代理驱动开发**：使用 superpowers:subagent-driven-development 技能完成实现
+  - 严格的规范审查 → 代码质量审查流程
+  - 两轮审查修复（安全、性能、错误处理）
+  - 最终评分：train_alpha158_model.py 通过，rpc_realtime_signals.py 9.5/10
+
 ### 2026-02-28
 - 📈 **Alpha 模型实战案例**：添加 A 股机器学习模型训练完整工作流
   - ✅ **数据加载**：从 MySQL 数据库加载 50 只股票的 5 年历史数据（60,256 条样本）

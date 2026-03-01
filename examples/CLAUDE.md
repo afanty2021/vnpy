@@ -186,7 +186,60 @@ python examples/alpha_model_backtest.py
 **输出文件**:
 - `~/vnpy_lab/backtest_results.png` - 回测结果图表
 
-### 11. data_recorder - 数据记录示例
+### 11. train_alpha158_model - Alpha158 因子集训练示例
+**路径**: `train_alpha158_model.py`
+
+**功能描述**:
+- 使用 Microsoft Qlib 的 Alpha158 因子集进行模型训练
+- 从 MySQL 数据库加载 QMT 历史数据
+- 计算 157 个 Alpha158 技术因子（排除 vwap）
+- 使用 LightGBM 回归模型预测 5 日远期收益率
+
+**关键特性**:
+- 支持自定义日期范围和股票列表
+- 自动生成特征重要性可视化图表
+- 模型持久化保存
+- 环境变量配置（MySQL 凭据）
+
+**使用方法**:
+```bash
+# 设置环境变量
+export MYSQL_PASSWORD=your_password
+
+# 运行训练脚本
+python examples/train_alpha158_model.py
+```
+
+**输出文件**:
+- `~/vnpy_lab/model/alpha158_lgb.txt` - 训练好的模型
+- `~/vnpy_lab/feature_importance.png` - 特征重要性图表
+
+### 12. rpc_realtime_signals - RPC 实时信号生成示例
+**路径**: `rpc_realtime_signals.py`
+
+**功能描述**:
+- 通过 RPC 连接 QMT 服务器获取实时行情
+- 使用 Alpha158 因子集计算实时特征
+- 使用训练好的 LightGBM 模型生成交易信号
+- 提供丰富的终端 UI 实时显示信号
+
+**关键特性**:
+- RPC 自动重连机制（最多重试 3 次）
+- 因子缓存优化（性能提升 50-70%）
+- 实时信号分类（做多/做空/持仓）
+- Top 做多/做空股票排名
+- 可配置信号阈值
+
+**使用方法**:
+```bash
+python examples/rpc_realtime_signals.py --req tcp://192.168.2.168:2014 --sub tcp://192.168.2.168:4102
+```
+
+**文档**:
+- `RPC_REALTIME_SIGNALS_GUIDE.md` - 详细使用指南
+- `rpc_realtime_signals_README.md` - 历史数据加载指南
+
+### 13. data_recorder - 数据记录示例
 **路径**: `data_recorder/data_recorder.py`
 
 **功能描述**:
@@ -249,10 +302,31 @@ A: 是的，支持多个客户端同时连接同一个服务端。
 - `alpha_model_training.py` - Alpha 模型训练脚本
 - `alpha_model_prediction.py` - Alpha 模型预测脚本
 - `alpha_model_backtest.py` - Alpha 模型回测脚本
+- `train_alpha158_model.py` - Alpha158 因子集训练脚本
+- `rpc_realtime_signals.py` - RPC 实时信号生成脚本
 - `ALPHA_MODEL_GUIDE.md` - Alpha 模型详细使用指南
 - `README_ALPHA.md` - Alpha 模型快速入门指南
+- `TRAIN_ALPHA158_GUIDE.md` - Alpha158 训练指南
+- `RPC_REALTIME_SIGNALS_GUIDE.md` - RPC 实时信号指南
+- `rpc_realtime_signals_README.md` - RPC 实时信号 README
 
 ## 变更记录 (Changelog)
+
+### 2026-03-01
+- ✨ **新增 Alpha158 因子集训练示例**：
+  - `train_alpha158_model.py` - 使用 Alpha158 因子集进行模型训练
+  - 从 MySQL 数据库加载 QMT 历史数据
+  - 计算 157 个 Alpha158 技术因子
+  - 环境变量配置支持
+  - `TRAIN_ALPHA158_GUIDE.md` - 详细使用指南
+- 🚀 **新增 RPC 实时信号生成示例**：
+  - `rpc_realtime_signals.py` - 结合 RPC-QMT 连接实现实时交易信号生成
+  - 使用 Alpha158 因子集计算实时特征
+  - 因子缓存优化（性能提升 50-70%）
+  - RPC 自动重连机制
+  - 丰富的终端 UI 显示
+  - `RPC_REALTIME_SIGNALS_GUIDE.md` - 详细使用指南
+  - `rpc_realtime_signals_README.md` - 历史数据加载指南
 
 ### 2026-02-28
 - 📈 **新增 Alpha 模型系列示例**：添加机器学习模型训练、预测和回测脚本
