@@ -2,7 +2,7 @@
 
 # Examples - 示例应用集合
 
-> 更新时间：2026-01-18
+> 更新时间：2026-02-28
 
 ## 模块职责
 
@@ -109,7 +109,84 @@ cd examples/notebook_trading
 jupyter notebook demo_notebook.ipynb
 ```
 
-### 7. data_recorder - 数据记录示例
+### 7. alpha_research - Alpha 量化研究示例
+**路径**: `alpha_research/`
+
+**功能描述**:
+- Alpha 因子研究和探索
+- 包含多个研究脚本和策略示例
+- 适合学习 Alpha 因子开发流程
+
+### 8. alpha_model_training - Alpha 模型训练示例
+**路径**: `alpha_model_training.py`
+
+**功能描述**:
+- 从 MySQL 数据库加载历史行情数据
+- 使用 vnpy.alpha 模块训练 LightGBM 模型
+- 基于 Alpha158 因子集（158 个技术指标）
+- 适合量化研究和机器学习策略开发
+
+**关键特性**:
+- 支持多股票批量数据加载
+- 自动计算 158 个 Alpha 因子
+- 训练集/验证集/测试集自动划分
+- 模型自动保存和特征重要性展示
+
+**使用方法**:
+```bash
+python examples/alpha_model_training.py
+```
+
+**输出文件**:
+- `~/vnpy_lab/model/a_stock_lgb.txt` - 训练好的 LightGBM 模型
+- `~/vnpy_lab/dataset/a_stock_dataset.pkl` - 处理后的数据集
+
+### 9. alpha_model_prediction - Alpha 模型预测示例
+**路径**: `alpha_model_prediction.py`
+
+**功能描述**:
+- 使用已训练的模型生成当日交易信号
+- 根据预测收益率生成做多/做空/持仓信号
+- 提供信号统计分析和可视化
+
+**关键特性**:
+- 支持自定义交易信号阈值
+- 自动生成信号分析图表
+- 按股票和日期分组统计
+- Top 做多/做空股票排名
+
+**使用方法**:
+```bash
+python examples/alpha_model_prediction.py
+```
+
+**输出文件**:
+- `~/vnpy_lab/signals/signals_YYYY-MM-DD.csv` - 每日交易信号
+- `~/vnpy_lab/signal_analysis.png` - 信号分析图表
+
+### 10. alpha_model_backtest - Alpha 模型回测示例
+**路径**: `alpha_model_backtest.py`
+
+**功能描述**:
+- 使用历史数据验证模型交易效果
+- 包含完整的回测引擎（手续费、滑点、仓位管理）
+- 提供详细的绩效指标和可视化
+
+**关键特性**:
+- 支持自定义回测周期
+- 包含手续费和滑点成本
+- 最大持仓数量控制
+- 年化收益率、夏普比率、最大回撤等指标
+
+**使用方法**:
+```bash
+python examples/alpha_model_backtest.py
+```
+
+**输出文件**:
+- `~/vnpy_lab/backtest_results.png` - 回测结果图表
+
+### 11. data_recorder - 数据记录示例
 **路径**: `data_recorder/data_recorder.py`
 
 **功能描述**:
@@ -168,8 +245,27 @@ A: 是的，支持多个客户端同时连接同一个服务端。
 - `simple_rpc/test_client.py` - RPC测试客户端
 - `notebook_trading/demo_notebook.ipynb` - Jupyter笔记本交易示例
 - `data_recorder/data_recorder.py` - 数据记录程序
+- `alpha_research/` - Alpha 因子研究示例目录
+- `alpha_model_training.py` - Alpha 模型训练脚本
+- `alpha_model_prediction.py` - Alpha 模型预测脚本
+- `alpha_model_backtest.py` - Alpha 模型回测脚本
+- `ALPHA_MODEL_GUIDE.md` - Alpha 模型详细使用指南
+- `README_ALPHA.md` - Alpha 模型快速入门指南
 
 ## 变更记录 (Changelog)
+
+### 2026-02-28
+- 📈 **新增 Alpha 模型系列示例**：添加机器学习模型训练、预测和回测脚本
+  - `alpha_model_training.py` - 模型训练脚本
+  - `alpha_model_prediction.py` - 信号生成脚本
+  - `alpha_model_backtest.py` - 历史回测脚本
+  - `ALPHA_MODEL_GUIDE.md` - 详细使用指南
+  - `README_ALPHA.md` - 快速入门指南
+- 🔧 **Alpha 模型实战案例**：
+  - 基于 Alpha158 因子集（157 个特征）
+  - LightGBM 模型（999 棵树，验证集 Loss: 7.68e-07）
+  - 50 只 A 股，60,256 条样本数据
+  - 模型保存至 `~/vnpy_lab/model/a_stock_lgb.txt`
 
 ### 2026-01-18
 - 📈 **新增notebook_trading示例**：添加Jupyter笔记本交易示例说明

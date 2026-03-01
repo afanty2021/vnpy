@@ -1,6 +1,6 @@
 # VeighNa量化交易框架
 
-> 更新时间：2026-02-23
+> 更新时间：2026-02-28
 > 版本：4.3.0
 > AI驱动的一站数量化交易平台
 
@@ -256,6 +256,23 @@ rpc_client.connect("tcp://127.0.0.1:2014", "tcp://127.0.0.1:4102")
 - **国际市场**：Interactive Brokers (IB)、TAP
 
 ## 变更记录 (Changelog)
+
+### 2026-02-28
+- 📈 **Alpha 模型实战案例**：添加 A 股机器学习模型训练完整工作流
+  - ✅ **数据加载**：从 MySQL 数据库加载 50 只股票的 5 年历史数据（60,256 条样本）
+  - ✅ **特征工程**：使用 Alpha158 因子集（157 个特征）
+  - ✅ **模型训练**：LightGBM 回归模型（999 棵树，验证集 Loss: 7.68e-07）
+  - ✅ **信号生成**：根据预测收益率生成做多/做空/持仓信号
+  - ✅ **历史回测**：包含手续费、滑点、仓位管理的完整回测引擎
+- 📁 **新增示例脚本**：
+  - `examples/alpha_model_training.py` - 模型训练脚本
+  - `examples/alpha_model_prediction.py` - 信号生成脚本
+  - `examples/alpha_model_backtest.py` - 历史回测脚本
+  - `examples/ALPHA_MODEL_GUIDE.md` - 详细使用指南
+  - `examples/README_ALPHA.md` - 快速入门指南
+- 💾 **模型保存位置**：
+  - 模型文件：`~/vnpy_lab/model/a_stock_lgb.txt` (~3MB)
+  - 数据集：`~/vnpy_lab/dataset/a_stock_dataset.pkl` (~152MB)
 
 ### 2026-02-27
 - 🔧 **vnpy_qmt 补丁**（外部包修复）：

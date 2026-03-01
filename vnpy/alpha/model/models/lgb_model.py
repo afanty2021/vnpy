@@ -1,4 +1,5 @@
 from typing import cast
+from pathlib import Path
 
 import numpy as np
 import polars as pl
@@ -252,3 +253,41 @@ class LgbModel(AlphaModel):
         """
         self._last_model = state.get("last_model")
         self.model = state.get("model")
+
+    def save_model(self, path: Path | str) -> None:
+        """
+        Save the trained model to a file
+
+        Parameters
+        ----------
+        path : Path | str
+            The path to save the model
+
+        Returns
+        -------
+        None
+        """
+        if self.model is None:
+            raise ValueError("model is not fitted yet!")
+
+        path = Path(path) if isinstance(path, str) else path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.model.save_model(str(path))
+        print(f"模型已保存到：{path}")
+
+    def load_model(self, path: Path | str) -> None:
+        """
+        Load a trained model from a file
+
+        Parameters
+        ----------
+        path : Path | str
+            The path to load the model from
+
+        Returns
+        -------
+        None
+        """
+        path = Path(path) if isinstance(path, str) else path
+        self.model = lgb.Booster(model_file=str(path))
+        print(f"模型已从 {path} 加载")

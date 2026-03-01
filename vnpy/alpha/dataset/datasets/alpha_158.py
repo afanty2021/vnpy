@@ -33,7 +33,7 @@ class Alpha158(AlphaDataset):
         self.add_feature("ksft_2", "(close * 2 - high - low) / (high - low + 1e-12)")
 
         # Price change features
-        for field in ["open", "high", "low", "vwap"]:
+        for field in ["open", "high", "low"]:
             self.add_feature(f"{field}_0", f"{field} / close")
 
         # Time series features
@@ -126,5 +126,6 @@ class Alpha158(AlphaDataset):
         for w in windows:
             self.add_feature(f"vsumd_{w}", f"(ts_sum(ts_greater(volume - ts_delay(volume, 1), 0), {w}) - ts_sum(ts_greater(ts_delay(volume, 1) - volume, 0), {w})) / (ts_sum(ts_abs(volume - ts_delay(volume, 1)), {w}) + 1e-12)")
 
-        # Set label
-        self.set_label("ts_delay(close, -3) / ts_delay(close, -1) - 1")
+        # Set label (to be overridden by set_label method)
+        # Default: 5-day forward return
+        self.set_label("ts_delay(close, 5) / close - 1")
