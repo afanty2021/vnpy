@@ -20,6 +20,7 @@ Alpha158 特征工程训练脚本
 
 import sys
 import argparse
+import os
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Any
@@ -38,13 +39,13 @@ from vnpy.alpha.model.models.lgb_model import LgbModel
 # 配置部分
 # ============================================================
 
-# MySQL 配置
+# MySQL 配置（从环境变量读取，提供默认值）
 MYSQL_CONFIG = {
-    "host": "localhost",
-    "port": 3306,
-    "user": "vnpy",
-    "password": "Vnpy2024!",
-    "database": "vnpy_china",
+    "host": os.getenv("MYSQL_HOST", "localhost"),
+    "port": int(os.getenv("MYSQL_PORT", "3306")),
+    "user": os.getenv("MYSQL_USER", "vnpy"),
+    "password": os.getenv("MYSQL_PASSWORD", ""),
+    "database": os.getenv("MYSQL_DATABASE", "vnpy_china"),
     "charset": "utf8mb4",
 }
 
@@ -84,68 +85,71 @@ def load_data_from_mysql(
     print(f"  日期范围: {start_date} ~ {end_date}")
 
     conn = pymysql.connect(**MYSQL_CONFIG)
-    cursor = conn.cursor()
 
-    # 构建查询
-    placeholders = ','.join(['%s'] * len(symbols))
-    query = f"""
-        SELECT
-            `datetime`,
-            symbol,
-            `exchange`,
-            open_price,
-            high_price,
-            low_price,
-            close_price,
-            volume,
-            turnover
-        FROM db_bar_data
-        WHERE `datetime` >= %s
-          AND `datetime` <= %s
-          AND symbol IN ({placeholders})
-          AND `interval` = 'd'
-        ORDER BY symbol, `datetime`
-    """
+    try:
+        # 使用上下文管理器确保游标关闭
+        with conn.cursor() as cursor:
+            # 构建查询
+            placeholders = ','.join(['%s'] * len(symbols))
+            query = f"""
+                SELECT
+                    `datetime`,
+                    symbol,
+                    `exchange`,
+                    open_price,
+                    high_price,
+                    low_price,
+                    close_price,
+                    volume,
+                    turnover
+                FROM db_bar_data
+                WHERE `datetime` >= %s
+                  AND `datetime` <= %s
+                  AND symbol IN ({placeholders})
+                  AND `interval` = 'd'
+                ORDER BY symbol, `datetime`
+            """
 
-    cursor.execute(query, [start_date, end_date] + symbols)
+            cursor.execute(query, [start_date, end_date] + symbols)
 
-    # 转换为 DataFrame
-    rows = cursor.fetchall()
-    cursor.close()
-    conn.close()
+            # 转换为 DataFrame
+            rows = cursor.fetchall()
 
-    if not rows:
-        raise ValueError("没有查询到数据，请检查日期范围和股票代码")
+        if not rows:
+            raise ValueError("没有查询到数据，请检查日期范围和股票代码")
 
-    # 创建 DataFrame
-    df = pl.DataFrame(
-        rows,
-        schema=[
-            "datetime", "symbol", "exchange",
-            "open", "high", "low", "close",
-            "volume", "turnover"
-        ],
-        orient="row"
-    )
+        # 创建 DataFrame
+        df = pl.DataFrame(
+            rows,
+            schema=[
+                "datetime", "symbol", "exchange",
+                "open", "high", "low", "close",
+                "volume", "turnover"
+            ],
+            orient="row"
+        )
 
-    # 转换 datetime 列
-    df = df.with_columns([
-        pl.col("datetime").str.to_datetime()
-    ])
+        # 转换 datetime 列
+        df = df.with_columns([
+            pl.col("datetime").str.to_datetime()
+        ])
 
-    # 创建 vt_symbol 列 (symbol.exchange)
-    df = df.with_columns([
-        (pl.col("symbol") + "." + pl.col("exchange")).alias("vt_symbol")
-    ])
+        # 创建 vt_symbol 列 (symbol.exchange)
+        df = df.with_columns([
+            (pl.col("symbol") + "." + pl.col("exchange")).alias("vt_symbol")
+        ])
 
-    # 删除 exchange 列（已合并到 vt_symbol）
-    df = df.drop("exchange")
+        # 删除 exchange 列（已合并到 vt_symbol）
+        df = df.drop("exchange")
 
-    print(f"  ✓ 加载了 {len(df)} 条记录")
-    print(f"  ✓ 日期范围: {df['datetime'].min()} ~ {df['datetime'].max()}")
-    print(f"  ✓ 股票数量: {df['symbol'].n_unique()}")
+        print(f"  ✓ 加载了 {len(df)} 条记录")
+        print(f"  ✓ 日期范围: {df['datetime'].min()} ~ {df['datetime'].max()}")
+        print(f"  ✓ 股票数量: {df['symbol'].n_unique()}")
 
-    return df
+        return df
+
+    finally:
+        conn.close()
 
 
 # ============================================================
@@ -158,7 +162,7 @@ def train_alpha158_model(
     valid_period: tuple[str, str],
     test_period: tuple[str, str],
     num_boost_round: int = 1000
-) -> LgbModel:
+) -> tuple[LgbModel, Alpha158]:
     """
     训练 Alpha158 模型
 
@@ -177,8 +181,8 @@ def train_alpha158_model(
 
     Returns
     -------
-    LgbModel
-        训练好的模型
+    tuple[LgbModel, Alpha158]
+        训练好的模型和数据集
     """
     print("\n正在准备 Alpha158 数据集...")
 
@@ -214,7 +218,7 @@ def train_alpha158_model(
     print(f"\n正在训练模型（最多 {num_boost_round} 轮）...")
     model.fit(dataset)
 
-    return model
+    return model, dataset
 
 
 # ============================================================
@@ -272,32 +276,37 @@ def generate_feature_importance_plot(model: LgbModel) -> None:
     model : LgbModel
         训练好的模型
     """
-    if model.model is None:
-        print("  警告: 模型未训练，无法生成特征重要性图表")
-        return
+    try:
+        if model.model is None:
+            print("  警告: 模型未训练，无法生成特征重要性图表")
+            return
 
-    # 获取特征重要性
-    importance = model.model.feature_importance(importance_type='gain')
-    feature_names = model.model.feature_name()
+        # 获取特征重要性
+        importance = model.model.feature_importance(importance_type='gain')
+        feature_names = model.model.feature_name()
 
-    # 排序
-    indices = np.argsort(importance)[::-1]
+        # 排序
+        indices = np.argsort(importance)[::-1]
 
-    # 只显示前 30 个特征
-    top_n = 30
-    indices = indices[:top_n]
+        # 只显示前 30 个特征
+        top_n = 30
+        indices = indices[:top_n]
 
-    # 创建图表
-    plt.figure(figsize=(12, 10))
-    plt.title('Alpha158 特征重要性 (Top 30)')
-    plt.barh(range(top_n), importance[indices][::-1], align='center')
-    plt.yticks(range(top_n), [feature_names[i] for i in indices][::-1])
-    plt.xlabel('重要性 (gain)')
-    plt.tight_layout()
+        # 创建图表
+        plt.figure(figsize=(12, 10))
+        plt.title('Alpha158 特征重要性 (Top 30)')
+        plt.barh(range(top_n), importance[indices][::-1], align='center')
+        plt.yticks(range(top_n), [feature_names[i] for i in indices][::-1])
+        plt.xlabel('重要性 (gain)')
+        plt.tight_layout()
 
-    # 保存图表
-    plt.savefig(FEATURE_IMPORTANCE_PATH, dpi=150, bbox_inches='tight')
-    plt.close()
+        # 保存图表
+        plt.savefig(FEATURE_IMPORTANCE_PATH, dpi=150, bbox_inches='tight')
+        plt.close()
+
+    except Exception as e:
+        print(f"  警告: 生成特征重要性图表失败 - {e}")
+        plt.close()  # 确保图表资源被释放
 
 
 # ============================================================
@@ -379,8 +388,8 @@ def main():
         valid_period = (train_end_dt.strftime("%Y-%m-%d"), valid_end_dt.strftime("%Y-%m-%d"))
         test_period = (valid_end_dt.strftime("%Y-%m-%d"), args.end_date)
 
-        # 3. 训练模型
-        model = train_alpha158_model(
+        # 3. 训练模型（返回 model 和 dataset）
+        model, dataset = train_alpha158_model(
             df=df,
             train_period=train_period,
             valid_period=valid_period,
@@ -388,16 +397,7 @@ def main():
             num_boost_round=args.num_boost_round
         )
 
-        # 4. 评估并保存
-        # 需要重新创建 dataset 用于评估
-        dataset = Alpha158(
-            df=df,
-            train_period=train_period,
-            valid_period=valid_period,
-            test_period=test_period
-        )
-        dataset.prepare_data()
-
+        # 4. 评估并保存（使用返回的 dataset，避免重复创建）
         evaluate_and_save_model(model, dataset)
 
         print("\n" + "=" * 70)
