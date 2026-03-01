@@ -118,7 +118,7 @@ def load_data_from_mysql(
         if not rows:
             raise ValueError("没有查询到数据，请检查日期范围和股票代码")
 
-        # 创建 DataFrame
+        # 创建 DataFrame - MySQL返回datetime和Decimal类型
         df = pl.DataFrame(
             rows,
             schema=[
@@ -129,9 +129,17 @@ def load_data_from_mysql(
             orient="row"
         )
 
-        # 转换 datetime 列
+        # 转换数值列为Float64类型，解决Decimal不支持rolling_map的问题
+        # 注意：datetime列已经是datetime类型，不需要转换
+        numeric_cols = ["open", "high", "low", "close", "volume", "turnover"]
         df = df.with_columns([
-            pl.col("datetime").str.to_datetime()
+            pl.col(c).cast(pl.Float64).alias(c) for c in numeric_cols
+        ])
+
+        # 计算 vwap（成交量加权均价），Alpha158因子需要此字段
+        # vwap = (high + low + close) / 3 * volume（近似计算）
+        df = df.with_columns([
+            ((pl.col("high") + pl.col("low") + pl.col("close")) / 3 * pl.col("volume")).alias("vwap")
         ])
 
         # 创建 vt_symbol 列 (symbol.exchange)
@@ -258,7 +266,9 @@ def evaluate_and_save_model(
     # 保存模型
     print(f"\n正在保存模型...")
     MODEL_PATH.mkdir(parents=True, exist_ok=True)
-    model.save_model(MODEL_PATH / "alpha158_lgb.txt")
+
+    # 直接使用lightgbm原生API保存模型
+    model.model.save_model(str(MODEL_PATH / "alpha158_lgb.txt"))
     print(f"  ✓ 模型已保存到: {MODEL_PATH / 'alpha158_lgb.txt'}")
 
     # 生成特征重要性图表
