@@ -5,6 +5,7 @@
 提供信号管理、状态跟踪和回调机制。
 """
 
+import logging
 import threading
 import uuid
 from datetime import datetime
@@ -179,12 +180,18 @@ class SignalEngine:
 
         Returns:
             bool: 确认是否成功
+
+        Note:
+            只有以下情况可以确认：
+            - 状态为 RISK_PASSED（风控通过）
+            - 状态为 PENDING（待处理）
+            - 来源为 MANUAL（人工信号）
         """
         signal = self.get_signal(signal_id)
         if not signal:
             return False
 
-        # 只有风控通过或人工信号才能确认
+        # 检查是否满足确认条件
         if signal.status not in (SignalStatus.RISK_PASSED, SignalStatus.PENDING):
             if signal.source != SignalSource.MANUAL:
                 return False
@@ -208,8 +215,9 @@ class SignalEngine:
         Args:
             callback: 回调函数，接收TradingSignal参数
         """
-        if callback not in self.callbacks:
-            self.callbacks.append(callback)
+        with self.lock:
+            if callback not in self.callbacks:
+                self.callbacks.append(callback)
 
     def unregister_callback(self, callback: Callable[[TradingSignal], None]) -> None:
         """注销信号回调函数
@@ -217,25 +225,30 @@ class SignalEngine:
         Args:
             callback: 回调函数
         """
-        if callback in self.callbacks:
-            self.callbacks.remove(callback)
+        with self.lock:
+            if callback in self.callbacks:
+                self.callbacks.remove(callback)
 
     def clear_history(self, before_status: Optional[SignalStatus] = None) -> int:
         """清理历史信号
 
         Args:
-            before_status: 只清理指定状态之前的信号，默认清理已执行和已取消的
+            before_status: 已弃用参数，保留向后兼容。清理逻辑现在基于显式状态列表。
 
         Returns:
             int: 清理的信号数量
         """
-        if before_status is None:
-            before_status = SignalStatus.EXECUTED
+        # 需要清理的历史状态列表（显式定义，不依赖枚举值顺序）
+        historical_statuses = {
+            SignalStatus.EXECUTED,      # 已执行（已完成交易）
+            SignalStatus.CANCELLED,      # 已取消
+            SignalStatus.RISK_REJECTED, # 风控拒绝
+        }
 
         with self.lock:
             signal_ids = [
                 sid for sid, s in self.signals.items()
-                if s.status.value <= before_status.value
+                if s.status in historical_statuses
             ]
             for sid in signal_ids:
                 del self.signals[sid]
@@ -265,12 +278,16 @@ class SignalEngine:
         Args:
             signal: 发生变化的信号对象
         """
-        for callback in self.callbacks:
+        # 使用锁保护callbacks列表的迭代操作
+        with self.lock:
+            callbacks_copy = list(self.callbacks)
+
+        for callback in callbacks_copy:
             try:
                 callback(signal)
             except Exception as e:
                 # 记录异常但不影响其他回调
-                print(f"信号回调执行异常: {e}")
+                logging.warning(f"信号回调执行异常: {e}")
 
 
 __all__ = ["SignalEngine"]
