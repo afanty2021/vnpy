@@ -17,10 +17,12 @@ RPC实时信号生成脚本
 import sys
 import time
 import signal
+import logging
 from pathlib import Path
 from datetime import datetime, timedelta
 from collections import deque, defaultdict
 from typing import Dict, List, Optional, Tuple
+from functools import lru_cache
 
 import polars as pl
 import numpy as np
@@ -30,6 +32,13 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.live import Live
 from rich.text import Text
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # 添加项目路径
 project_root = Path(__file__).parent.parent
@@ -51,6 +60,7 @@ RPC_CONFIG = {
     "req_address": "tcp://192.168.2.168:2014",
     "sub_address": "tcp://192.168.2.168:4102",
     "reconnect_interval": 5,  # 重连间隔（秒）
+    "max_reconnect_attempts": 10,  # 最大重连次数（新增）
 }
 
 # 模型配置
@@ -83,7 +93,7 @@ class RealtimeSignalManager:
     功能：
     1. 管理RPC连接和数据订阅
     2. 维护历史数据窗口
-    3. 计算Alpha158因子
+    3. 计算Alpha158因子（使用缓存优化）
     4. 生成交易信号
     5. 提供信号查询接口
     """
@@ -102,6 +112,7 @@ class RealtimeSignalManager:
         self.sub_address = rpc_sub_address
         self.rpc_client: Optional[RpcClient] = None
         self.connected = False
+        self.reconnect_attempts = 0  # 重连尝试次数计数器
 
         # 模型
         self.model_path = model_path
@@ -124,6 +135,10 @@ class RealtimeSignalManager:
         # Alpha158数据集（用于因子计算）
         self.dataset: Optional[Alpha158] = None
 
+        # 因子缓存：{vt_symbol: {"df": pl.DataFrame, "last_update": datetime}}
+        # 使用缓存避免重复计算因子，提升性能
+        self.factor_cache: Dict[str, dict] = {}
+
         # 统计信息
         self.stats = {
             "last_update": None,
@@ -138,9 +153,13 @@ class RealtimeSignalManager:
         try:
             self.model.load_model(self.model_path)
             self.model_loaded = True
+            logger.info(f"模型加载成功: {self.model_path}")
             return True
+        except FileNotFoundError as e:
+            logger.error(f"模型文件不存在: {self.model_path}, 错误: {e}")
+            return False
         except Exception as e:
-            print(f"加载模型失败: {e}")
+            logger.error(f"加载模型失败: {e}")
             return False
 
     def connect(self) -> bool:
@@ -166,18 +185,31 @@ class RealtimeSignalManager:
             self.rpc_client.subscribe_topic("tick")
 
             self.connected = True
+            self.reconnect_attempts = 0  # 连接成功后重置重连计数器
+            logger.info(f"RPC连接成功: {self.req_address}")
             return True
 
+        except ConnectionError as e:
+            logger.error(f"RPC连接失败（网络错误）: {e}")
+            return False
+        except TimeoutError as e:
+            logger.error(f"RPC连接失败（超时）: {e}")
+            return False
         except Exception as e:
-            print(f"连接RPC失败: {e}")
+            logger.error(f"RPC连接失败（未知错误）: {e}")
             return False
 
     def disconnect(self) -> None:
         """断开RPC连接"""
         if self.rpc_client:
-            self.rpc_client.stop()
-            self.rpc_client.join()
-            self.connected = False
+            try:
+                self.rpc_client.stop()
+                self.rpc_client.join()
+                self.connected = False
+                logger.info("RPC连接已断开")
+            except Exception as e:
+                logger.error(f"断开RPC连接时出错: {e}")
+                self.connected = False
 
     def on_tick(self, tick: TickData) -> None:
         """
@@ -272,8 +304,9 @@ class RealtimeSignalManager:
             return new_bar
 
     def _generate_signal(self, vt_symbol: str) -> None:
-        """生成交易信号"""
+        """生成交易信号（使用缓存优化因子计算）"""
         if not self.model_loaded:
+            logger.warning(f"模型未加载，跳过信号生成: {vt_symbol}")
             return
 
         window = self.data_windows[vt_symbol]
@@ -288,7 +321,22 @@ class RealtimeSignalManager:
             # 添加vt_symbol列
             df = df.with_columns(pl.lit(vt_symbol).alias("vt_symbol"))
 
-            # 创建数据集并计算因子
+            # 获取当前K线的时间戳
+            current_datetime = df["datetime"][-1]
+
+            # 检查缓存：只有当数据窗口更新时才重新计算因子
+            if vt_symbol in self.factor_cache:
+                cached_info = self.factor_cache[vt_symbol]
+                # 如果缓存的数据是最新的，直接使用缓存的预测结果
+                if cached_info["last_update"] == current_datetime:
+                    logger.debug(f"使用缓存的因子数据: {vt_symbol}")
+                    # 使用缓存的数据集进行预测
+                    predictions = self.model.predict(cached_info["dataset"], Segment.TEST)
+                    self._process_prediction(vt_symbol, predictions)
+                    return
+
+            # 创建数据集并计算因子（未命中缓存）
+            logger.debug(f"计算 {vt_symbol} 的Alpha158因子...")
             dataset = Alpha158(
                 df=df,
                 train_period=("2020-01-01", "2024-12-31"),
@@ -298,68 +346,126 @@ class RealtimeSignalManager:
             dataset.prepare_data()
             dataset.process_data()
 
+            # 缓存处理后的数据集（包含计算好的因子）
+            self.factor_cache[vt_symbol] = {
+                "dataset": dataset,
+                "last_update": current_datetime,
+            }
+
             # 进行预测
             predictions = self.model.predict(dataset, Segment.TEST)
+            self._process_prediction(vt_symbol, predictions)
 
-            if len(predictions) > 0:
-                pred = predictions[-1]  # 取最新预测值
-
-                # 生成信号
-                if pred > self.long_threshold:
-                    signal = 1  # 做多
-                    self.stats["long_signals"] += 1
-                elif pred < self.short_threshold:
-                    signal = -1  # 做空
-                    self.stats["short_signals"] += 1
-                else:
-                    signal = 0  # 持仓
-                    self.stats["hold_signals"] += 1
-
-                # 更新信号
-                self.signals[vt_symbol] = {
-                    "prediction": float(pred),
-                    "signal": signal,
-                    "timestamp": datetime.now(),
-                }
-
-                self.stats["total_predictions"] += 1
-                self.stats["last_update"] = datetime.now()
-
+        except pl.exceptions.ComputeError as e:
+            logger.error(f"计算因子时出错（数据不足） {vt_symbol}: {e}")
+        except ValueError as e:
+            logger.error(f"生成信号失败（数据格式错误） {vt_symbol}: {e}")
         except Exception as e:
-            print(f"生成信号失败 {vt_symbol}: {e}")
+            logger.error(f"生成信号失败（未知错误） {vt_symbol}: {e}", exc_info=True)
+
+    def _process_prediction(self, vt_symbol: str, predictions: np.ndarray) -> None:
+        """处理预测结果并生成信号"""
+        if len(predictions) > 0:
+            pred = predictions[-1]  # 取最新预测值
+
+            # 生成信号
+            if pred > self.long_threshold:
+                signal = 1  # 做多
+                self.stats["long_signals"] += 1
+            elif pred < self.short_threshold:
+                signal = -1  # 做空
+                self.stats["short_signals"] += 1
+            else:
+                signal = 0  # 持仓
+                self.stats["hold_signals"] += 1
+
+            # 更新信号
+            self.signals[vt_symbol] = {
+                "prediction": float(pred),
+                "signal": signal,
+                "timestamp": datetime.now(),
+            }
+
+            self.stats["total_predictions"] += 1
+            self.stats["last_update"] = datetime.now()
+
+            logger.debug(f"{vt_symbol} 信号生成完成: 预测={pred:.4f}, 信号={signal}")
 
     def load_initial_data(self, symbols: List[Tuple[str, str]]) -> None:
         """
         加载初始历史数据
 
+        TODO: 此方法当前为空实现，实际使用时需要实现以下功能之一：
+        1. 从RPC服务器查询历史数据（需要RPC服务器支持）
+        2. 从本地CSV文件加载历史数据（推荐用于开发测试）
+        3. 从数据库加载历史数据（如MySQL、PostgreSQL）
+
+        推荐方案：
+        - 开发环境：从本地CSV文件加载
+        - 生产环境：通过RPC查询或从数据库加载
+
         Parameters
         ----------
         symbols : List[Tuple[str, str]]
             股票列表 [(symbol, exchange), ...]
+
+        示例代码（从本地CSV加载）:
+        ---------------------------
+        for symbol, exchange_str in symbols:
+            vt_symbol = f"{symbol}.{exchange_str}"
+            csv_path = f"data/{vt_symbol}.csv"
+
+            if Path(csv_path).exists():
+                df = pl.read_csv(csv_path, try_parse_dates=True)
+                for row in df.iter_rows(named=True):
+                    self.data_windows[vt_symbol].append({
+                        "datetime": row["datetime"],
+                        "open": row["open"],
+                        "high": row["high"],
+                        "low": row["low"],
+                        "close": row["close"],
+                        "volume": row["volume"],
+                        "turnover": row.get("turnover", 0),
+                    })
+                logger.info(f"已加载 {vt_symbol} 的历史数据，共 {len(df)} 条")
         """
         if not self.rpc_client or not self.connected:
-            print("RPC未连接，无法加载历史数据")
+            logger.warning("RPC未连接，无法加载历史数据")
             return
 
-        print("开始加载初始历史数据...")
+        logger.info("开始加载初始历史数据...")
 
         for symbol, exchange_str in symbols:
             try:
                 vt_symbol = f"{symbol}.{exchange_str}"
 
-                # 调用RPC接口查询历史数据
-                # 这里需要根据实际的RPC接口实现
-                # 假设有一个query_history方法
-                # history = self.rpc_client.query_history(symbol, exchange_str, ...)
+                # TODO: 实现历史数据加载逻辑
+                # 当前为空实现，系统需要等待60天积累数据才能生成信号
+                #
+                # 推荐实现方案：
+                # 1. 从本地CSV文件加载（最简单）
+                #    df = pl.read_csv(f"data/{vt_symbol}.csv")
+                #    for row in df.iter_rows(named=True):
+                #        self.data_windows[vt_symbol].append(...)
+                #
+                # 2. 从数据库加载（推荐）
+                #    df = pl.read_database(f"SELECT * FROM {vt_symbol}...", conn)
+                #
+                # 3. 通过RPC查询（需要RPC服务器支持）
+                #    history = self.rpc_client.query_history(symbol, exchange_str)
 
-                # 暂时跳过，实际使用时需要实现
+                logger.debug(f"跳过 {vt_symbol} 的历史数据加载（待实现）")
                 pass
 
+            except FileNotFoundError as e:
+                logger.warning(f"历史数据文件不存在 {vt_symbol}: {e}")
+            except pl.exceptions.ComputeError as e:
+                logger.error(f"解析历史数据失败 {vt_symbol}: {e}")
             except Exception as e:
-                print(f"加载历史数据失败 {vt_symbol}: {e}")
+                logger.error(f"加载历史数据失败 {vt_symbol}: {e}", exc_info=True)
                 continue
 
-        print("初始数据加载完成")
+        logger.info("初始数据加载完成")
 
     def get_top_signals(self, n: int = 10) -> Tuple[List[dict], List[dict]]:
         """
@@ -618,20 +724,41 @@ def main():
 
                 # 检查连接状态
                 if not manager.connected:
-                    print("连接断开，尝试重连...")
-                    time.sleep(RPC_CONFIG["reconnect_interval"])
-                    manager.connect()
+                    max_attempts = RPC_CONFIG.get("max_reconnect_attempts", 10)
+
+                    if manager.reconnect_attempts < max_attempts:
+                        manager.reconnect_attempts += 1
+                        logger.info(
+                            f"连接断开，尝试重连 ({manager.reconnect_attempts}/{max_attempts})..."
+                        )
+                        time.sleep(RPC_CONFIG["reconnect_interval"])
+
+                        if manager.connect():
+                            logger.info("重连成功")
+                        else:
+                            if manager.reconnect_attempts >= max_attempts:
+                                logger.error(
+                                    f"重连失败，已达到最大重试次数 ({max_attempts})，程序退出"
+                                )
+                                running = False
+                                break
+                    else:
+                        logger.error("已达到最大重连次数，程序退出")
+                        running = False
+                        break
 
                 # 短暂休眠
                 time.sleep(0.5)
 
     except KeyboardInterrupt:
-        pass
+        logger.info("用户中断程序")
+    except Exception as e:
+        logger.error(f"程序异常退出: {e}", exc_info=True)
     finally:
         # 清理资源
-        print("\n正在断开连接...")
+        logger.info("正在断开连接...")
         manager.disconnect()
-        print("程序已退出")
+        logger.info("程序已退出")
 
 
 if __name__ == "__main__":
