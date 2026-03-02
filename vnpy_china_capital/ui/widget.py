@@ -218,9 +218,28 @@ class ChinaCapitalWidget(QtWidgets.QWidget):
 
     def refresh_t1_data(self) -> None:
         """刷新T+1持仓流水"""
+        from datetime import date, timedelta
+
         # 获取所有持仓
         positions = self.main_engine.get_all_positions()
         contracts = {c.vt_symbol: c for c in self.main_engine.get_all_contracts()}
+
+        # 获取所有交易记录，用于查找买入日期
+        trades = self.main_engine.get_all_trades()
+
+        # 查找每只股票的最早买入日期
+        buy_dates: dict = {}
+        for trade in trades:
+            if trade.direction.value == "long":  # 买入交易
+                symbol = trade.vt_symbol
+                trade_date = trade.datetime.date() if hasattr(trade.datetime, 'date') else trade.datetime.date()
+
+                if symbol not in buy_dates:
+                    buy_dates[symbol] = trade_date
+                else:
+                    # 保留最早的买入日期
+                    if trade_date < buy_dates[symbol]:
+                        buy_dates[symbol] = trade_date
 
         # 按股票汇总持仓
         position_summary: dict = {}
@@ -231,6 +250,7 @@ class ChinaCapitalWidget(QtWidgets.QWidget):
                     "volume": 0,
                     "price": pos.price,
                     "cost": pos.price,
+                    "buy_date": buy_dates.get(symbol),  # 记录买入日期
                 }
             position_summary[symbol]["volume"] += pos.volume
 
@@ -248,9 +268,14 @@ class ChinaCapitalWidget(QtWidgets.QWidget):
             name_item = QtWidgets.QTableWidgetItem(name)
             self.t1_table.setItem(row, 1, name_item)
 
-            # 买入日期（使用当前日期）
-            today = date.today()
-            date_item = QtWidgets.QTableWidgetItem(today.strftime("%Y-%m-%d"))
+            # 买入日期（从交易历史获取）
+            buy_date = data.get("buy_date")
+            if buy_date:
+                date_str = buy_date.strftime("%Y-%m-%d")
+            else:
+                # 如果没有买入记录，显示未知
+                date_str = "未知"
+            date_item = QtWidgets.QTableWidgetItem(date_str)
             self.t1_table.setItem(row, 2, date_item)
 
             # 买入数量
@@ -262,12 +287,29 @@ class ChinaCapitalWidget(QtWidgets.QWidget):
             self.t1_table.setItem(row, 4, sold_item)
 
             # 可卖数量（A股T+1：昨日买入可卖，今日买入不可卖）
-            # TODO: 需要记录买入日期，这里暂时假设所有持仓都是之前买入的
             # T+1规则：当日买入的股票次日才能卖出
-            sellable = str(data["volume"])  # 暂时假设都可卖
+            today = date.today()
+            buy_date = data.get("buy_date")
+
+            if buy_date:
+                # 计算是否在T+1限制期内
+                days_since_buy = (today - buy_date).days
+                if days_since_buy == 0:
+                    # 今日买入，不可卖
+                    sellable = "0"
+                    is_restricted = True
+                else:
+                    # 昨日及之前买入，可以卖
+                    sellable = str(data["volume"])
+                    is_restricted = False
+            else:
+                # 没有买入记录，默认不可卖
+                sellable = "0"
+                is_restricted = True
+
             sellable_item = QtWidgets.QTableWidgetItem(sellable)
-            # 今日买入显示灰色
-            if sellable == "0":
+            # T+1限制期内显示灰色
+            if is_restricted:
                 sellable_item.setForeground(QtGui.QColor("gray"))
             self.t1_table.setItem(row, 5, sellable_item)
 
