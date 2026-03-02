@@ -476,14 +476,46 @@ class ChinaDataService(
         start_date: str,
         end_date: str
     ) -> List[BarData]:
-        """获取板块指数数据"""
+        """获取板块指数数据
+
+        Args:
+            sector_code: 板块代码
+            start_date: 开始日期 (YYYYMMDD)
+            end_date: 结束日期 (YYYYMMDD)
+
+        Returns:
+            K线数据列表
+        """
+        import logging
+        logger = logging.getLogger("vnpy_china_data")
+
         # 优先使用 QMT 适配器
-        if self.qmt_adapter:
-            data = self.qmt_adapter.get_sector_index(sector_code, start_date, end_date)
+        if self.qmt_adapter and self.qmt_adapter.connected:
+            try:
+                data = self.qmt_adapter.get_sector_index(sector_code, start_date, end_date)
+                if data:
+                    return data
+            except Exception as e:
+                logger.warning(f"QMT适配器获取板块指数失败: {e}，尝试其他方式...")
+
+        # 如果QMT不可用，尝试从本地数据库获取
+        try:
+            data = self._get_sector_index_from_db(sector_code, start_date, end_date)
             if data:
                 return data
+        except Exception as e:
+            logger.debug(f"数据库获取板块指数失败: {e}")
 
-        # Fallback: 简化实现
+        logger.warning(
+            f"无法获取板块指数数据: {sector_code}。"
+            "RPC模式下需要Windows服务端支持get_sector_index函数，"
+            "或提前通过本地QMT下载板块指数数据。"
+        )
+        return []
+
+    def _get_sector_index_from_db(self, sector_code: str, start_date: str, end_date: str) -> List[BarData]:
+        """从本地数据库获取板块指数数据"""
+        # 简化实现 - 可以扩展为从MySQL获取历史数据
         return []
 
     # ========== 资金流向数据 ==========
