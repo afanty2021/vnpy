@@ -64,28 +64,29 @@ from vnpy_china_capital import ChinaCapitalApp
 from vnpy_china_ml import ChinaMlApp
 
 # 导入配置管理
-from vnpy_china_config import ConfigManager, DataModuleConfig
+from vnpy_china_config import ConfigManager, GlobalConfig
 
 
 def load_rpc_config() -> dict:
     """加载RPC配置
 
     优先级：
-    1. 配置文件（.vntrader_china/config/data_development.yaml）
+    1. 配置文件（.vntrader_china/config/global_config.yaml）
     2. 环境变量
     3. 默认值
     """
+    import os
+
     # 重置单例以清除可能的缓存
     ConfigManager.reset_instance()
     config_manager = ConfigManager()
-    config = config_manager.load_module_config("data", DataModuleConfig, force_reload=True)
+    config = config_manager.load_global_config(force_reload=True)
 
     # 从配置获取RPC地址
-    req_address = config.qmt_rpc_req_address
-    sub_address = config.qmt_rpc_sub_address
+    req_address = config.rpc.rep_address
+    sub_address = config.rpc.pub_address
 
     # 支持环境变量覆盖
-    import os
     req_address = os.getenv("QMT_RPC_REQ_ADDRESS", req_address)
     sub_address = os.getenv("QMT_RPC_SUB_ADDRESS", sub_address)
 
@@ -146,7 +147,7 @@ def start_gui_with_rpc():
     print("  显示精度: 2位小数")
     print("  功能模块: A股策略、分析、规则、数据、回测、资金、机器学习")
     print("\n配置说明:")
-    print("  配置文件: .vntrader_china/config/data_development.yaml")
+    print("  配置文件: .vntrader_china/config/global_development.yaml")
     print("  环境变量: QMT_RPC_REQ_ADDRESS, QMT_RPC_SUB_ADDRESS")
     print("=" * 60)
 
