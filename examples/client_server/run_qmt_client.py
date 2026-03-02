@@ -81,7 +81,7 @@ def load_rpc_config() -> dict:
     ConfigManager.reset_instance()
 
     # 设置配置文件路径（项目根目录/.vntrader_china/config）
-    config_dir = Path(__file__).parent.parent / ".vntrader_china/config"
+    config_dir = Path(__file__).parent.parent.parent / ".vntrader_china/config"
     config_manager = ConfigManager()
     config_manager.set_config_path(config_dir)
 

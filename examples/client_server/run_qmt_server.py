@@ -29,7 +29,7 @@ sys.path.insert(0, str(project_root))
 # 设置配置文件路径为当前目录
 from vnpy_china_config import ConfigManager
 
-config_dir = Path(__file__).parent.parent / ".vntrader_china/config"
+config_dir = Path(__file__).parent.parent.parent / ".vntrader_china/config"
 config_manager = ConfigManager()
 config_manager.set_config_path(config_dir)
 
