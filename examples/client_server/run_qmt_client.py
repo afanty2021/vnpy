@@ -70,12 +70,11 @@ def _insert_new_row(self, data):
 
         # 特殊处理 cash 字段 - 从 extra 中获取
         if header == "cash":
-            if hasattr(data, 'extra') and 'cash' in data.extra:
-                content = data.extra['cash']
-            else:
-                content = 0
+            extra = getattr(data, 'extra', None) or {}
+            content = extra.get('cash', 0)
         else:
-            content = data.__getattribute__(header)
+            # 安全获取属性，使用 getattr 而不是 __getattribute__
+            content = getattr(data, header, 0)
 
         cell = setting["cell"](content, data)
         self.setItem(0, column, cell)
@@ -84,8 +83,9 @@ def _insert_new_row(self, data):
             row_cells[header] = cell
 
     if self.data_key:
-        key = data.__getattribute__(self.data_key)
-        self.cells[key] = row_cells
+        key = getattr(data, self.data_key, None)
+        if key is not None:
+            self.cells[key] = row_cells
 
 AccountMonitor.insert_new_row = _insert_new_row
 
@@ -93,18 +93,22 @@ AccountMonitor.insert_new_row = _insert_new_row
 _original_update_old_row = AccountMonitor.update_old_row
 def _update_old_row(self, data):
     """更新旧行 - 特殊处理 cash 字段"""
-    key = data.__getattribute__(self.data_key)
-    row_cells = self.cells[key]
+    key = getattr(data, self.data_key, None)
+    if key is None:
+        return
+
+    row_cells = self.cells.get(key)
+    if row_cells is None:
+        return
 
     for header, cell in row_cells.items():
         # 特殊处理 cash 字段 - 从 extra 中获取
         if header == "cash":
-            if hasattr(data, 'extra') and 'cash' in data.extra:
-                content = data.extra['cash']
-            else:
-                content = 0
+            extra = getattr(data, 'extra', None) or {}
+            content = extra.get('cash', 0)
         else:
-            content = data.__getattribute__(header)
+            # 安全获取属性，使用 getattr 而不是 __getattribute__
+            content = getattr(data, header, 0)
         cell.set_content(content, data)
 
 AccountMonitor.update_old_row = _update_old_row
