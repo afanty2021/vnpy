@@ -11,6 +11,7 @@ from typing import Any, Optional, Type
 from vnpy.trader.app import BaseApp
 
 from vnpy_china_trading.signal_engine import SignalEngine
+from vnpy_china_trading.risk_engine import RiskEngine
 
 
 class ChinaTradingApp(BaseApp):
@@ -53,9 +54,9 @@ class ChinaTradingApp(BaseApp):
         if self.signal_engine is None:
             self.signal_engine = SignalEngine(self.main_engine, self.event_engine)
 
-        # TODO: 初始化风控引擎
-        # if self.risk_engine is None:
-        #     self.risk_engine = RiskEngine(self.main_engine, self.event_engine)
+        # 初始化风控引擎
+        if self.risk_engine is None:
+            self.risk_engine = RiskEngine(self.main_engine)
 
     def close(self) -> None:
         """关闭应用模块
