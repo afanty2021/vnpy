@@ -1,0 +1,21 @@
+# Mac/Linux客户端配置文件模板
+# 运行在Mac/Linux上，通过RPC连接Windows服务端
+#
+# 使用方法：
+# 1. 复制此文件为 client.yaml
+# 2. 修改下面的RPC地址为服务端IP地址
+
+# RPC连接配置（必须）
+rpc:
+  req_address: "tcp://192.168.1.100:2014" # RPC服务器请求地址（替换为服务端IP）
+  sub_address: "tcp://192.168.1.100:4102" # RPC服务器订阅地址（替换为服务端IP）
+  timeout: 5000                             # 超时时间（毫秒）
+
+# 可选：数据库配置（用于数据存储）
+# database:
+#   enabled: false
+#   host: localhost
+#   port: 3306
+#   user: vnpy
+#   password: ''
+#   database: vnpy_china
