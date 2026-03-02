@@ -55,6 +55,7 @@ class TestTradingFlow:
             ("2. 信号生成测试", self.test_signal_generation),
             ("3. 风控检查测试", self.test_risk_check),
             ("4. 信号状态转换测试", self.test_status_transitions),
+            ("4.1 风控拒绝流程测试", self.test_risk_rejected_flow),
             ("5. 取消流程测试", self.test_cancel_flow),
         ]
 
@@ -95,6 +96,20 @@ class TestTradingFlow:
         mock_account.frozen = 20000
         self.main_engine.get_account = Mock(return_value=mock_account)
         self.main_engine.get_position = Mock(return_value=None)
+
+        # 配置风控引擎需要的 Mock 方法
+        mock_tick = MagicMock()
+        mock_tick.limit_up = False
+        mock_tick.limit_down = False
+        mock_tick.last_price = 10.0
+        mock_tick.ask_price_1 = 10.01
+        self.main_engine.get_tick = Mock(return_value=mock_tick)
+
+        self.main_engine.get_all_trades = Mock(return_value=[])
+        self.main_engine.get_all_positions = Mock(return_value=[])
+        # 配置账户列表返回可迭代对象
+        mock_account_dict = {1: mock_account}  # 模拟 dict 格式
+        self.main_engine.get_all_accounts = Mock(return_value=mock_account_dict)
 
         # 初始化 ChinaTradingApp
         self.app = ChinaTradingApp(self.main_engine, self.event_engine)
