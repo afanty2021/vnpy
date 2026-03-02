@@ -71,7 +71,7 @@ def load_rpc_config() -> dict:
     """加载RPC配置
 
     优先级：
-    1. 配置文件（.vntrader_china/config/global_config.yaml）
+    1. 配置文件（client.yaml）
     2. 环境变量
     3. 默认值
     """
@@ -79,8 +79,14 @@ def load_rpc_config() -> dict:
 
     # 重置单例以清除可能的缓存
     ConfigManager.reset_instance()
+
+    # 设置配置文件路径
+    config_dir = Path(__file__).parent / ".vntrader_china/config"
     config_manager = ConfigManager()
-    config = config_manager.load_global_config(force_reload=True)
+    config_manager.set_config_path(config_dir)
+
+    # 加载客户端配置
+    config = config_manager.load_client_config(force_reload=True)
 
     # 从配置获取RPC地址
     req_address = config.rpc.rep_address

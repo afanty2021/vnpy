@@ -330,6 +330,81 @@ class ConfigManager:
         self._configs["global"] = config
         return config
 
+    def load_server_config(self, force_reload: bool = False) -> "GlobalConfig":
+        """加载服务端配置
+
+        优先从 server.yaml 加载，如果不存在则从 global_{env}.yaml 加载。
+
+        Args:
+            force_reload: 是否强制重新加载
+
+        Returns:
+            服务端配置对象
+        """
+        if not force_reload and "server" in self._configs:
+            return self._configs["server"]
+
+        from .global_config import GlobalConfig
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # 优先尝试 server.yaml
+        server_config_file = self._config_path / "server.yaml"
+
+        if server_config_file.exists():
+            try:
+                config = GlobalConfig.from_file(server_config_file)
+                # 服务端默认使用本地QMT
+                config.qmt.use_rpc = False
+            except Exception as e:
+                raise ValueError(f"服务端配置文件 {server_config_file} 验证失败:\n{e}")
+        else:
+            # 回退到 global 配置
+            config = self.load_global_config(force_reload)
+            # 服务端默认使用本地QMT
+            config.qmt.use_rpc = False
+            logger.info("未找到 server.yaml，使用全局配置")
+
+        self._configs["server"] = config
+        return config
+
+    def load_client_config(self, force_reload: bool = False) -> "GlobalConfig":
+        """加载客户端配置
+
+        优先从 client.yaml 加载，如果不存在则从 global_{env}.yaml 加载。
+
+        Args:
+            force_reload: 是否强制重新加载
+
+        Returns:
+            客户端配置对象
+        """
+        if not force_reload and "client" in self._configs:
+            return self._configs["client"]
+
+        from .global_config import GlobalConfig
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # 优先尝试 client.yaml
+        client_config_file = self._config_path / "client.yaml"
+
+        if client_config_file.exists():
+            try:
+                config = GlobalConfig.from_file(client_config_file)
+                # 客户端默认使用RPC模式
+                config.qmt.use_rpc = True
+                config.qmt.enabled = False  # 客户端不需要本地QMT
+            except Exception as e:
+                raise ValueError(f"客户端配置文件 {client_config_file} 验证失败:\n{e}")
+        else:
+            # 回退到 global 配置
+            config = self.load_global_config(force_reload)
+            logger.info("未找到 client.yaml，使用全局配置")
+
+        self._configs["client"] = config
+        return config
+
     def load_module_config(
         self,
         module_name: str,

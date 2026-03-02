@@ -33,22 +33,24 @@ config_dir = Path(__file__).parent / ".vntrader_china/config"
 config_manager = ConfigManager()
 config_manager.set_config_path(config_dir)
 
+# 加载服务端配置
+global_config = config_manager.load_server_config(force_reload=True)
+
 from vnpy.event import EventEngine
 from vnpy.trader.engine import MainEngine
 from vnpy.trader.object import TickData, BarData, OrderData, TradeData, PositionData, AccountData
 from vnpy_rpcservice import RpcServiceApp
 from vnpy_qmt import QmtGateway
 
-# RPC服务配置
+# 从配置获取设置
 RPC_SETTING = {
-    "req_address": "tcp://0.0.0.0:2014",      # 请求地址（0.0.0.0允许外网访问）
-    "sub_address": "tcp://0.0.0.0:4102",      # 订阅地址
+    "req_address": global_config.rpc.rep_address,
+    "sub_address": global_config.rpc.pub_address,
 }
 
-# QMT配置
 QMT_SETTING = {
-    "交易账号": "40218291",
-    "mini路径": "D:/国金证券QMT交易端/userdata_mini/",
+    "交易账号": global_config.qmt.account_id,
+    "mini路径": global_config.qmt.mini_path,
 }
 
 
