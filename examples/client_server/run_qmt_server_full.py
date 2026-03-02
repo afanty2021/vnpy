@@ -3,8 +3,8 @@
 VeighNa RPC服务端 - 完整交易接口版
 需要vnpy_rpcservice包
 
-使用统一的 global_development.yaml 配置文件管理所有配置，避免硬编码敏感信息。
-配置文件位置: .vntrader_china/config/global_{environment}.yaml
+使用 qmt_gateway.yaml 配置文件管理QMT配置。
+配置文件位置: .vntrader_china/config/qmt_gateway.yaml
 """
 
 import sys
@@ -44,13 +44,15 @@ def load_config():
     Returns:
         tuple: (QMT_SETTING, RPC_SETTING)
 
-    从 global_development.yaml 读取配置：
+    从 qmt_gateway.yaml 读取配置：
     - qmt.account_id: QMT 资金账号
     - qmt.mini_path: miniQMT 路径
     - qmt.session_id: QMT 会话ID（可选）
     - qmt.password: QMT 交易密码（可选）
-    - rpc.rep_address: RPC 服务端监听地址（REP模式）
-    - rpc.pub_address: RPC 服务端监听地址（PUB模式）
+
+    RPC 地址固定为：
+    - tcp://0.0.0.0:2014 (REP模式)
+    - tcp://0.0.0.0:4102 (PUB模式)
     """
     if not HAS_CONFIG:
         # 默认配置
@@ -62,14 +64,14 @@ def load_config():
             "sub_address": "tcp://0.0.0.0:4102",
         }
 
-    # 从全局配置文件加载
+    # 从 qmt_gateway.yaml 加载配置
     manager = ConfigManager()
-    config = manager.load_global_config()
+    config = manager.load_qmt_gateway_config(force_reload=True)
 
     # 构建 QMT_SETTING
     qmt_setting = {
-        "交易账号": config.qmt.account_id or "",
-        "mini路径": config.qmt.mini_path or "",
+        "交易账号": config.qmt.account_id,
+        "mini路径": config.qmt.mini_path,
     }
 
     # 可选字段
@@ -78,15 +80,11 @@ def load_config():
     if config.qmt.password:
         qmt_setting["密码"] = config.qmt.password
 
-    # 构建 RPC_SETTING（使用全局 RPC 配置）
+    # RPC 地址固定
     rpc_setting = {
-        "req_address": config.rpc.rep_address,
-        "sub_address": config.rpc.pub_address,
+        "req_address": "tcp://0.0.0.0:2014",
+        "sub_address": "tcp://0.0.0.0:4102",
     }
-
-    # 支持环境变量覆盖
-    rpc_setting["req_address"] = os.getenv("QMT_RPC_REP_ADDRESS", rpc_setting["req_address"])
-    rpc_setting["sub_address"] = os.getenv("QMT_RPC_PUB_ADDRESS", rpc_setting["sub_address"])
 
     return qmt_setting, rpc_setting
 
@@ -136,7 +134,7 @@ def main():
 
         if HAS_CONFIG:
             manager = ConfigManager()
-            print(f"\n配置文件位置: {manager.config_path / 'global_development.yaml'}")
+            print(f"\n配置文件位置: {manager.config_path / 'qmt_gateway.yaml'}")
             print("\n配置示例:")
             print("qmt:")
             print("  account_id: \"YOUR_ACCOUNT_ID\"")
