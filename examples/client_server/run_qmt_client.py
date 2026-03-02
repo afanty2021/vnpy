@@ -80,13 +80,13 @@ def load_rpc_config() -> dict:
     # 重置单例以清除可能的缓存
     ConfigManager.reset_instance()
 
-    # 设置配置文件路径
-    config_dir = Path(__file__).parent / ".vntrader_china/config"
+    # 设置配置文件路径（项目根目录/.vntrader_china/config）
+    config_dir = Path(__file__).parent.parent / ".vntrader_china/config"
     config_manager = ConfigManager()
     config_manager.set_config_path(config_dir)
 
     # 加载客户端配置
-    config = config_manager.load_client_config(force_reload=True)
+    config = config_manager.load_config(force_reload=True)
 
     # 从配置获取RPC地址
     req_address = config.rpc.rep_address

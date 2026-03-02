@@ -1,0 +1,13 @@
+# QMT网关配置文件模板（Windows服务端使用）
+# 运行在Windows上，连接本地QMT
+#
+# 使用方法：
+# 1. 复制此文件到项目根目录 .vntrader_china/config/qmt_gateway.yaml
+# 2. 填写 QMT 相关配置
+
+# QMT交易接口配置
+qmt:
+  account_id: ''                             # QMT资金账号（必填）
+  mini_path: ''                              # miniQMT路径，例如：D:/国金证券QMT交易端/userdata_mini/（必填）
+  session_id: 0                              # 会话ID（可选，多会话时使用）
+  password: ''                               # 交易密码（可选）

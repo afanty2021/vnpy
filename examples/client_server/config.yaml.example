@@ -1,0 +1,59 @@
+# 客户端配置文件模板（Mac/Linux客户端使用）
+# 运行在Mac/Linux上，通过RPC连接Windows服务端
+#
+# 使用方法：
+# 1. 复制此文件到项目根目录 .vntrader_china/config/config.yaml
+# 2. 修改 RPC 地址为服务端 IP 地址
+# 3. 根据需要填写其他配置项
+
+# RPC连接配置
+rpc:
+  rep_address: "tcp://192.168.2.168:2014"  # REP模式地址（请求-响应）
+  pub_address: "tcp://192.168.2.168:4102"  # PUB模式地址（发布-订阅）
+  timeout: 5000                              # 超时时间（毫秒）
+
+# 日志配置
+logging:
+  level: INFO                                # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  file_enabled: true
+  file_path: logs/vnpy_china.log
+  max_bytes: 10485760                        # 10MB
+  backup_count: 5
+  console_enabled: true
+
+# 风控配置
+risk:
+  max_position_ratio: 0.8                    # 最大持仓比例（0-1之间）
+  max_single_position_ratio: 0.2             # 单只股票最大持仓比例（0-1之间）
+  max_daily_loss_ratio: 0.05                 # 单日最大亏损比例（0-1之间）
+  max_consecutive_losses: 5                   # 最大连续亏损次数
+
+# 数据库配置（历史数据存储）
+database:
+  enabled: true                              # 是否启用数据库（默认开启）
+  host: localhost
+  port: 3306
+  user: vnpy
+  password: ''
+  database: vnpy_china
+  pool_size: 5
+  max_overflow: 10
+  redis_host: localhost
+  redis_port: 6379
+  redis_db: 0
+  redis_password: ''
+
+# Tushare配置
+tushare:
+  token: ''                                  # 从环境变量 TUSHARE_TOKEN 读取，或在此填入
+  rate_limit: 200                            # API调用频率限制（次/分钟）
+  retry_times: 3                             # 重试次数
+  retry_delay: 1                            # 重试延迟（秒）
+
+# 增量更新配置
+data_update:
+  enabled: true                              # 是否启用增量更新
+  interval: 3600                             # 更新间隔（秒）
+  start_time: "08:00"                       # 更新开始时间
+  end_time: "20:00"                         # 更新结束时间

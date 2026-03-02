@@ -330,10 +330,10 @@ class ConfigManager:
         self._configs["global"] = config
         return config
 
-    def load_server_config(self, force_reload: bool = False) -> "GlobalConfig":
+    def load_qmt_gateway_config(self, force_reload: bool = False) -> "GlobalConfig":
         """加载服务端配置
 
-        优先从 server.yaml 加载，如果不存在则从 global_{env}.yaml 加载。
+        优先从 qmt_gateway.yaml 加载，如果不存在则从 global_{env}.yaml 加载。
 
         Args:
             force_reload: 是否强制重新加载
@@ -348,8 +348,8 @@ class ConfigManager:
         import logging
         logger = logging.getLogger(__name__)
 
-        # 优先尝试 server.yaml
-        server_config_file = self._config_path / "server.yaml"
+        # 优先尝试 qmt_gateway.yaml
+        server_config_file = self._config_path / "qmt_gateway.yaml"
 
         if server_config_file.exists():
             try:
@@ -363,15 +363,15 @@ class ConfigManager:
             config = self.load_global_config(force_reload)
             # 服务端默认使用本地QMT
             config.qmt.use_rpc = False
-            logger.info("未找到 server.yaml，使用全局配置")
+            logger.info("未找到 qmt_gateway.yaml，使用全局配置")
 
         self._configs["server"] = config
         return config
 
-    def load_client_config(self, force_reload: bool = False) -> "GlobalConfig":
+    def load_config(self, force_reload: bool = False) -> "GlobalConfig":
         """加载客户端配置
 
-        优先从 client.yaml 加载，如果不存在则从 global_{env}.yaml 加载。
+        优先从 config.yaml 加载，如果不存在则从 global_{env}.yaml 加载。
 
         Args:
             force_reload: 是否强制重新加载
@@ -386,8 +386,8 @@ class ConfigManager:
         import logging
         logger = logging.getLogger(__name__)
 
-        # 优先尝试 client.yaml
-        client_config_file = self._config_path / "client.yaml"
+        # 优先尝试 config.yaml
+        client_config_file = self._config_path / "config.yaml"
 
         if client_config_file.exists():
             try:
@@ -400,7 +400,7 @@ class ConfigManager:
         else:
             # 回退到 global 配置
             config = self.load_global_config(force_reload)
-            logger.info("未找到 client.yaml，使用全局配置")
+            logger.info("未找到 config.yaml，使用全局配置")
 
         self._configs["client"] = config
         return config
