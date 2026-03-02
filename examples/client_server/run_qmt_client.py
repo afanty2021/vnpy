@@ -39,15 +39,75 @@ from vnpy.trader.ui.widget import PositionMonitor
 # 直接修改类属性来改变显示名称
 PositionMonitor.headers = {
     "symbol": {"display": "代码", "cell": widget.BaseCell, "update": False},
-    "exchange": {"display": "交易所", "cell": widget.EnumCell, "update": False},
-    "direction": {"display": "方向", "cell": widget.DirectionCell, "update": False},
+    "name": {"display": "名称", "cell": widget.BaseCell, "update": False},
     "volume": {"display": "数量", "cell": widget.BaseCell, "update": True},
     "yd_volume": {"display": "昨仓", "cell": widget.BaseCell, "update": True},
-    "frozen": {"display": "冻结", "cell": widget.BaseCell, "update": True},
     "price": {"display": "成本价", "cell": widget.BaseCell, "update": True},
     "pnl": {"display": "盈亏", "cell": widget.PnlCell, "update": True},
     "gateway_name": {"display": "接口", "cell": widget.BaseCell, "update": False},
 }
+
+# 修改AccountMonitor - 添加可用现金字段
+from vnpy.trader.ui.widget import AccountMonitor
+from vnpy.trader.object import AccountData
+
+AccountMonitor.headers = {
+    "accountid": {"display": "账号", "cell": widget.BaseCell, "update": False},
+    "balance": {"display": "总资产", "cell": widget.BaseCell, "update": True},
+    "cash": {"display": "可用现金", "cell": widget.BaseCell, "update": True},
+    "gateway_name": {"display": "接口", "cell": widget.BaseCell, "update": False},
+}
+
+# 重写 insert_new_row 方法来处理 cash 字段
+_original_insert_new_row = AccountMonitor.insert_new_row
+def _insert_new_row(self, data):
+    """插入新行 - 特殊处理 cash 字段"""
+    self.insertRow(0)
+
+    row_cells = {}
+    for column, header in enumerate(self.headers.keys()):
+        setting = self.headers[header]
+
+        # 特殊处理 cash 字段 - 从 extra 中获取
+        if header == "cash":
+            if hasattr(data, 'extra') and 'cash' in data.extra:
+                content = data.extra['cash']
+            else:
+                content = 0
+        else:
+            content = data.__getattribute__(header)
+
+        cell = setting["cell"](content, data)
+        self.setItem(0, column, cell)
+
+        if setting["update"]:
+            row_cells[header] = cell
+
+    if self.data_key:
+        key = data.__getattribute__(self.data_key)
+        self.cells[key] = row_cells
+
+AccountMonitor.insert_new_row = _insert_new_row
+
+# 重写 update_old_row 方法来处理 cash 字段
+_original_update_old_row = AccountMonitor.update_old_row
+def _update_old_row(self, data):
+    """更新旧行 - 特殊处理 cash 字段"""
+    key = data.__getattribute__(self.data_key)
+    row_cells = self.cells[key]
+
+    for header, cell in row_cells.items():
+        # 特殊处理 cash 字段 - 从 extra 中获取
+        if header == "cash":
+            if hasattr(data, 'extra') and 'cash' in data.extra:
+                content = data.extra['cash']
+            else:
+                content = 0
+        else:
+            content = data.__getattribute__(header)
+        cell.set_content(content, data)
+
+AccountMonitor.update_old_row = _update_old_row
 
 from vnpy.event import EventEngine
 from vnpy.trader.engine import MainEngine

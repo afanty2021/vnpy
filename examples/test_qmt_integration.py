@@ -13,7 +13,7 @@ QMT环境集成测试
 
 环境要求：
     - Windows服务端已运行 run_qmt_server.py
-    - RPC地址已配置在 .vntrader_china/config/data_development.yaml
+    - RPC地址已配置在 .vntrader_china/config/config.yaml
 """
 
 import sys
@@ -106,14 +106,14 @@ class QMTIntegrationTest:
         rpc_gateway = self.main_engine.add_gateway(RpcGateway, "RPC")
 
         # 尝试连接
-        from vnpy_china_config import ConfigManager, DataModuleConfig
+        from vnpy_china_config import ConfigManager
         config_manager = ConfigManager()
-        config = config_manager.load_module_config("data", DataModuleConfig)
+        config = config_manager.load_config()
 
         # 连接RPC
         rpc_setting = {
-            "主动请求地址": config.qmt_rpc_req_address,
-            "推送订阅地址": config.qmt_rpc_sub_address,
+            "主动请求地址": config.rpc.rep_address,
+            "推送订阅地址": config.rpc.pub_address,
         }
 
         self.main_engine.connect(rpc_setting, "RPC")

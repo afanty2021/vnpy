@@ -1,8 +1,8 @@
 # -*- coding:utf-8 -*-
 """
-vnpy_qmt 历史数据下载修复部署脚本
+vnpy_qmt 修复部署脚本
 
-自动将修复后的 vnpy_qmt/md.py 部署到 conda 环境中。
+自动将修复后的 vnpy_qmt 文件部署到 conda 环境中。
 """
 
 import os
@@ -44,11 +44,26 @@ def find_conda_env():
     return None
 
 
+def deploy_file(source_file, target_file, backup_dir):
+    """部署单个文件"""
+    # 备份原始文件
+    if target_file.exists():
+        backup_file = backup_dir / f"{target_file.name}.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        shutil.copy2(target_file, backup_file)
+        print(f"   备份: {target_file.name} -> {backup_file.name}")
+
+    # 复制修复文件
+    shutil.copy2(source_file, target_file)
+    print(f"   部署: {source_file.name} -> {target_file}")
+
+    return True
+
+
 def deploy_fix():
     """部署 vnpy_qmt 修复"""
 
     print("=" * 60)
-    print("vnpy_qmt 历史数据下载修复部署")
+    print("vnpy_qmt 修复部署")
     print("=" * 60)
 
     # 查找 conda 环境
@@ -63,60 +78,66 @@ def deploy_fix():
 
     # 目标路径
     target_dir = conda_env / "Lib" / "site-packages" / "vnpy_qmt"
-    target_file = target_dir / "md.py"
-
     if not target_dir.exists():
         print(f"ERROR: vnpy_qmt 未安装在环境中: {target_dir}")
         return False
 
-    print(f"   目标路径: {target_file}")
+    print(f"   目标路径: {target_dir}")
 
-    # 源文件路径
+    # 源文件路径（patches 目录）
     script_dir = Path(__file__).parent
-    source_file = script_dir / "vnpy_qmt" / "md.py"
 
-    if not source_file.exists():
-        print(f"ERROR: 修复文件不存在: {source_file}")
-        print("请确保 patches/vnpy_qmt/md.py 存在")
-        return False
-
-    print(f"   源文件: {source_file}")
-
-    # 备份原始文件
-    print("\n[2/5] 备份原始文件...")
+    # 备份目录
     backup_dir = script_dir / "backups"
     backup_dir.mkdir(exist_ok=True)
-    backup_file = backup_dir / f"md.py.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-    if target_file.exists():
-        shutil.copy2(target_file, backup_file)
-        print(f"   备份到: {backup_file}")
-    else:
-        print("   原始文件不存在，跳过备份")
+    # 部署的文件列表
+    files_to_deploy = [
+        ("md.py", "历史数据修复"),
+        ("td.py", "账户数据修复（balance 使用现金而非总资产）"),
+    ]
 
-    # 复制修复文件
-    print("\n[3/5] 部署修复文件...")
-    try:
-        shutil.copy2(source_file, target_file)
-        print(f"   已复制: {source_file} -> {target_file}")
-    except Exception as e:
-        print(f"ERROR: 复制失败: {e}")
-        return False
+    print("\n[2/5] 部署修复文件...")
+    success_count = 0
+
+    for filename, description in files_to_deploy:
+        print(f"\n   部署 {filename} ({description}):")
+        source_file = script_dir / filename
+        target_file = target_dir / filename
+
+        if not source_file.exists():
+            print(f"      ERROR: 源文件不存在: {source_file}")
+            continue
+
+        try:
+            if deploy_file(source_file, target_file, backup_dir):
+                success_count += 1
+        except Exception as e:
+            print(f"      ERROR: 部署失败: {e}")
+
+    print(f"\n   成功部署: {success_count}/{len(files_to_deploy)} 个文件")
 
     # 验证文件
-    print("\n[4/5] 验证修复...")
-    if target_file.exists():
-        size = target_file.stat().st_size
-        print(f"   文件大小: {size} 字节")
-        print(f"   修改时间: {datetime.fromtimestamp(target_file.stat().st_mtime)}")
-    else:
-        print("ERROR: 目标文件不存在")
-        return False
+    print("\n[3/5] 验证部署...")
+    for filename, _ in files_to_deploy:
+        target_file = target_dir / filename
+        if target_file.exists():
+            size = target_file.stat().st_size
+            mtime = datetime.fromtimestamp(target_file.stat().st_mtime)
+            print(f"   {filename}: {size} 字节, {mtime.strftime('%Y-%m-%d %H:%M:%S')}")
+        else:
+            print(f"   {filename}: 文件不存在")
 
-    print("\n[5/5] 测试验证...")
-    print("   请运行以下命令测试:")
-    print("   cd examples/client_server")
-    print("   python test_qmt_simple.py")
+    print("\n[4/5] 修复说明:")
+    print("   md.py - 历史数据下载修复")
+    print("   td.py - 账户数据修复:")
+    print("     * balance 字段现在使用 asset.cash（可用现金）")
+    print("     * 而不是 asset.total_asset（总资产）")
+    print("     * 这样 '可用' 字段将正确显示可用现金")
+
+    print("\n[5/5] 测试验证:")
+    print("   请在 Windows 服务端重启 QMT 服务，")
+    print("   然后在 Mac 客户端验证账户数据显示。")
 
     print("\n" + "=" * 60)
     print("部署完成！")

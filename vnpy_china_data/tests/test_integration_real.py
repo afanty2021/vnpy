@@ -127,20 +127,20 @@ def main():
     print("=" * 70)
 
     try:
-        from vnpy_china_config import ConfigManager, DataModuleConfig
+        from vnpy_china_config import ConfigManager
         from vnpy_china_data.adapter import RpcQmtDataAdapter
 
         config_manager = ConfigManager()
-        data_config = config_manager.load_module_config("data", DataModuleConfig)
+        config = config_manager.load_config()
 
         print(f"RPC QMT 配置:")
-        print(f"  请求地址: {data_config.qmt_rpc_req_address}")
-        print(f"  订阅地址: {data_config.qmt_rpc_sub_address}")
+        print(f"  请求地址: {config.rpc.rep_address}")
+        print(f"  订阅地址: {config.rpc.pub_address}")
 
         # 创建 RPC 适配器
         adapter = RpcQmtDataAdapter(
-            req_address=data_config.qmt_rpc_req_address,
-            sub_address=data_config.qmt_rpc_sub_address
+            req_address=config.rpc.rep_address,
+            sub_address=config.rpc.pub_address
         )
 
         # 连接 RPC

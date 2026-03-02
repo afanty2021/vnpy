@@ -32,11 +32,11 @@ risk:
 # 数据库配置（历史数据存储）
 database:
   enabled: true                              # 是否启用数据库（默认开启）
-  host: localhost
-  port: 3306
-  user: vnpy
-  password: ''
-  database: vnpy_china
+  mysql_host: localhost
+  mysql_port: 3306
+  mysql_user: vnpy
+  mysql_password: 'Vnpy2024!'
+  mysql_database: vnpy_china
   pool_size: 5
   max_overflow: 10
   redis_host: localhost

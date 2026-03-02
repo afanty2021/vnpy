@@ -13,7 +13,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 # 导入配置管理
-from vnpy_china_config import ConfigManager, DataModuleConfig
+from vnpy_china_config import ConfigManager
 
 
 def check_config():
@@ -32,11 +32,12 @@ def check_config():
 
     # 尝试加载配置（强制重新加载）
     try:
-        config = config_manager.load_module_config("data", DataModuleConfig, force_reload=True)
+        config = config_manager.load_config(force_reload=True)
         print(f"\n✓ 配置加载成功")
-        print(f"  RPC模式: {'启用' if config.qmt_use_rpc else '禁用'}")
-        print(f"  请求地址: {config.qmt_rpc_req_address}")
-        print(f"  订阅地址: {config.qmt_rpc_sub_address}")
+        print(f"  QMT启用: {'是' if config.qmt.enabled else '否'}")
+        print(f"  RPC模式: {'启用' if config.qmt.use_rpc else '禁用'}")
+        print(f"  请求地址: {config.rpc.rep_address}")
+        print(f"  订阅地址: {config.rpc.pub_address}")
         return config
     except Exception as e:
         print(f"\n✗ 配置加载失败: {e}")
@@ -136,8 +137,8 @@ def diagnose():
         sub_address = env_vars["sub"]
         print("使用环境变量配置:")
     elif config:
-        req_address = config.qmt_rpc_req_address
-        sub_address = config.qmt_rpc_sub_address
+        req_address = config.rpc.rep_address
+        sub_address = config.rpc.pub_address
         print("使用配置文件配置:")
     else:
         req_address = "tcp://127.0.0.1:2014"
@@ -209,10 +210,11 @@ def diagnose():
     print("\n如果需要修改配置，请选择以下方式之一:")
 
     print("\n方式1: 创建/修改配置文件")
-    print("  文件路径: .vntrader_china/config/data_development.yaml")
+    print("  文件路径: .vntrader_china/config/config.yaml (Mac/Linux客户端)")
+    print("  或 qmt_gateway.yaml (Windows服务端)")
     print("  配置内容:")
-    print(f"    qmt_rpc_req_address: \"{req_address}\"")
-    print(f"    qmt_rpc_sub_address: \"{sub_address}\"")
+    print(f"    rpc.rep_address: \"{req_address}\"")
+    print(f"    rpc.pub_address: \"{sub_address}\"")
 
     print("\n方式2: 设置环境变量")
     print(f"  export QMT_RPC_REQ_ADDRESS=\"{req_address}\"")
