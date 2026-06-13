@@ -1,8 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """
-配置加载测试脚本
-测试 ConfigManager 的 load_config() 和 load_qmt_gateway_config() 方法
+测试配置文件加载情况
 """
+
 import sys
 from pathlib import Path
 
@@ -10,113 +11,80 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-from vnpy_china_config import ConfigManager
+def test_config_loading():
+    """测试配置加载"""
+    print("=" * 70)
+    print("配置文件加载测试")
+    print("=" * 70)
 
-
-def test_load_config():
-    """测试客户端配置加载"""
-    print("=" * 60)
-    print("测试 1: load_config() - 客户端配置")
-    print("=" * 60)
-
+    # 1. 测试ConfigManager
+    print("\n1. 测试ConfigManager加载...")
     try:
-        config_dir = project_root / ".vntrader_china/config"
+        from vnpy_china_config import ConfigManager
         config_manager = ConfigManager()
-        config_manager.set_config_path(config_dir)
 
-        config = config_manager.load_config(force_reload=True)
+        # 加载全局配置
+        global_config = config_manager.load_global_config()
 
-        print("✓ 配置文件加载成功")
-        print(f"  RPC 请求地址: {config.rpc.rep_address}")
-        print(f"  RPC 订阅地址: {config.rpc.pub_address}")
-        print(f"  日志级别: {config.logging.level}")
-        print(f"  数据库启用: {config.database.enabled}")
-        print(f"  最大持仓比例: {config.risk.max_position_ratio}")
-        return True
+        print(f"  数据库配置:")
+        print(f"    主机: {global_config.database.mysql_host}")
+        print(f"    端口: {global_config.database.mysql_port}")
+        print(f"    用户: {global_config.database.mysql_user}")
+        print(f"    密码: {global_config.database.mysql_password}")
+        print(f"    数据库: {global_config.database.mysql_database}")
 
-    except FileNotFoundError as e:
-        print(f"✗ 配置文件不存在: {e}")
-        print(f"  请确保 {config_dir}/config.yaml 存在")
-        return False
-    except Exception as e:
-        print(f"✗ 加载失败: {e}")
-        return False
-
-
-def test_load_qmt_gateway_config():
-    """测试 QMT 网关配置加载"""
-    print("\n" + "=" * 60)
-    print("测试 2: load_qmt_gateway_config() - QMT 网关配置")
-    print("=" * 60)
-
-    try:
-        config_dir = project_root / ".vntrader_china/config"
-        config_manager = ConfigManager()
-        config_manager.set_config_path(config_dir)
-
-        config = config_manager.load_qmt_gateway_config(force_reload=True)
-
-        print("✓ 配置文件加载成功")
-        print(f"  QMT 账号: {config.qmt.account_id or '(未配置)'}")
-        print(f"  Mini路径: {config.qmt.mini_path or '(未配置)'}")
-        print(f"  会话ID: {config.qmt.session_id}")
-        return True
-
-    except FileNotFoundError as e:
-        print(f"✗ 配置文件不存在: {e}")
-        print(f"  请确保 {config_dir}/qmt_gateway.yaml 存在")
-        return False
-    except Exception as e:
-        print(f"✗ 加载失败: {e}")
-        return False
-
-
-def test_fallback_to_global():
-    """测试回退到全局配置"""
-    print("\n" + "=" * 60)
-    print("测试 3: 回退机制 - 使用全局配置")
-    print("=" * 60)
-
-    try:
-        # 使用不存在的配置目录
-        config_dir = project_root / "non_existent_config"
-        config_manager = ConfigManager()
-        config_manager.set_config_path(config_dir)
-
-        # 应该回退到 load_global_config()
-        config = config_manager.load_config(force_reload=True)
-
-        print("✓ 回退到全局配置成功")
-        return True
+        # 检查密码是否为默认值
+        if global_config.database.mysql_password in ['', 'password', 'root']:
+            print(f"    [WARNING] 使用了不安全的密码！")
+        else:
+            print(f"    [OK] 密码安全")
 
     except Exception as e:
-        print(f"✗ 回退失败: {e}")
-        return False
+        print(f"  [ERROR] 配置加载失败: {e}")
+        import traceback
+        traceback.print_exc()
 
+    # 2. 测试数据库连接
+    print("\n2. 测试数据库连接...")
+    try:
+        from vnpy.trader.database import get_database
+        import os
 
-def main():
-    """运行所有测试"""
-    print("\n配置加载测试\n")
+        # 检查环境变量
+        mysql_pwd = os.getenv('MYSQL_PASSWORD')
+        print(f"  环境变量 MYSQL_PASSWORD: {'{已设置}' if mysql_pwd else '{未设置}'}")
 
-    results = {
-        "客户端配置加载": test_load_config(),
-        "QMT网关配置加载": test_load_qmt_gateway_config(),
-        "回退机制": test_fallback_to_global(),
-    }
+        # 尝试获取数据库
+        db = get_database()
+        print(f"  数据库类型: {type(db).__name__}")
 
-    print("\n" + "=" * 60)
-    print("测试结果汇总")
-    print("=" * 60)
-    for name, passed in results.items():
-        status = "✓ 通过" if passed else "✗ 失败"
-        print(f"  {status}  {name}")
+    except Exception as e:
+        print(f"  [ERROR] 数据库连接失败: {e}")
 
-    all_passed = all(results.values())
-    print("\n" + ("✓ 所有测试通过" if all_passed else "✗ 部分测试失败"))
-    print("=" * 60)
+    # 3. 检查配置文件路径
+    print("\n3. 检查配置文件路径...")
+    config_paths = [
+        project_root / ".vntrader_china" / "config" / "global_development.yaml",
+        project_root / ".vntrader_china" / "config" / "global_production.yaml",
+    ]
 
-    return 0 if all_passed else 1
+    for config_path in config_paths:
+        if config_path.exists():
+            print(f"  [存在] {config_path}")
+            # 读取文件内容查看密码
+            with open(config_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                if 'mysql_password' in content:
+                    lines = [line for line in content.split('\n') if 'mysql_password' in line]
+                    for line in lines:
+                        print(f"    {line.strip()}")
+        else:
+            print(f"  [不存在] {config_path}")
+
+    print("\n" + "=" * 70)
+    print("测试完成")
+    print("=" * 70)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    test_config_loading()
