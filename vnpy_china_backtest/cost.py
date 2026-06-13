@@ -183,7 +183,7 @@ class CostCalculatorFactory:
             # ETF佣金更低，无印花税
             return CostConfig(
                 commission_rate=0.0001,  # 万1
-                min_commmission=0,
+                min_commission=0,
                 stamp_duty_rate=0,  # ETF无印花税
             )
         elif market == "B":

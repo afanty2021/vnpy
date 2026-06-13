@@ -101,8 +101,8 @@ class T1Simulator:
         # 记录卖出（使用FIFO原则）
         self._process_sell(symbol, volume, trade_date)
 
-        # 更新持仓
-        self._update_position(symbol, volume, price, is_buy=False)
+        # 更新持仓（传入回测日期以正确计算 T+1 冻结量）
+        self._update_position(symbol, volume, price, is_buy=False, trade_date=trade_date)
 
         return True, "卖出成功", volume
 
@@ -221,9 +221,15 @@ class T1Simulator:
         symbol: str,
         volume: int,
         price: float,
-        is_buy: bool
+        is_buy: bool,
+        trade_date: Optional[date] = None
     ) -> None:
-        """更新持仓"""
+        """更新持仓
+
+        Args:
+            trade_date: 回测交易日期，卖出时用于判定 T+1 冻结量；
+                        为空（如非回测直接调用）时回退系统日期
+        """
         if symbol not in self._positions:
             self._positions[symbol] = PositionRecord(
                 symbol=symbol,
@@ -249,8 +255,9 @@ class T1Simulator:
         else:
             # 卖出：减少持仓
             pos.volume -= volume
-            # 解冻相应数量
-            today = date.today()
+            # 重新计算冻结量：用回测日期判断当日买入（T+1 冻结），
+            # 替代此前的 date.today()（系统日期会污染回测判定）
+            today = trade_date or date.today()
             frozen_after_sell = 0
             for rec in self._buy_records.get(symbol, []):
                 if rec.buy_date >= today:

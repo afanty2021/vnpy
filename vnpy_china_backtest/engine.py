@@ -87,6 +87,15 @@ class EnhancedBacktestEngine:
         self.history_bars: Dict[Tuple[datetime, str], BarData] = {}
         self.pre_closes: Dict[str, float] = {}  # 昨日收盘价
 
+        # 回测时钟与市价快照（由 process_bar 随 bar 推进）
+        # current_datetime 取自 bar.datetime，替代此前的 datetime.now()
+        self.current_datetime: Optional[datetime] = None
+        # 当前市价映射，用于按市价计算持仓市值
+        self.current_prices: Dict[str, float] = {}
+
+        # 权益曲线（首点为初始资金，其后为每根 bar 收盘权益）
+        self.equity_curve: List[float] = []
+
     def set_parameters(
         self,
         vt_symbols: List[str],
@@ -139,6 +148,11 @@ class EnhancedBacktestEngine:
         """
         self.history_bars.clear()
 
+        # 重置回测时钟、市价与权益曲线（首点为初始资金）
+        self.current_datetime = None
+        self.current_prices.clear()
+        self.equity_curve = [self.cash]
+
         for bar in bars:
             key = (bar.datetime, bar.vt_symbol)
             self.history_bars[key] = bar
@@ -154,10 +168,16 @@ class EnhancedBacktestEngine:
             bar: K线数据
         """
         symbol = bar.vt_symbol
-        current_price = bar.close_price
 
-        # 更新昨日收盘价（收盘后）
+        # 推进回测时钟：用 bar 的历史日期替代此前的 datetime.now()
+        self.current_datetime = bar.datetime
+
+        # 更新市价快照与昨日收盘价
+        self.current_prices[symbol] = bar.close_price
         self.pre_closes[symbol] = bar.close_price
+
+        # 记录当日收盘权益，构建真实的权益曲线
+        self.equity_curve.append(self.get_equity())
 
     def buy(
         self,
@@ -228,7 +248,14 @@ class EnhancedBacktestEngine:
         """
         # 提取交易所信息
         symbol, exchange = extract_vt_symbol(vt_symbol)
-        trade_date = datetime.now().date()
+
+        # 交易日期取回测时钟（由 process_bar 推进）；
+        # 无回放上下文（如直接调用 buy/sell）时回退系统日期以保持向后兼容
+        trade_date = (
+            self.current_datetime.date()
+            if self.current_datetime
+            else datetime.now().date()
+        )
 
         # 获取昨日收盘价
         prev_close = self.pre_closes.get(vt_symbol, price)
@@ -367,7 +394,7 @@ class EnhancedBacktestEngine:
             offset=offset,
             price=price,
             volume=volume,
-            datetime=datetime.now(),
+            datetime=self.current_datetime or datetime.now(),
             gateway_name=self.gateway_name
         )
 
@@ -378,12 +405,14 @@ class EnhancedBacktestEngine:
         return self.positions.get(vt_symbol, 0)
 
     def get_equity(self) -> float:
-        """获取当前权益"""
-        # 持仓市值
+        """获取当前权益（现金 + 持仓按市价计算）"""
+        # 持仓市值：优先用回测当前市价，无市价快照时回退持仓均价
         position_value = 0.0
         for vt_symbol, volume in self.positions.items():
-            avg_price = self.avg_prices.get(vt_symbol, 0)
-            position_value += volume * avg_price
+            price = self.current_prices.get(vt_symbol)
+            if price is None:
+                price = self.avg_prices.get(vt_symbol, 0)
+            position_value += volume * price
 
         return self.cash + position_value
 
@@ -393,12 +422,15 @@ class EnhancedBacktestEngine:
         Returns:
             EnhancedMetrics: 回测指标
         """
-        # 构建简化的权益曲线
+        # 使用真实权益曲线与回测天数，而非此前的两点曲线 + 硬编码 240
+        equity_curve = (
+            self.equity_curve
+            if len(self.equity_curve) >= 2
+            else [self.capital, self.get_equity()]
+        )
         initial_capital = self.capital
-        final_capital = self.get_equity()
-        trading_days = 240  # 简化
-
-        equity_curve = [initial_capital, final_capital]
+        final_capital = equity_curve[-1]
+        trading_days = max(1, len(equity_curve) - 1)
 
         return self.metrics_calculator.calculate(
             trades=list(self.trades.values()),
@@ -434,6 +466,11 @@ class EnhancedBacktestEngine:
         self.total_cost = 0.0
         self.blocked_orders = 0
         self.logs.clear()
+
+        # 重置回测时钟、市价与权益曲线
+        self.current_datetime = None
+        self.current_prices.clear()
+        self.equity_curve = []
 
         self.t1_simulator.reset()
 
