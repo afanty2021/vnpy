@@ -4,12 +4,37 @@
 测试配置文件加载情况
 """
 
+import re
 import sys
 from pathlib import Path
 
 # 添加项目路径
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
+
+
+def mask_secret(secret: str) -> str:
+    """脱敏显示密钥：仅保留首末字符与长度，不输出明文
+
+    用于避免在测试输出/CI 日志/共享屏幕中泄露数据库密码等敏感信息。
+    """
+    if not secret:
+        return "{空}"
+    if len(secret) <= 2:
+        return "*" * len(secret)
+    return f"{secret[0]}{'*' * (len(secret) - 2)}{secret[-1]} (长度{len(secret)})"
+
+
+def mask_password_line(line: str) -> str:
+    """对 'mysql_password: xxx' 这类配置行脱敏，仅掩码冒号后的值部分"""
+    _quotes = "\"'"  # YAML 值可能用引号包裹，strip 时去除
+
+    def _mask_value(m):
+        value = m.group(2).strip().strip(_quotes)
+        return f"{m.group(1)}{mask_secret(value)}"
+
+    return re.sub(r'(:\s*)(.+)', _mask_value, line, count=1)
+
 
 def test_config_loading():
     """测试配置加载"""
@@ -30,7 +55,7 @@ def test_config_loading():
         print(f"    主机: {global_config.database.mysql_host}")
         print(f"    端口: {global_config.database.mysql_port}")
         print(f"    用户: {global_config.database.mysql_user}")
-        print(f"    密码: {global_config.database.mysql_password}")
+        print(f"    密码: {mask_secret(global_config.database.mysql_password)}")
         print(f"    数据库: {global_config.database.mysql_database}")
 
         # 检查密码是否为默认值
@@ -77,7 +102,7 @@ def test_config_loading():
                 if 'mysql_password' in content:
                     lines = [line for line in content.split('\n') if 'mysql_password' in line]
                     for line in lines:
-                        print(f"    {line.strip()}")
+                        print(f"    {mask_password_line(line.strip())}")
         else:
             print(f"  [不存在] {config_path}")
 
