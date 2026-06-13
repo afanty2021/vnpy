@@ -289,6 +289,23 @@ class TestOpenPricePredictionAccuracy:
         assert r["sample_size"] == 1
         assert r["accuracy"] == 0.0
 
+    def test_predict_stores_pre_close_in_history(self):
+        """predict() 必须将 pre_close 写入历史记录（方向判断的生产者）
+
+        回归保障：防止 append 漏存 pre_close 导致 accuracy 恒为 0。
+        """
+        from vnpy_china_analysis.auction.open_predict import OpenPricePredictor
+
+        p = OpenPricePredictor()
+        p.predict("000001", {
+            "pre_close": 10.0,
+            "auction_price": 10.2,
+            "auction_volume": 100000
+        })
+        rec = p.prediction_history["000001"][-1]
+        assert "pre_close" in rec, "predict() 未将 pre_close 写入历史记录"
+        assert rec["pre_close"] == 10.0
+
 
 class TestLevel2UiFieldMapping:
     """修复A：Level2 字段类型映射（dict 取值，不抛 TypeError）"""

@@ -109,6 +109,7 @@ class OpenPricePredictor(HistoricalAnalyzer):
         self.prediction_history[symbol].append({
             "datetime": datetime.now(),
             "predicted_price": predicted_price,
+            "pre_close": pre_close,  # 方向判断基准（供 get_prediction_accuracy）
             "actual_price": None,  # 实际开盘价需要后续更新
             "confidence": confidence
         })
