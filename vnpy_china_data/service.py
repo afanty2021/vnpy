@@ -137,13 +137,13 @@ class ChinaDataService(
             self.tushare_adapter.connect()
 
             # 连接QMT（可选）- 仅在非RPC模式下尝试连接本地QMT
-            if qmt_config.use_rpc:
+            if self.global_config.qmt.use_rpc:
                 # RPC模式：连接RPC适配器（不需要本地xtquant）
                 logger.info("使用RPC模式连接QMT，跳过本地QMT检查")
                 self.qmt_adapter.connect()
             else:
                 # 本地模式：需要xtquant库
-                if qmt_config.enabled:
+                if self.global_config.qmt.enabled:
                     try:
                         from xtquant import xtdata  # 尝试导入xtquant
                         self.qmt_adapter.connect()

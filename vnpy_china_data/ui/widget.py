@@ -131,8 +131,6 @@ class ChinaDataWidget(QtWidgets.QWidget):
         # K线周期
         config_layout.addWidget(QtWidgets.QLabel(_("K线周期：")), 3, 0)
         self.interval_combo = QtWidgets.QComboBox()
-        self.interval_combo.addItem(_("1分钟线"), Interval.MINUTE)
-        self.interval_combo.addItem(_("5分钟线"), Interval.MINUTE)  # Tushare暂不支持
         self.interval_combo.addItem(_("日线"), Interval.DAILY)
         config_layout.addWidget(self.interval_combo, 3, 1, 1, 3)
 
