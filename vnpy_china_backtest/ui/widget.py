@@ -1,9 +1,44 @@
 """A股回测UI组件"""
+import csv
 from typing import Any, Optional
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
+from collections import defaultdict
 
 from vnpy.trader.ui.qt import QtCore, QtGui, QtWidgets
 from vnpy.trader.locale import _
+from vnpy.trader.constant import Exchange, Interval, Direction
+
+
+# 交易所代码映射
+EXCHANGE_MAP = {
+    "SH": Exchange.SSE,
+    "SZ": Exchange.SZSE,
+    "SSE": Exchange.SSE,
+    "SZSE": Exchange.SZSE,
+}
+
+
+def parse_vt_symbol(vt_symbol: str) -> tuple:
+    """解析 vt_symbol 为 (symbol, exchange)
+
+    支持格式: "600660.SSE", "600660.SH", "000001.SZSE", "000001.SZ"
+    """
+    parts = vt_symbol.strip().split(".")
+    if len(parts) == 2:
+        symbol, suffix = parts
+        exchange = EXCHANGE_MAP.get(suffix.upper())
+        if exchange is None:
+            raise ValueError(f"不支持的交易所: {suffix}")
+        return symbol, exchange
+    elif len(parts) == 1:
+        # 自动推断交易所
+        code = parts[0]
+        if code.startswith("6"):
+            return code, Exchange.SSE
+        else:
+            return code, Exchange.SZSE
+    else:
+        raise ValueError(f"无效的股票代码格式: {vt_symbol}")
 
 
 class ChinaBacktestWidget(QtWidgets.QWidget):
@@ -24,6 +59,9 @@ class ChinaBacktestWidget(QtWidgets.QWidget):
 
         # 回测结果数据
         self.backtest_results: dict = {}
+        self.trades: list = []
+        self.equity_curve: list = []
+        self.daily_logs: list = []
 
         self.init_ui()
 
@@ -66,25 +104,38 @@ class ChinaBacktestWidget(QtWidgets.QWidget):
         param_group.setLayout(param_layout)
         layout.addWidget(param_group)
 
+        # 股票代码
+        param_layout.addWidget(QtWidgets.QLabel(_("股票代码：")), 0, 0)
+        self.symbol_input = QtWidgets.QLineEdit("600660.SSE")
+        self.symbol_input.setPlaceholderText(_("如：600660.SSE 或 000001.SZ"))
+        param_layout.addWidget(self.symbol_input, 0, 1)
+
+        # 策略选择
+        param_layout.addWidget(QtWidgets.QLabel(_("回测策略：")), 1, 0)
+        self.strategy_combo = QtWidgets.QComboBox()
+        self.strategy_combo.addItem(_("均线策略（MA5/MA20 金叉死叉）"), "ma_cross")
+        self.strategy_combo.addItem(_("买入持有（基准对比）"), "buy_hold")
+        param_layout.addWidget(self.strategy_combo, 1, 1)
+
         # 初始资金
-        param_layout.addWidget(QtWidgets.QLabel(_("初始资金：")), 0, 0)
+        param_layout.addWidget(QtWidgets.QLabel(_("初始资金：")), 2, 0)
         self.capital_input = QtWidgets.QLineEdit("1000000")
-        param_layout.addWidget(self.capital_input, 0, 1)
-        param_layout.addWidget(QtWidgets.QLabel(_("元")), 0, 2)
+        param_layout.addWidget(self.capital_input, 2, 1)
+        param_layout.addWidget(QtWidgets.QLabel(_("元")), 2, 2)
 
         # 开始日期
-        param_layout.addWidget(QtWidgets.QLabel(_("开始日期：")), 1, 0)
+        param_layout.addWidget(QtWidgets.QLabel(_("开始日期：")), 3, 0)
         self.start_date_edit = QtWidgets.QDateEdit()
         self.start_date_edit.setCalendarPopup(True)
         self.start_date_edit.setDate(QtCore.QDate.currentDate().addYears(-1))
-        param_layout.addWidget(self.start_date_edit, 1, 1)
+        param_layout.addWidget(self.start_date_edit, 3, 1)
 
         # 结束日期
-        param_layout.addWidget(QtWidgets.QLabel(_("结束日期：")), 2, 0)
+        param_layout.addWidget(QtWidgets.QLabel(_("结束日期：")), 4, 0)
         self.end_date_edit = QtWidgets.QDateEdit()
         self.end_date_edit.setCalendarPopup(True)
         self.end_date_edit.setDate(QtCore.QDate.currentDate())
-        param_layout.addWidget(self.end_date_edit, 2, 1)
+        param_layout.addWidget(self.end_date_edit, 4, 1)
 
         # A股特色功能
         feature_group = QtWidgets.QGroupBox(_("A股特色功能"))
@@ -197,6 +248,28 @@ class ChinaBacktestWidget(QtWidgets.QWidget):
         self.total_cost_label = QtWidgets.QLabel("--")
         china_layout.addWidget(self.total_cost_label, 1, 3)
 
+        # 交易统计区
+        stats_group = QtWidgets.QGroupBox(_("交易统计"))
+        stats_layout = QtWidgets.QGridLayout()
+        stats_group.setLayout(stats_layout)
+        layout.addWidget(stats_group)
+
+        stats_layout.addWidget(QtWidgets.QLabel(_("总交易次数：")), 0, 0)
+        self.total_trades_label = QtWidgets.QLabel("--")
+        stats_layout.addWidget(self.total_trades_label, 0, 1)
+
+        stats_layout.addWidget(QtWidgets.QLabel(_("被阻止订单：")), 0, 2)
+        self.blocked_label = QtWidgets.QLabel("--")
+        stats_layout.addWidget(self.blocked_label, 0, 3)
+
+        stats_layout.addWidget(QtWidgets.QLabel(_("最终权益：")), 1, 0)
+        self.final_equity_label = QtWidgets.QLabel("--")
+        stats_layout.addWidget(self.final_equity_label, 1, 1)
+
+        stats_layout.addWidget(QtWidgets.QLabel(_("数据条数：")), 1, 2)
+        self.bar_count_label = QtWidgets.QLabel("--")
+        stats_layout.addWidget(self.bar_count_label, 1, 3)
+
         layout.addStretch()
 
         # 操作按钮
@@ -213,9 +286,23 @@ class ChinaBacktestWidget(QtWidgets.QWidget):
 
         return widget
 
+    # ── 回测执行 ──────────────────────────────────────────────
+
     def start_backtest(self) -> None:
         """开始回测"""
-        # 获取参数
+        # 解析股票代码
+        vt_symbol = self.symbol_input.text().strip()
+        if not vt_symbol:
+            self.show_status(_("请输入股票代码"))
+            return
+
+        try:
+            symbol, exchange = parse_vt_symbol(vt_symbol)
+        except ValueError as e:
+            self.show_status(str(e))
+            return
+
+        # 解析资金
         try:
             capital = float(self.capital_input.text())
         except ValueError:
@@ -229,51 +316,219 @@ class ChinaBacktestWidget(QtWidgets.QWidget):
             self.show_status(_("开始日期必须早于结束日期"))
             return
 
+        self.show_status(_("正在加载数据..."))
+        self.progress_bar.setValue(5)
+
+        # 加载K线数据
+        bars = self._load_bar_data(symbol, exchange, start_date, end_date)
+        if not bars:
+            self.show_status(_("未能加载到数据，请检查股票代码和日期范围"))
+            self.progress_bar.setValue(0)
+            return
+
         self.show_status(_("正在执行回测..."))
-        self.progress_bar.setValue(10)
+        self.progress_bar.setValue(20)
 
-        # 模拟回测执行（实际应调用GUI引擎）
-        self._simulate_backtest(capital, start_date, end_date)
+        # 获取策略类型
+        strategy_key = self.strategy_combo.currentData()
 
-    def stop_backtest(self) -> None:
-        """停止回测"""
-        self.show_status(_("回测已停止"))
-        self.progress_bar.setValue(0)
+        # 执行回测
+        self._run_backtest(
+            vt_symbol=f"{symbol}.{exchange.value}",
+            bars=bars,
+            capital=capital,
+            strategy_key=strategy_key,
+        )
 
-    def _simulate_backtest(self, capital: float, start_date: date, end_date: date) -> None:
-        """模拟回测执行"""
-        import random
+    def _load_bar_data(
+        self,
+        symbol: str,
+        exchange: Exchange,
+        start_date: date,
+        end_date: date,
+    ) -> list:
+        """通过数据服务加载K线数据"""
+        try:
+            from vnpy_china_data.service import ChinaDataService
 
-        # 模拟进度
-        for i in range(10, 101, 10):
-            self.progress_bar.setValue(i)
-            QtCore.QTimer.singleShot(100, lambda: None)
+            service = ChinaDataService()
+            service.connect()
 
-        # 生成模拟结果
-        total_return = random.uniform(-0.3, 0.5)  # -30% 到 50%
-        annual_return = random.uniform(-0.2, 0.4)
-        max_drawdown = -random.uniform(0.05, 0.3)
-        sharpe = random.uniform(0.5, 2.5)
-        win_rate = random.uniform(0.4, 0.7)
-        profit_loss_ratio = random.uniform(1.0, 3.0)
-        avg_holding_days = random.uniform(3, 20)
-        total_cost = capital * random.uniform(0.001, 0.01)
+            start_dt = datetime.combine(start_date, datetime.min.time())
+            end_dt = datetime.combine(end_date, datetime.max.time())
 
+            bars = service.get_bar_data(
+                symbol=symbol,
+                exchange=exchange,
+                interval=Interval.DAILY,
+                start=start_dt,
+                end=end_dt,
+            )
+
+            service.disconnect()
+            return bars
+
+        except ImportError:
+            self.show_status(_("未安装 vnpy_china_data，无法加载数据"))
+            return []
+        except Exception as e:
+            self.show_status(_("数据加载失败: {}").format(e))
+            return []
+
+    def _run_backtest(
+        self,
+        vt_symbol: str,
+        bars: list,
+        capital: float,
+        strategy_key: str,
+    ) -> None:
+        """执行真实回测"""
+        from vnpy_china_backtest.engine import EnhancedBacktestEngine
+
+        # 创建引擎
+        engine = EnhancedBacktestEngine()
+        engine.capital = capital
+        engine.cash = capital
+        engine.enable_cost = self.enable_cost_checkbox.isChecked()
+        engine.enable_slippage = self.enable_slippage_checkbox.isChecked()
+        engine.enable_price_limit = self.enable_price_limit_checkbox.isChecked()
+        engine.enable_t1 = self.enable_t1_checkbox.isChecked()
+
+        # 加载数据
+        engine.load_data(bars)
+
+        total_bars = len(bars)
+        self.daily_logs = []
+        self.equity_curve = [capital]
+
+        # 按策略执行逐日回放
+        if strategy_key == "ma_cross":
+            self._strategy_ma_cross(engine, vt_symbol, bars)
+        elif strategy_key == "buy_hold":
+            self._strategy_buy_hold(engine, vt_symbol, bars)
+
+        # 计算指标
+        metrics = engine.calculate_metrics()
+
+        # 收集结果
         self.backtest_results = {
-            "total_return": total_return,
-            "annual_return": annual_return,
-            "max_drawdown": max_drawdown,
-            "sharpe_ratio": sharpe,
-            "win_rate": win_rate,
-            "profit_loss_ratio": profit_loss_ratio,
-            "avg_holding_days": avg_holding_days,
-            "total_cost": total_cost,
+            "total_return": metrics.total_return,
+            "annual_return": metrics.annual_return,
+            "max_drawdown": metrics.max_drawdown,
+            "sharpe_ratio": metrics.sharpe_ratio,
+            "win_rate": metrics.win_rate,
+            "profit_loss_ratio": metrics.profit_loss_ratio,
+            "avg_holding_days": metrics.avg_holding_days,
+            "total_cost": engine.total_cost,
+            "total_trades": metrics.total_trades,
+            "blocked_orders": engine.blocked_orders,
+            "final_equity": engine.get_equity(),
+            "bar_count": total_bars,
         }
+        self.trades = list(engine.trades.values())
 
-        # 更新结果
+        # 更新界面
         self.update_results()
-        self.show_status(_("回测完成"))
         self.progress_bar.setValue(100)
+        self.show_status(
+            _("回测完成：{} 条数据，{} 笔交易").format(total_bars, len(self.trades))
+        )
+
+    def _strategy_ma_cross(
+        self,
+        engine,
+        vt_symbol: str,
+        bars: list,
+    ) -> None:
+        """均线策略：MA5/MA20 金叉买入，死叉卖出"""
+        close_prices = [bar.close_price for bar in bars]
+        total = len(bars)
+        holding = False
+
+        for i, bar in enumerate(bars):
+            # 更新昨日收盘价
+            engine.pre_closes[vt_symbol] = bar.close_price
+
+            # 需要至少20根K线才能计算MA20
+            if i < 20:
+                engine.process_bar(bar)
+                self.equity_curve.append(engine.get_equity())
+                continue
+
+            # 计算均线
+            ma5 = sum(close_prices[i - 5 : i]) / 5
+            ma20 = sum(close_prices[i - 20 : i]) / 20
+            prev_ma5 = sum(close_prices[i - 6 : i - 1]) / 5
+            prev_ma20 = sum(close_prices[i - 21 : i - 1]) / 20
+
+            price = bar.close_price
+
+            # 金叉：MA5 上穿 MA20 → 买入
+            if not holding and prev_ma5 <= prev_ma20 and ma5 > ma20:
+                # 计算可买股数（100股整数倍）
+                max_volume = int(engine.cash / (price * 100)) * 100
+                if max_volume >= 100:
+                    ok, reason = engine.buy(vt_symbol, price, max_volume)
+                    if ok:
+                        holding = True
+                        self.daily_logs.append(
+                            f"{bar.datetime.date()} 买入 {vt_symbol} "
+                            f"价格:{price:.2f} 数量:{max_volume}"
+                        )
+
+            # 死叉：MA5 下穿 MA20 → 卖出
+            elif holding and prev_ma5 >= prev_ma20 and ma5 < ma20:
+                pos = engine.get_position(vt_symbol)
+                if pos > 0:
+                    ok, reason = engine.sell(vt_symbol, price, pos)
+                    if ok:
+                        holding = False
+                        self.daily_logs.append(
+                            f"{bar.datetime.date()} 卖出 {vt_symbol} "
+                            f"价格:{price:.2f} 数量:{pos}"
+                        )
+
+            engine.process_bar(bar)
+            self.equity_curve.append(engine.get_equity())
+
+            # 更新进度
+            progress = 20 + int(70 * (i + 1) / total)
+            self.progress_bar.setValue(progress)
+
+    def _strategy_buy_hold(
+        self,
+        engine,
+        vt_symbol: str,
+        bars: list,
+    ) -> None:
+        """买入持有策略：首日全仓买入，持有到期末"""
+        if not bars:
+            return
+
+        total = len(bars)
+
+        # 首日买入
+        first_bar = bars[0]
+        engine.pre_closes[vt_symbol] = first_bar.close_price
+        price = first_bar.close_price
+        max_volume = int(engine.cash / (price * 100)) * 100
+        if max_volume >= 100:
+            engine.buy(vt_symbol, price, max_volume)
+            self.daily_logs.append(
+                f"{first_bar.datetime.date()} 买入 {vt_symbol} "
+                f"价格:{price:.2f} 数量:{max_volume} (买入持有)"
+            )
+
+        # 逐日更新
+        for i, bar in enumerate(bars):
+            engine.pre_closes[vt_symbol] = bar.close_price
+            engine.process_bar(bar)
+            self.equity_curve.append(engine.get_equity())
+
+            progress = 20 + int(70 * (i + 1) / total)
+            self.progress_bar.setValue(progress)
+
+    # ── 结果展示 ──────────────────────────────────────────────
 
     def update_results(self) -> None:
         """更新回测结果显示"""
@@ -293,6 +548,12 @@ class ChinaBacktestWidget(QtWidgets.QWidget):
         self._update_metric_label(self.profit_loss_ratio_label, r["profit_loss_ratio"], is_percent=False, fmt=".2f")
         self._update_metric_label(self.avg_holding_days_label, r["avg_holding_days"], is_percent=False, fmt=".1f")
         self.total_cost_label.setText(f"¥{r['total_cost']:,.2f}")
+
+        # 更新交易统计
+        self.total_trades_label.setText(str(r.get("total_trades", 0)))
+        self.blocked_label.setText(str(r.get("blocked_orders", 0)))
+        self.final_equity_label.setText(f"¥{r.get('final_equity', 0):,.2f}")
+        self.bar_count_label.setText(str(r.get("bar_count", 0)))
 
     def _update_metric_label(
         self,
@@ -314,18 +575,87 @@ class ChinaBacktestWidget(QtWidgets.QWidget):
             label.setStyleSheet("color: black; font-weight: bold;")
             label.setText(text)
 
+    # ── 导出报告 ──────────────────────────────────────────────
+
     def export_report(self) -> None:
-        """导出回测报告"""
+        """导出回测报告为CSV"""
         if not self.backtest_results:
             self.show_status(_("无可导出的数据"))
             return
 
-        # 模拟导出
-        self.show_status(_("报告已导出（模拟）"))
+        # 选择保存路径
+        default_name = f"backtest_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            _("导出回测报告"),
+            default_name,
+            _("CSV文件 (*.csv)")
+        )
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, "w", newline="", encoding="utf-8-sig") as f:
+                writer = csv.writer(f)
+
+                # 绩效指标摘要
+                writer.writerow(["=== 绩效指标 ==="])
+                writer.writerow(["指标", "值"])
+                r = self.backtest_results
+                writer.writerow(["总收益率", f"{r['total_return']:.2%}"])
+                writer.writerow(["年化收益率", f"{r['annual_return']:.2%}"])
+                writer.writerow(["最大回撤", f"{r['max_drawdown']:.2%}"])
+                writer.writerow(["夏普比率", f"{r['sharpe_ratio']:.2f}"])
+                writer.writerow(["胜率", f"{r['win_rate']:.2%}"])
+                writer.writerow(["盈亏比", f"{r['profit_loss_ratio']:.2f}"])
+                writer.writerow(["平均持股天数", f"{r['avg_holding_days']:.1f}"])
+                writer.writerow(["总交易成本", f"¥{r['total_cost']:,.2f}"])
+                writer.writerow(["总交易次数", r.get("total_trades", 0)])
+                writer.writerow(["被阻止订单", r.get("blocked_orders", 0)])
+                writer.writerow(["最终权益", f"¥{r.get('final_equity', 0):,.2f}"])
+                writer.writerow([])
+
+                # 交易明细
+                if self.trades:
+                    writer.writerow(["=== 交易明细 ==="])
+                    writer.writerow(["时间", "代码", "方向", "价格", "数量", "金额"])
+                    for t in self.trades:
+                        direction = "买入" if t.direction == Direction.LONG else "卖出"
+                        amount = t.price * t.volume
+                        writer.writerow([
+                            t.datetime,
+                            t.vt_symbol,
+                            direction,
+                            f"{t.price:.2f}",
+                            int(t.volume),
+                            f"{amount:,.2f}",
+                        ])
+                    writer.writerow([])
+
+                # 日度权益曲线
+                if self.equity_curve:
+                    writer.writerow(["=== 权益曲线 ==="])
+                    writer.writerow(["序号", "权益"])
+                    for i, eq in enumerate(self.equity_curve):
+                        writer.writerow([i, f"{eq:,.2f}"])
+
+            self.show_status(_("报告已导出: {}").format(file_path))
+
+        except Exception as e:
+            self.show_status(_("导出失败: {}").format(e))
+
+    def stop_backtest(self) -> None:
+        """停止回测"""
+        self.show_status(_("回测已停止"))
+        self.progress_bar.setValue(0)
 
     def clear_results(self) -> None:
         """清空结果"""
         self.backtest_results = {}
+        self.trades = []
+        self.equity_curve = []
+        self.daily_logs = []
+
         self.total_return_label.setText("--")
         self.annual_return_label.setText("--")
         self.max_drawdown_label.setText("--")
@@ -334,6 +664,10 @@ class ChinaBacktestWidget(QtWidgets.QWidget):
         self.profit_loss_ratio_label.setText("--")
         self.avg_holding_days_label.setText("--")
         self.total_cost_label.setText("--")
+        self.total_trades_label.setText("--")
+        self.blocked_label.setText("--")
+        self.final_equity_label.setText("--")
+        self.bar_count_label.setText("--")
         self.progress_bar.setValue(0)
         self.show_status(_("结果已清空"))
 
