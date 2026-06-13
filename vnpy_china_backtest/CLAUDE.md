@@ -270,6 +270,17 @@ print(f"成本费率: {metrics.cost_rate:.4f}")
 
 ## 变更记录
 
+### 2026-06-13 v1.1.0
+- 🔧 **回测可信度修复**：
+  - `get_equity()` 改用回测当前市价计算持仓市值（此前用买入均价，导致日间未实现盈亏丢失）
+  - 回测时钟取自 `bar.datetime`，替代 `datetime.now()`（此前导致 T+1 规则在回放中失效、所有卖出被阻止）
+  - `calculate_metrics()` 接入完整权益曲线与真实回测天数（此前两点曲线导致夏普比率恒为 0、最大回撤失真、天数硬编码 240）
+  - `t1_simulator` 卖出冻结量计算改用回测 `trade_date`，消除 `date.today()` 污染
+  - 修复 `cost.py` 中 `CostCalculatorFactory("ETF")` 的 `min_commission` 拼写错误（原会抛 TypeError）
+- 🏗️ **架构重构**：
+  - 新增 `strategies.py`：`BaseStrategy` / `MaCrossStrategy` / `BuyHoldStrategy`，策略与 UI 解耦（新增策略无需改 Widget）
+  - `widget.py` 复用数据服务单例 `get_data_service()`、统一使用 `extract_vt_symbol`、清理未用导入（`timedelta`/`defaultdict`/`QtGui`）
+
 ### 2026-02-24 v1.0.0
 - 初始版本
 - 实现交易成本计算（佣金、印花税、过户费、经手费）
