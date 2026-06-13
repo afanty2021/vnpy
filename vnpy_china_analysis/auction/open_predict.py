@@ -165,14 +165,14 @@ class OpenPricePredictor(HistoricalAnalyzer):
             error = abs(p["predicted_price"] - p["actual_price"]) / p["actual_price"]
             errors.append(error)
 
-            # 判断方向是否正确
-            pred_change = p["predicted_price"] - p["predicted_price"]  # 这里有问题，需要修改
-            actual_change = p["actual_price"] - p["predicted_price"]  # 这里也有问题
-
-            # 简化判断
-            if (p["predicted_price"] > p["actual_price"] * 0.99 and
-                p["predicted_price"] < p["actual_price"] * 1.01):
-                correct_direction += 1
+            # 方向判断：必须有有效基准（pre_close），否则跳过（不计入 correct，但仍计入误差与分母）
+            # pre_close=0 会让方向恒为 True 虚高准确率，故严格 None/正数检查
+            pre_close = p.get("pre_close")
+            if pre_close is not None and pre_close > 0:
+                pred_dir = (p["predicted_price"] - pre_close) > 0
+                actual_dir = (p["actual_price"] - pre_close) > 0
+                if pred_dir == actual_dir:
+                    correct_direction += 1
 
         return {
             "sample_size": len(predictions),

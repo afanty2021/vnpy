@@ -233,9 +233,14 @@ class Level2AnalysisWidget(BaseAnalysisWidget):
 
             if analysis:
                 order_queue = analysis.get("order_queue", {})
-                self.setItemText(row, 1, self.format_number(order_queue.get("support_level", 0), 2))
-                self.setItemText(row, 2, self.format_number(order_queue.get("resistance_level", 0), 2))
-                self.setItemText(row, 3, str(order_queue.get("price_depth", 0)))
+                # support_level/resistance_level/price_depth 均为 dict，取语义字段
+                support = order_queue.get("support_level") or {}
+                resistance = order_queue.get("resistance_level") or {}
+                depth = order_queue.get("price_depth") or {}
+
+                self.setItemText(row, 1, self.format_number(support.get("price", 0), 2))
+                self.setItemText(row, 2, self.format_number(resistance.get("price", 0), 2))
+                self.setItemText(row, 3, self.format_number(depth.get("depth_ratio", 0), 2))
 
                 main_force = analysis.get("main_force", {})
                 self.setItemText(row, 4, main_force.get("action", _("未知")))
@@ -528,28 +533,28 @@ class MoneyFlowWidget(BaseAnalysisWidget):
             # 填充数据
             self.setItemText(row, 0, data.get("symbol", ""))
 
-            # 主力净流入（着色）
-            main_inflow = data.get("main_net_amount", 0) / 10000  # 转换为万元
+            # 主力净流入（着色），单位：元，format_amount 内部做 万/亿 转换
+            main_inflow = data.get("main_net_amount", 0)
             self.setItemText(row, 1, self.format_amount(main_inflow), color=self.get_inflow_color(main_inflow))
 
             # 超大单
-            super_large = data.get("super_large_net_amount", 0) / 10000  # 转换为万元
+            super_large = data.get("super_large_net_amount", 0)
             self.setItemText(row, 2, self.format_amount(super_large))
 
             # 大单
-            large = data.get("large_net_amount", 0) / 10000  # 转换为万元
+            large = data.get("large_net_amount", 0)
             self.setItemText(row, 3, self.format_amount(large))
 
             # 中单
-            medium = data.get("medium_net_amount", 0) / 10000  # 转换为万元
+            medium = data.get("medium_net_amount", 0)
             self.setItemText(row, 4, self.format_amount(medium))
 
             # 小单
-            small = data.get("small_net_amount", 0) / 10000  # 转换为万元
+            small = data.get("small_net_amount", 0)
             self.setItemText(row, 5, self.format_amount(small))
 
-            # 总净流入（着色）
-            net_inflow = data.get("total_net_amount", 0) / 10000  # 转换为万元
+            # 总净流入（着色），单位：元
+            net_inflow = data.get("total_net_amount", 0)
             self.setItemText(row, 6, self.format_amount(net_inflow), color=self.get_inflow_color(net_inflow))
 
     def update_historical_summary(self, data_list: List[Dict[str, Any]]) -> None:
@@ -558,8 +563,8 @@ class MoneyFlowWidget(BaseAnalysisWidget):
         Args:
             data_list: 历史资金流向数据列表
         """
-        total_main_inflow = sum(d.get("main_net_amount", 0) for d in data_list) / 10000  # 转换为万元
-        total_net_inflow = sum(d.get("total_net_amount", 0) for d in data_list) / 10000  # 转换为万元
+        total_main_inflow = sum(d.get("main_net_amount", 0) for d in data_list)  # 单位：元
+        total_net_inflow = sum(d.get("total_net_amount", 0) for d in data_list)  # 单位：元
 
         self.main_inflow_label.setText(_("主力净流入：") + self.format_amount(total_main_inflow))
         self.main_inflow_label.setStyleSheet(

@@ -1,9 +1,15 @@
-"""Tests for vnpy_china_analysis module - REQ-007 行情数据分析"""
+"""Tests for vnpy_china_analysis module - REQ-007 行情数据分析
 
+测试体仅使用原生 assert，无需 pytest 即可运行（pytest/unittest runner 均兼容）。
+"""
+
+import os
 import sys
-sys.path.insert(0, '/Users/berton/Github/vnpy')
 
-import pytest
+# 项目根目录（本文件上溯三级：tests -> vnpy_china_analysis -> 项目根）
+# 跨平台替代原先硬编码的 macOS 绝对路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 from datetime import datetime
 from decimal import Decimal
 
@@ -173,3 +179,173 @@ class TestHelpers:
         # 成交量100万股，总股本1亿股
         result = calculate_turnover_rate(volume=1000000, total_shares=100000000)
         assert result == 1.0  # 1%
+
+
+# ---------------------------------------------------------------------------
+# 以下为代码审查修复的回归测试（A/B/C/D/E）
+# ---------------------------------------------------------------------------
+
+def _make_tick(symbol, price, cum_volume, bid1, ask1, last_volume=0):
+    """构造 TickData（Level1，QMT 不填 last_volume）"""
+    from vnpy.trader.object import TickData
+    from vnpy.trader.constant import Exchange
+    return TickData(
+        symbol=symbol, exchange=Exchange.SZSE, datetime=datetime.now(),
+        gateway_name="QMT", last_price=price, volume=cum_volume,
+        last_volume=last_volume, bid_price_1=bid1, ask_price_1=ask1
+    )
+
+
+class TestMoneyFlowAnalyzerUpdate:
+    """修复B：update() 聚合（tick 缓冲区）"""
+
+    def test_update_accumulates_tick_history(self):
+        """连续 update 两条 tick，tick_history 应累积为 2（聚合生效）"""
+        from vnpy_china_analysis.money_flow.analyzer import MoneyFlowAnalyzer
+
+        a = MoneyFlowAnalyzer()
+        a.update("000001", {"price": 10.0, "volume": 100, "direction": "buy"})
+        a.update("000001", {"price": 10.0, "volume": 100, "direction": "sell"})
+
+        assert "000001" in a.tick_history
+        assert len(a.tick_history["000001"]) == 2
+
+
+class TestTickAdapter:
+    """修复C：TickData→TickFlowData（Level1 方向推断 + 成交量差分）"""
+
+    def test_direction_buy_at_ask(self):
+        """成交价 >= ask1 → 主动买"""
+        from vnpy_china_analysis.adapters.tick_adapter import tick_to_flow
+
+        tick = _make_tick("000001", 10.01, 1000, 10.00, 10.01)
+        lp, ld, lv = {}, {}, {}
+        flow = tick_to_flow(tick, lp, ld, lv)
+        assert flow.direction == "buy"
+
+    def test_direction_sell_at_bid(self):
+        """成交价 <= bid1 → 主动卖"""
+        from vnpy_china_analysis.adapters.tick_adapter import tick_to_flow
+
+        tick = _make_tick("000001", 9.99, 1000, 9.99, 10.00)
+        lp, ld, lv = {}, {}, {}
+        flow = tick_to_flow(tick, lp, ld, lv)
+        assert flow.direction == "sell"
+
+    def test_volume_diff_fallback(self):
+        """QMT 不填 last_volume 时，用累计 volume 差分得到本笔成交量"""
+        from vnpy_china_analysis.adapters.tick_adapter import tick_to_flow
+
+        lp, ld, lv = {}, {}, {}
+        t1 = _make_tick("000001", 10.01, 1000, 10.00, 10.01)
+        f1 = tick_to_flow(t1, lp, ld, lv)
+        t2 = _make_tick("000001", 10.01, 1200, 10.00, 10.01)
+        f2 = tick_to_flow(t2, lp, ld, lv)
+
+        assert f1.volume == 1000    # 首笔：无前值，差分 = 1000 - 0
+        assert f2.volume == 200     # 次笔：1200 - 1000
+
+    def test_on_tick_drives_aggregation(self):
+        """on_tick 端到端：发 tick 后 tick_history 非空"""
+        from vnpy_china_analysis.money_flow.analyzer import MoneyFlowAnalyzer
+
+        a = MoneyFlowAnalyzer()
+        a.on_tick(_make_tick("000001", 10.01, 1000, 10.00, 10.01))
+        a.on_tick(_make_tick("000001", 9.99, 1200, 9.99, 10.00))
+
+        buf = a.tick_history["000001"]
+        assert len(buf) == 2
+        assert buf[0].direction == "buy" and buf[0].volume == 1000
+        assert buf[1].direction == "sell" and buf[1].volume == 200
+
+
+class TestOpenPricePredictionAccuracy:
+    """修复D：开盘价方向判断（None 兼容，不虚高准确率）"""
+
+    def test_accuracy_with_valid_pre_close(self):
+        """预测与实际同向（均高于 pre_close）→ 计入正确，accuracy=100"""
+        from vnpy_china_analysis.auction.open_predict import OpenPricePredictor
+
+        p = OpenPricePredictor()
+        p.prediction_history["000001"] = [{
+            "datetime": datetime.now(),
+            "predicted_price": 10.5, "pre_close": 10.0,
+            "actual_price": 10.8, "confidence": 80
+        }]
+        r = p.get_prediction_accuracy("000001")
+        assert r["accuracy"] == 100.0
+
+    def test_accuracy_skips_missing_pre_close(self):
+        """旧记录无 pre_close → 跳过方向判断，accuracy=0（不虚高）"""
+        from vnpy_china_analysis.auction.open_predict import OpenPricePredictor
+
+        p = OpenPricePredictor()
+        p.prediction_history["000001"] = [{
+            "datetime": datetime.now(),
+            "predicted_price": 9.5, "actual_price": 11.0, "confidence": 80
+            # 无 pre_close
+        }]
+        r = p.get_prediction_accuracy("000001")
+        assert r["sample_size"] == 1
+        assert r["accuracy"] == 0.0
+
+
+class TestLevel2UiFieldMapping:
+    """修复A：Level2 字段类型映射（dict 取值，不抛 TypeError）"""
+
+    def test_dict_field_extraction(self):
+        """support_level/price_depth 为 dict 时，取 price/depth_ratio 不崩溃"""
+        from vnpy_china_analysis.ui.widget import BaseAnalysisWidget
+
+        class _W(BaseAnalysisWidget):
+            def __init__(self):
+                pass
+
+        w = _W()
+        order_queue = {
+            "support_level": {"price": 10.0, "volume": 500, "strength": 2500, "level": "weak"},
+            "resistance_level": {"price": 10.2, "volume": 300, "strength": 1500, "level": "minimal"},
+            "price_depth": {"bid_total": 1000, "ask_total": 800, "depth_ratio": 1.25}
+        }
+        support = order_queue.get("support_level") or {}
+        resistance = order_queue.get("resistance_level") or {}
+        depth = order_queue.get("price_depth") or {}
+
+        assert w.format_number(support.get("price", 0), 2) == "10.00"
+        assert w.format_number(resistance.get("price", 0), 2) == "10.20"
+        assert w.format_number(depth.get("depth_ratio", 0), 2) == "1.25"
+
+    def test_empty_order_queue_fallback(self):
+        """空 order_queue（无 tick 数据）→ 取值兜底 0，不崩溃"""
+        order_queue = {}
+        support = order_queue.get("support_level") or {}
+        depth = order_queue.get("price_depth") or {}
+        assert support.get("price", 0) == 0
+        assert depth.get("depth_ratio", 0) == 0
+
+
+class TestMoneyFlowAmountFormat:
+    """修复E：历史金额单位（元，不再 /10000 双重换算）"""
+
+    def test_format_yi_level(self):
+        """1亿元主力净流入应显示为「亿」量级（与实时路径一致）"""
+        from vnpy_china_analysis.ui.widget import BaseAnalysisWidget
+
+        class _W(BaseAnalysisWidget):
+            def __init__(self):
+                pass
+
+        w = _W()
+        # 模拟修复后：main_net_amount（元）直接进 format_amount
+        assert "亿" in w.format_amount(100000000)
+
+    def test_format_wan_level(self):
+        """2万元应显示为「万」量级"""
+        from vnpy_china_analysis.ui.widget import BaseAnalysisWidget
+
+        class _W(BaseAnalysisWidget):
+            def __init__(self):
+                pass
+
+        w = _W()
+        assert "万" in w.format_amount(20000)

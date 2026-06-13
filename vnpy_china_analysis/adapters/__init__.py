@@ -6,8 +6,10 @@
 
 from .qmt_adapter import QmtDataAdapter
 from .tushare_adapter import TushareDataAdapter
+from .tick_adapter import tick_to_flow
 
 __all__ = [
     "QmtDataAdapter",
     "TushareDataAdapter",
+    "tick_to_flow",
 ]

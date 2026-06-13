@@ -7,9 +7,12 @@
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 
+from vnpy.trader.object import TickData
+
 from .classifier import MoneyFlowClassifier
 from .indicator import MoneyFlowIndicator
 from ..objects.types import MoneyFlowData, TickFlowData, MoneyFlowLevel
+from ..adapters.tick_adapter import tick_to_flow
 
 
 class MoneyFlowAnalyzer:
@@ -27,7 +30,13 @@ class MoneyFlowAnalyzer:
         """
         self.classifier = MoneyFlowClassifier(thresholds)
         self.indicator = MoneyFlowIndicator()
-        self.flow_history: Dict[str, List[MoneyFlowData]] = {}
+        self.flow_history: Dict[str, List[MoneyFlowData]] = {}      # 聚合快照（供 get_flow_summary）
+        self.tick_history: Dict[str, List[TickFlowData]] = {}       # 原始 tick 缓冲（供 update/on_tick 聚合）
+        self.max_tick_cache = 1000                                   # 单标的 tick 缓冲上限
+        # Level1 方向推断 / 成交量差分所需状态（供 tick_adapter 复用）
+        self._last_price: Dict[str, float] = {}
+        self._last_dir: Dict[str, str] = {}
+        self._last_volume: Dict[str, int] = {}
 
     def analyze(
         self,
@@ -117,14 +126,14 @@ class MoneyFlowAnalyzer:
             function_code=data.get("function_code", 1)
         )
 
-        # 获取历史tick数据
-        if symbol not in self.flow_history:
-            tick_history = []
-        else:
-            # 从缓存中获取历史数据
-            tick_history = []
+        # 写入 tick 缓冲并限长
+        buf = self.tick_history.setdefault(symbol, [])
+        buf.append(tick_flow)
+        if len(buf) > self.max_tick_cache:
+            del buf[:-self.max_tick_cache]
 
-        result = self.analyze(symbol, [tick_flow] + tick_history)
+        # 用窗口内全部 tick 聚合（analyze 内部按 window_minutes 过滤 datetime）
+        result = self.analyze(symbol, buf)
 
         return {
             "symbol": symbol,
@@ -132,6 +141,28 @@ class MoneyFlowAnalyzer:
             "flow_data": result,
             "structure": self.get_flow_structure(symbol)
         }
+
+    def on_tick(self, tick: TickData) -> None:
+        """实时 Tick 驱动资金流分析（Level1）
+
+        Level1 无主动方向、QMT 不填 last_volume，由 tick_adapter 推断方向并差分成交量。
+        跳过无新增成交量的 tick，避免 0 成交污染聚合。
+
+        Args:
+            tick: vnpy TickData
+        """
+        flow = tick_to_flow(tick, self._last_price, self._last_dir, self._last_volume)
+
+        # 跳过无新增成交量（差分为 0 或回退）
+        if flow.volume <= 0:
+            return
+
+        buf = self.tick_history.setdefault(tick.symbol, [])
+        buf.append(flow)
+        if len(buf) > self.max_tick_cache:
+            del buf[:-self.max_tick_cache]
+
+        self.analyze(tick.symbol, buf)
 
     def get_flow_summary(self, symbol: str, minutes: int = 5) -> Dict[str, Any]:
         """获取资金流向汇总
@@ -272,8 +303,16 @@ class MoneyFlowAnalyzer:
         """
         if symbol:
             self.flow_history.pop(symbol, None)
+            self.tick_history.pop(symbol, None)
+            self._last_price.pop(symbol, None)
+            self._last_dir.pop(symbol, None)
+            self._last_volume.pop(symbol, None)
         else:
             self.flow_history.clear()
+            self.tick_history.clear()
+            self._last_price.clear()
+            self._last_dir.clear()
+            self._last_volume.clear()
 
         self.classifier.clear_cache(symbol)
         self.indicator.clear_cache(symbol)
