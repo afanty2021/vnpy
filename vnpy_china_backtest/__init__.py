@@ -47,6 +47,14 @@ from vnpy_china_backtest.engine import (
     create_engine
 )
 
+from vnpy_china_backtest.strategies import (
+    BaseStrategy,
+    MaCrossStrategy,
+    BuyHoldStrategy,
+    STRATEGIES,
+    get_strategy
+)
+
 from vnpy_china_backtest.config import (
     BacktestConfig,
     default_config,
@@ -96,6 +104,13 @@ __all__ = [
     # 引擎
     "EnhancedBacktestEngine",
     "create_engine",
+
+    # 策略
+    "BaseStrategy",
+    "MaCrossStrategy",
+    "BuyHoldStrategy",
+    "STRATEGIES",
+    "get_strategy",
 
     # 配置
     "BacktestConfig",

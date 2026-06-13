@@ -1,44 +1,36 @@
 """A股回测UI组件"""
 import csv
 from typing import Any, Optional
-from datetime import datetime, date, timedelta
-from collections import defaultdict
+from datetime import datetime, date
 
-from vnpy.trader.ui.qt import QtCore, QtGui, QtWidgets
+from vnpy.trader.ui.qt import QtCore, QtWidgets
 from vnpy.trader.locale import _
 from vnpy.trader.constant import Exchange, Interval, Direction
+from vnpy.trader.utility import extract_vt_symbol
 
 
-# 交易所代码映射
-EXCHANGE_MAP = {
-    "SH": Exchange.SSE,
-    "SZ": Exchange.SZSE,
-    "SSE": Exchange.SSE,
-    "SZSE": Exchange.SZSE,
+# 交易所缩写规范化（SH/SZ → SSE/SZSE），其余原样交给标准 extract_vt_symbol
+_EXCHANGE_ALIASES = {
+    "SH": "SSE",
+    "SZ": "SZSE",
 }
 
 
-def parse_vt_symbol(vt_symbol: str) -> tuple:
+def _parse_vt_symbol(vt_symbol: str) -> tuple:
     """解析 vt_symbol 为 (symbol, exchange)
 
-    支持格式: "600660.SSE", "600660.SH", "000001.SZSE", "000001.SZ"
+    支持格式: "600660.SSE"、"600660.SH"、"000001.SZSE"、"000001.SZ"。
+    复用 vnpy.trader.utility.extract_vt_symbol，仅补充 SH/SZ 缩写规范化，
+    不再做不可靠的代码前缀自动推断。
     """
-    parts = vt_symbol.strip().split(".")
-    if len(parts) == 2:
-        symbol, suffix = parts
-        exchange = EXCHANGE_MAP.get(suffix.upper())
-        if exchange is None:
-            raise ValueError(f"不支持的交易所: {suffix}")
-        return symbol, exchange
-    elif len(parts) == 1:
-        # 自动推断交易所
-        code = parts[0]
-        if code.startswith("6"):
-            return code, Exchange.SSE
-        else:
-            return code, Exchange.SZSE
-    else:
-        raise ValueError(f"无效的股票代码格式: {vt_symbol}")
+    vt_symbol = vt_symbol.strip()
+    if "." not in vt_symbol:
+        raise ValueError(
+            f"股票代码需包含交易所后缀，如 600660.SSE 或 000001.SZ: {vt_symbol}"
+        )
+    symbol, suffix = vt_symbol.split(".", 1)
+    suffix = _EXCHANGE_ALIASES.get(suffix.upper(), suffix)
+    return extract_vt_symbol(f"{symbol}.{suffix}")
 
 
 class ChinaBacktestWidget(QtWidgets.QWidget):
@@ -297,7 +289,7 @@ class ChinaBacktestWidget(QtWidgets.QWidget):
             return
 
         try:
-            symbol, exchange = parse_vt_symbol(vt_symbol)
+            symbol, exchange = _parse_vt_symbol(vt_symbol)
         except ValueError as e:
             self.show_status(str(e))
             return
@@ -347,26 +339,28 @@ class ChinaBacktestWidget(QtWidgets.QWidget):
         start_date: date,
         end_date: date,
     ) -> list:
-        """通过数据服务加载K线数据"""
-        try:
-            from vnpy_china_data.service import ChinaDataService
+        """通过数据服务加载K线数据
 
-            service = ChinaDataService()
-            service.connect()
+        复用 ChinaDataService 单例：仅在未连接时 connect，不主动 disconnect，
+        避免每次回测都重建数据库/缓存连接的开销。
+        """
+        try:
+            from vnpy_china_data.service import get_data_service
+
+            service = get_data_service()
+            if not service.connected:
+                service.connect()
 
             start_dt = datetime.combine(start_date, datetime.min.time())
             end_dt = datetime.combine(end_date, datetime.max.time())
 
-            bars = service.get_bar_data(
+            return service.get_bar_data(
                 symbol=symbol,
                 exchange=exchange,
                 interval=Interval.DAILY,
                 start=start_dt,
                 end=end_dt,
             )
-
-            service.disconnect()
-            return bars
 
         except ImportError:
             self.show_status(_("未安装 vnpy_china_data，无法加载数据"))
@@ -384,6 +378,7 @@ class ChinaBacktestWidget(QtWidgets.QWidget):
     ) -> None:
         """执行真实回测"""
         from vnpy_china_backtest.engine import EnhancedBacktestEngine
+        from vnpy_china_backtest.strategies import get_strategy
 
         # 创建引擎
         engine = EnhancedBacktestEngine()
@@ -394,21 +389,26 @@ class ChinaBacktestWidget(QtWidgets.QWidget):
         engine.enable_price_limit = self.enable_price_limit_checkbox.isChecked()
         engine.enable_t1 = self.enable_t1_checkbox.isChecked()
 
-        # 加载数据
+        # 加载数据（load_data 会初始化权益曲线首点为初始资金）
         engine.load_data(bars)
 
         total_bars = len(bars)
-        self.daily_logs = []
-        self.equity_curve = [capital]
 
-        # 按策略执行逐日回放
-        if strategy_key == "ma_cross":
-            self._strategy_ma_cross(engine, vt_symbol, bars)
-        elif strategy_key == "buy_hold":
-            self._strategy_buy_hold(engine, vt_symbol, bars)
+        # 策略进度（0-100）映射到 widget 进度区间 20-90
+        def on_progress(percent: int) -> None:
+            self.progress_bar.setValue(20 + int(percent * 0.7))
 
-        # 计算指标
+        # 执行策略（交易逻辑由 strategies.py 提供，与 UI 解耦）
+        strategy = get_strategy(strategy_key)
+        self.daily_logs = strategy.run(
+            engine, bars, vt_symbol, on_progress=on_progress
+        )
+
+        # 计算指标（engine 维护完整权益曲线与真实回测天数）
         metrics = engine.calculate_metrics()
+
+        # 权益曲线由 engine 维护，widget 仅取副本用于展示/导出
+        self.equity_curve = list(engine.equity_curve)
 
         # 收集结果
         self.backtest_results = {
@@ -433,100 +433,6 @@ class ChinaBacktestWidget(QtWidgets.QWidget):
         self.show_status(
             _("回测完成：{} 条数据，{} 笔交易").format(total_bars, len(self.trades))
         )
-
-    def _strategy_ma_cross(
-        self,
-        engine,
-        vt_symbol: str,
-        bars: list,
-    ) -> None:
-        """均线策略：MA5/MA20 金叉买入，死叉卖出"""
-        close_prices = [bar.close_price for bar in bars]
-        total = len(bars)
-        holding = False
-
-        for i, bar in enumerate(bars):
-            # 更新昨日收盘价
-            engine.pre_closes[vt_symbol] = bar.close_price
-
-            # 需要至少20根K线才能计算MA20
-            if i < 20:
-                engine.process_bar(bar)
-                self.equity_curve.append(engine.get_equity())
-                continue
-
-            # 计算均线
-            ma5 = sum(close_prices[i - 5 : i]) / 5
-            ma20 = sum(close_prices[i - 20 : i]) / 20
-            prev_ma5 = sum(close_prices[i - 6 : i - 1]) / 5
-            prev_ma20 = sum(close_prices[i - 21 : i - 1]) / 20
-
-            price = bar.close_price
-
-            # 金叉：MA5 上穿 MA20 → 买入
-            if not holding and prev_ma5 <= prev_ma20 and ma5 > ma20:
-                # 计算可买股数（100股整数倍）
-                max_volume = int(engine.cash / (price * 100)) * 100
-                if max_volume >= 100:
-                    ok, reason = engine.buy(vt_symbol, price, max_volume)
-                    if ok:
-                        holding = True
-                        self.daily_logs.append(
-                            f"{bar.datetime.date()} 买入 {vt_symbol} "
-                            f"价格:{price:.2f} 数量:{max_volume}"
-                        )
-
-            # 死叉：MA5 下穿 MA20 → 卖出
-            elif holding and prev_ma5 >= prev_ma20 and ma5 < ma20:
-                pos = engine.get_position(vt_symbol)
-                if pos > 0:
-                    ok, reason = engine.sell(vt_symbol, price, pos)
-                    if ok:
-                        holding = False
-                        self.daily_logs.append(
-                            f"{bar.datetime.date()} 卖出 {vt_symbol} "
-                            f"价格:{price:.2f} 数量:{pos}"
-                        )
-
-            engine.process_bar(bar)
-            self.equity_curve.append(engine.get_equity())
-
-            # 更新进度
-            progress = 20 + int(70 * (i + 1) / total)
-            self.progress_bar.setValue(progress)
-
-    def _strategy_buy_hold(
-        self,
-        engine,
-        vt_symbol: str,
-        bars: list,
-    ) -> None:
-        """买入持有策略：首日全仓买入，持有到期末"""
-        if not bars:
-            return
-
-        total = len(bars)
-
-        # 首日买入
-        first_bar = bars[0]
-        engine.pre_closes[vt_symbol] = first_bar.close_price
-        price = first_bar.close_price
-        max_volume = int(engine.cash / (price * 100)) * 100
-        if max_volume >= 100:
-            engine.buy(vt_symbol, price, max_volume)
-            self.daily_logs.append(
-                f"{first_bar.datetime.date()} 买入 {vt_symbol} "
-                f"价格:{price:.2f} 数量:{max_volume} (买入持有)"
-            )
-
-        # 逐日更新
-        for i, bar in enumerate(bars):
-            engine.pre_closes[vt_symbol] = bar.close_price
-            engine.process_bar(bar)
-            self.equity_curve.append(engine.get_equity())
-
-            progress = 20 + int(70 * (i + 1) / total)
-            self.progress_bar.setValue(progress)
 
     # ── 结果展示 ──────────────────────────────────────────────
 
