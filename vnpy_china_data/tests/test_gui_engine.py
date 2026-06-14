@@ -198,6 +198,17 @@ class TestChinaDataGuiEngineHkConnect:
         assert second_call_kwargs["symbol"] == "01810"
         assert second_call_kwargs["exchange"] == Exchange.SEHK
 
+    def test_get_index_symbols_no_duplicates(self, gui_engine):
+        """指数成分股列表无重复项"""
+        for index in ["HS300", "ZZ500", "ZZ1000"]:
+            symbols = gui_engine.get_index_symbols(index)
+            assert len(symbols) == len(set(symbols)), \
+                f"{index} 成分股存在重复: {symbols}"
+
+    def test_get_index_symbols_unknown_returns_empty(self, gui_engine):
+        """未知指数返回空列表"""
+        assert gui_engine.get_index_symbols("UNKNOWN") == []
+
 
 class TestGuiEngineHelperMethods:
     """GUI引擎辅助方法测试"""
