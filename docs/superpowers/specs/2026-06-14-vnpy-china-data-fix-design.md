@@ -116,9 +116,9 @@
 
 **问题：** `service.download_bar_data` 返回空列表时，调用方无法区分「回补无新数据」与「API 实际失败」。
 
-**修复：** 在 `service.download_bar_data` 返回空列表时，根据数据源连接状态记录区分性日志：
-- 数据源未连接 → `logger.warning("下载失败: {symbol} 数据源未连接")`
-- 数据源已连接但无数据 → `logger.info("无新数据: {symbol} 该区间无回补")`
+**修复：** 在 `service.download_bar_data` 返回空列表时，根据双数据源连接状态记录区分性日志（与 `_fetch_bars_from_api` 的 QMT→Tushare 回退链对应）：
+- QMT 与 Tushare 均未连接 → `logger.warning("下载失败: {symbol} 数据源均未连接")`
+- 至少一个数据源已连接但无数据 → `logger.info("无新数据: {symbol} 该区间无回补")`
 
 > 注：`_fetch_bars_from_api` 在 API 调用异常时已 `logger.warning`（service.py:285/309），本项补的是「连接正常但返回空」的区分性日志，不改动 `_fetch_bars_from_api` 返回语义。
 
