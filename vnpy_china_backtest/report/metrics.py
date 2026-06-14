@@ -72,7 +72,8 @@ class MetricsCalculator:
         trading_days: int,
         initial_capital: float,
         final_capital: float,
-        total_cost: float = 0.0
+        total_cost: float = 0.0,
+        bar_datetimes: Optional[List[datetime]] = None
     ) -> EnhancedMetrics:
         """计算所有指标
 
@@ -108,7 +109,7 @@ class MetricsCalculator:
         self._calculate_cost_stats(metrics, trades)
 
         # 月度收益
-        metrics.monthly_returns = self._calculate_monthly_returns(equity_curve, trading_days)
+        metrics.monthly_returns = self._calculate_monthly_returns(equity_curve, trading_days, bar_datetimes)
 
         return metrics
 
@@ -160,6 +161,13 @@ class MetricsCalculator:
                 if std_return > 0:
                     # 假设无风险利率为0
                     metrics.sharpe_ratio = (avg_return * self.annual_days) / (std_return * math.sqrt(self.annual_days))
+
+                # F4: 索提诺比率（仅用负收益计算下行标准差）
+                downside_returns = [r for r in returns if r < 0]
+                if downside_returns:
+                    downside_std = (sum(r ** 2 for r in downside_returns) / len(downside_returns)) ** 0.5
+                    if downside_std > 0:
+                        metrics.sortino_ratio = (avg_return * self.annual_days) / (downside_std * math.sqrt(self.annual_days))
 
         # 卡玛比率
         if metrics.max_drawdown > 0:
@@ -244,15 +252,8 @@ class MetricsCalculator:
         metrics.buy_trades = len([t for t in trades if t.direction == Direction.LONG])
         metrics.sell_trades = len([t for t in trades if t.direction == Direction.SHORT])
 
-        # 按股票分组计算连续盈亏
-        stock_pnls: Dict[str, float] = {}
-        for trade in trades:
-            if trade.symbol not in stock_pnls:
-                stock_pnls[trade.symbol] = 0.0
-            if trade.direction == Direction.SHORT:
-                stock_pnls[trade.symbol] += trade.volume * trade.price
-            else:
-                stock_pnls[trade.symbol] -= trade.volume * trade.price
+        # F2: 按时间序的已实现盈亏事件（跨标的统一），替代原先按 symbol 聚合的无序遍历
+        events = self._compute_realized_events(trades)
 
         # 计算最大连续盈亏
         max_consecutive_wins = 0
@@ -260,7 +261,7 @@ class MetricsCalculator:
         current_wins = 0
         current_losses = 0
 
-        for pnl in stock_pnls.values():
+        for pnl in events:
             if pnl > 0:
                 current_wins += 1
                 current_losses = 0
@@ -295,32 +296,86 @@ class MetricsCalculator:
         if metrics.total_trades > 0:
             metrics.avg_cost_per_trade = metrics.total_cost / metrics.total_trades
 
-    def _calculate_stock_pnl(self, trades: List[TradeData]) -> float:
-        """计算单只股票的盈亏（简化版）"""
+    def _compute_realized_events(
+        self,
+        trades: List[TradeData]
+    ) -> List[float]:
+        """FIFO 匹配买卖，按时间序返回每笔卖出的已实现盈亏
+
+        未平仓部分不计入（符合「已实现盈亏」语义）。
+        跨标的统一按 datetime 排序，供连续盈亏统计。
+
+        Returns:
+            按时间序的已实现盈亏列表（每元素对应一次卖出平仓）
+        """
         if not trades:
-            return 0.0
+            return []
 
-        # 简化：只考虑卖出时的收益
-        buy_value = 0.0
-        sell_value = 0.0
+        sorted_trades = sorted(trades, key=lambda t: t.datetime or datetime.min)
 
-        for trade in trades:
-            value = trade.price * trade.volume
-            if trade.direction == Direction.LONG:
-                buy_value += value
-            else:
-                sell_value += value
+        # 每个 symbol 的 FIFO 买入队列：[[price, remaining_volume], ...]
+        queues: Dict[str, List[List]] = {}
+        events: List[float] = []
 
-        return sell_value - buy_value
+        for t in sorted_trades:
+            q = queues.setdefault(t.symbol, [])
+            if t.direction == Direction.LONG:
+                q.append([t.price, t.volume])
+            else:  # SHORT：FIFO 匹配买入
+                remaining = t.volume
+                realized = 0.0
+                while remaining > 0 and q:
+                    buy_price, buy_vol = q[0]
+                    matched = min(remaining, buy_vol)
+                    realized += matched * (t.price - buy_price)
+                    remaining -= matched
+                    if matched >= buy_vol:
+                        q.pop(0)
+                    else:
+                        q[0][1] = buy_vol - matched
+                events.append(realized)
+
+        return events
+
+    def _calculate_stock_pnl(self, trades: List[TradeData]) -> float:
+        """计算单只股票已实现盈亏（FIFO 匹配，仅已平仓部分）"""
+        return sum(self._compute_realized_events(trades))
 
     def _calculate_monthly_returns(
         self,
         equity_curve: List[float],
-        trading_days: int
+        trading_days: int,
+        bar_datetimes: Optional[List[datetime]] = None
     ) -> Dict[str, float]:
-        """计算月度收益"""
-        # 简化实现
-        return {}
+        """计算月度收益率
+
+        equity_curve[0] 为初始资金；其后每点对应一根 bar（bar_datetimes 提供日期）。
+        无日期信息或长度不匹配时返回空字典（向后兼容，避免静默错误）。
+        """
+        if not bar_datetimes or len(equity_curve) < 2:
+            return {}
+
+        # 防御：bar_datetimes 必须与 equity_curve 逐点对应（首点为初始资金）
+        if len(bar_datetimes) != len(equity_curve) - 1:
+            return {}
+
+        month_start: Dict[str, float] = {}
+        month_end: Dict[str, float] = {}
+
+        for i, dt in enumerate(bar_datetimes):
+            idx = i + 1
+            if idx >= len(equity_curve):
+                break
+            key = f"{dt.year}-{dt.month:02d}"
+            if key not in month_start:
+                month_start[key] = equity_curve[idx - 1]
+            month_end[key] = equity_curve[idx]
+
+        return {
+            k: (month_end[k] - month_start[k]) / month_start[k]
+            for k in month_end
+            if month_start[k] > 0
+        }
 
     def _std(self, values: List[float]) -> float:
         """计算标准差"""

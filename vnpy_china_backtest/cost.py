@@ -106,10 +106,8 @@ class CostCalculator:
         if direction == Direction.SHORT:
             stamp_duty = turnover * self.config.stamp_duty_rate
 
-        # 3. 过户费（双向收取）
+        # 3. 过户费（双向收取，万0.1，2022年4月起沪深统一，无最低值）
         transfer_fee = turnover * self.config.transfer_fee_rate
-        # 过户费有最低值
-        transfer_fee = max(transfer_fee, 0.1)  # 最低0.1元
 
         # 4. 经手费（双向收取）
         handling_fee = turnover * self.config.handling_fee_rate

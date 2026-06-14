@@ -33,6 +33,97 @@ def _parse_vt_symbol(vt_symbol: str) -> tuple:
     return extract_vt_symbol(f"{symbol}.{suffix}")
 
 
+class BacktestCancelled(Exception):
+    """回测取消异常（on_progress 检测到取消时抛出，中断 strategy 循环）"""
+    pass
+
+
+class BacktestWorker(QtCore.QThread):
+    """回测工作线程
+
+    在子线程执行回测，通过信号回传进度与结果。
+    cancel() 设置取消标志；strategy 循环内经 on_progress 检查并中断。
+    engine 在本线程内创建与使用，不跨线程共享，线程安全。
+    """
+
+    progress = QtCore.Signal(int)
+    finished_ok = QtCore.Signal(dict, list, list, list)   # results, trades, equity_curve, daily_logs
+
+    def __init__(
+        self,
+        vt_symbol: str,
+        bars: list,
+        capital: float,
+        strategy_key: str,
+        config: dict,
+    ) -> None:
+        super().__init__()
+        self._vt_symbol = vt_symbol
+        self._bars = bars
+        self._capital = capital
+        self._strategy_key = strategy_key
+        self._config = config
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        """请求取消（下一个 on_progress 检查点生效，粒度=每根 bar）"""
+        self._cancelled = True
+
+    def run(self) -> None:
+        """线程入口：执行回测，emit 进度与结果"""
+        from vnpy_china_backtest.engine import EnhancedBacktestEngine
+        from vnpy_china_backtest.strategies import get_strategy
+
+        engine = EnhancedBacktestEngine()
+        engine.capital = self._capital
+        engine.cash = self._capital
+        engine.enable_cost = self._config["enable_cost"]
+        engine.enable_slippage = self._config["enable_slippage"]
+        engine.enable_price_limit = self._config["enable_price_limit"]
+        engine.enable_t1 = self._config["enable_t1"]
+        engine.load_data(self._bars)
+
+        # on_progress：检查取消 → 抛异常中断；否则 emit 进度（跨线程安全）
+        def on_progress(percent: int) -> None:
+            if self._cancelled:
+                raise BacktestCancelled()
+            self.progress.emit(percent)
+
+        strategy = get_strategy(self._strategy_key)
+        try:
+            daily_logs = strategy.run(
+                engine, self._bars, self._vt_symbol, on_progress=on_progress
+            )
+        except BacktestCancelled:
+            return    # 取消：不发 finished_ok（QThread.finished 仍触发，恢复按钮）
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            return    # 策略异常：打印到 stderr，不发 finished_ok
+
+        metrics = engine.calculate_metrics()
+        results = {
+            "total_return": metrics.total_return,
+            "annual_return": metrics.annual_return,
+            "max_drawdown": metrics.max_drawdown,
+            "sharpe_ratio": metrics.sharpe_ratio,
+            "win_rate": metrics.win_rate,
+            "profit_loss_ratio": metrics.profit_loss_ratio,
+            "avg_holding_days": metrics.avg_holding_days,
+            "total_cost": engine.total_cost,
+            "total_trades": metrics.total_trades,
+            "blocked_orders": engine.blocked_orders,
+            "final_equity": engine.get_equity(),
+            "bar_count": len(self._bars),
+        }
+        self.finished_ok.emit(
+            results,
+            list(engine.trades.values()),
+            list(engine.equity_curve),
+            daily_logs,
+        )
+
+
 class ChinaBacktestWidget(QtWidgets.QWidget):
     """A股回测主界面"""
 
@@ -54,6 +145,9 @@ class ChinaBacktestWidget(QtWidgets.QWidget):
         self.trades: list = []
         self.equity_curve: list = []
         self.daily_logs: list = []
+
+        # F11: 回测工作线程
+        self._worker: Optional["BacktestWorker"] = None
 
         self.init_ui()
 
@@ -324,13 +418,29 @@ class ChinaBacktestWidget(QtWidgets.QWidget):
         # 获取策略类型
         strategy_key = self.strategy_combo.currentData()
 
-        # 执行回测
-        self._run_backtest(
+        # F11: 防止重复触发
+        if self._worker and self._worker.isRunning():
+            self.show_status(_("回测进行中，请先停止"))
+            return
+
+        # 执行回测（移入 worker 线程，避免阻塞 GUI）
+        config = {
+            "enable_cost": self.enable_cost_checkbox.isChecked(),
+            "enable_slippage": self.enable_slippage_checkbox.isChecked(),
+            "enable_price_limit": self.enable_price_limit_checkbox.isChecked(),
+            "enable_t1": self.enable_t1_checkbox.isChecked(),
+        }
+        self._worker = BacktestWorker(
             vt_symbol=f"{symbol}.{exchange.value}",
             bars=bars,
             capital=capital,
             strategy_key=strategy_key,
+            config=config,
         )
+        self._worker.progress.connect(self._on_backtest_progress)
+        self._worker.finished_ok.connect(self._on_backtest_finished)
+        self._worker.finished.connect(self._on_backtest_thread_finished)
+        self._worker.start()
 
     def _load_bar_data(
         self,
@@ -369,70 +479,29 @@ class ChinaBacktestWidget(QtWidgets.QWidget):
             self.show_status(_("数据加载失败: {}").format(e))
             return []
 
-    def _run_backtest(
-        self,
-        vt_symbol: str,
-        bars: list,
-        capital: float,
-        strategy_key: str,
+    def _on_backtest_progress(self, percent: int) -> None:
+        """worker 进度回调（主线程执行，跨线程安全）"""
+        self.progress_bar.setValue(20 + int(percent * 0.7))
+
+    def _on_backtest_finished(
+        self, results: dict, trades: list, equity_curve: list, daily_logs: list
     ) -> None:
-        """执行真实回测"""
-        from vnpy_china_backtest.engine import EnhancedBacktestEngine
-        from vnpy_china_backtest.strategies import get_strategy
-
-        # 创建引擎
-        engine = EnhancedBacktestEngine()
-        engine.capital = capital
-        engine.cash = capital
-        engine.enable_cost = self.enable_cost_checkbox.isChecked()
-        engine.enable_slippage = self.enable_slippage_checkbox.isChecked()
-        engine.enable_price_limit = self.enable_price_limit_checkbox.isChecked()
-        engine.enable_t1 = self.enable_t1_checkbox.isChecked()
-
-        # 加载数据（load_data 会初始化权益曲线首点为初始资金）
-        engine.load_data(bars)
-
-        total_bars = len(bars)
-
-        # 策略进度（0-100）映射到 widget 进度区间 20-90
-        def on_progress(percent: int) -> None:
-            self.progress_bar.setValue(20 + int(percent * 0.7))
-
-        # 执行策略（交易逻辑由 strategies.py 提供，与 UI 解耦）
-        strategy = get_strategy(strategy_key)
-        self.daily_logs = strategy.run(
-            engine, bars, vt_symbol, on_progress=on_progress
-        )
-
-        # 计算指标（engine 维护完整权益曲线与真实回测天数）
-        metrics = engine.calculate_metrics()
-
-        # 权益曲线由 engine 维护，widget 仅取副本用于展示/导出
-        self.equity_curve = list(engine.equity_curve)
-
-        # 收集结果
-        self.backtest_results = {
-            "total_return": metrics.total_return,
-            "annual_return": metrics.annual_return,
-            "max_drawdown": metrics.max_drawdown,
-            "sharpe_ratio": metrics.sharpe_ratio,
-            "win_rate": metrics.win_rate,
-            "profit_loss_ratio": metrics.profit_loss_ratio,
-            "avg_holding_days": metrics.avg_holding_days,
-            "total_cost": engine.total_cost,
-            "total_trades": metrics.total_trades,
-            "blocked_orders": engine.blocked_orders,
-            "final_equity": engine.get_equity(),
-            "bar_count": total_bars,
-        }
-        self.trades = list(engine.trades.values())
-
-        # 更新界面
+        """worker 正常完成回调（主线程执行）"""
+        self.backtest_results = results
+        self.trades = trades
+        self.equity_curve = equity_curve
+        self.daily_logs = daily_logs
         self.update_results()
         self.progress_bar.setValue(100)
         self.show_status(
-            _("回测完成：{} 条数据，{} 笔交易").format(total_bars, len(self.trades))
+            _("回测完成：{} 条数据，{} 笔交易").format(
+                results.get("bar_count", 0), len(trades)
+            )
         )
+
+    def _on_backtest_thread_finished(self) -> None:
+        """线程结束清理（无论正常/取消/异常，QThread.finished 无条件触发）"""
+        self._worker = None
 
     # ── 结果展示 ──────────────────────────────────────────────
 
@@ -551,9 +620,13 @@ class ChinaBacktestWidget(QtWidgets.QWidget):
             self.show_status(_("导出失败: {}").format(e))
 
     def stop_backtest(self) -> None:
-        """停止回测"""
-        self.show_status(_("回测已停止"))
-        self.progress_bar.setValue(0)
+        """停止回测（设置取消标志，worker 在下一个 on_progress 检查点中断）"""
+        if self._worker and self._worker.isRunning():
+            self._worker.cancel()
+            self.show_status(_("正在停止回测..."))
+        else:
+            self.progress_bar.setValue(0)
+            self.show_status(_("就绪"))
 
     def clear_results(self) -> None:
         """清空结果"""

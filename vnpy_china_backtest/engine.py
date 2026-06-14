@@ -93,6 +93,9 @@ class EnhancedBacktestEngine:
         # 当前市价映射，用于按市价计算持仓市值
         self.current_prices: Dict[str, float] = {}
 
+        # 当前 bar 成交量（供 ImpactCost 滑点模型，由 process_bar 推进）
+        self.current_bar_volume: float = 0.0
+
         # 权益曲线（首点为初始资金，其后为每根 bar 收盘权益）
         self.equity_curve: List[float] = []
 
@@ -122,6 +125,8 @@ class EnhancedBacktestEngine:
         self.capital = capital
         self.cash = capital
         self.annual_days = annual_days
+        # F8: 贯通——engine 的 annual_days 同步到 metrics 计算器（属性赋值，不重建实例）
+        self.metrics_calculator.annual_days = annual_days
 
     def set_cost_config(self, config: CostConfig) -> None:
         """设置成本配置
@@ -147,10 +152,12 @@ class EnhancedBacktestEngine:
             bars: K线数据列表
         """
         self.history_bars.clear()
+        self.pre_closes.clear()          # F3: 与 history_bars 等同步清理，避免连续回测残留
 
         # 重置回测时钟、市价与权益曲线（首点为初始资金）
         self.current_datetime = None
         self.current_prices.clear()
+        self.current_bar_volume = 0.0
         self.equity_curve = [self.cash]
 
         for bar in bars:
@@ -175,6 +182,8 @@ class EnhancedBacktestEngine:
         # 更新市价快照与昨日收盘价
         self.current_prices[symbol] = bar.close_price
         self.pre_closes[symbol] = bar.close_price
+        # 记录当前 bar 成交量（供 ImpactCost 滑点）
+        self.current_bar_volume = bar.volume
 
         # 记录当日收盘权益，构建真实的权益曲线
         self.equity_curve.append(self.get_equity())
@@ -300,7 +309,7 @@ class EnhancedBacktestEngine:
                 price,
                 volume,
                 direction,
-                market_volume=0  # 简化：未提供市场成交量
+                market_volume=self.current_bar_volume
             )
 
         # 扣除交易成本（买入时）
@@ -432,13 +441,23 @@ class EnhancedBacktestEngine:
         final_capital = equity_curve[-1]
         trading_days = max(1, len(equity_curve) - 1)
 
+        # F9: 收集各 bar 的 datetime（history_bars 保插入序），供月度收益对齐
+        bar_datetimes = [bar.datetime for bar in self.history_bars.values()]
+        if len(bar_datetimes) != len(equity_curve) - 1:
+            # 长度不匹配：history_bars 非空则是对齐异常（断言暴露）；空则为兜底场景（月度返回 {}）
+            assert not bar_datetimes, (
+                f"bar_datetimes({len(bar_datetimes)}) 与 equity_curve({len(equity_curve)}) 长度不匹配"
+            )
+            bar_datetimes = None
+
         return self.metrics_calculator.calculate(
             trades=list(self.trades.values()),
             equity_curve=equity_curve,
             trading_days=trading_days,
             initial_capital=initial_capital,
             final_capital=final_capital,
-            total_cost=self.total_cost
+            total_cost=self.total_cost,
+            bar_datetimes=bar_datetimes,
         )
 
     def write_log(self, msg: str) -> None:
@@ -470,6 +489,7 @@ class EnhancedBacktestEngine:
         # 重置回测时钟、市价与权益曲线
         self.current_datetime = None
         self.current_prices.clear()
+        self.current_bar_volume = 0.0
         self.equity_curve = []
 
         self.t1_simulator.reset()

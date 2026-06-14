@@ -41,6 +41,9 @@ class T1Simulator:
         # 当前持仓: {symbol: PositionRecord}
         self._positions: Dict[str, PositionRecord] = {}
 
+        # 已实现盈亏累计 {symbol: pnl}，由 _process_sell 在 FIFO 匹配时累加
+        self._realized_pnl: Dict[str, float] = {}
+
     def record_buy(
         self,
         symbol: str,
@@ -98,8 +101,8 @@ class T1Simulator:
             # 尝试卖出超过可卖出数量的部分
             return False, f"卖出数量{volume}超过可卖出数量{sellable}", 0
 
-        # 记录卖出（使用FIFO原则）
-        self._process_sell(symbol, volume, trade_date)
+        # 记录卖出（使用FIFO原则）—— 传入卖出价供盈亏累加
+        self._process_sell(symbol, volume, trade_date, sell_price=price)
 
         # 更新持仓（传入回测日期以正确计算 T+1 冻结量）
         self._update_position(symbol, volume, price, is_buy=False, trade_date=trade_date)
@@ -178,7 +181,7 @@ class T1Simulator:
         return total_cost
 
     def get_realized_pnl(self, symbol: str) -> float:
-        """获取已实现盈亏
+        """获取已实现盈亏（由 _process_sell 在 FIFO 匹配时累加）
 
         Args:
             symbol: 股票代码
@@ -186,21 +189,14 @@ class T1Simulator:
         Returns:
             float: 已实现盈亏
         """
-        if symbol not in self._buy_records:
-            return 0.0
+        return self._realized_pnl.get(symbol, 0.0)
 
-        realized_pnl = 0.0
-        for record in self._buy_records[symbol]:
-            if record.sold_volume > 0:
-                # 需要跟踪卖出价格来计算盈亏，这里简化处理
-                pass
-        return realized_pnl
-
-    def _process_sell(self, symbol: str, volume: int, trade_date: date) -> None:
-        """处理卖出（FIFO原则）"""
+    def _process_sell(self, symbol: str, volume: int, trade_date: date, sell_price: float) -> None:
+        """处理卖出（FIFO原则），同时累加已实现盈亏"""
         if symbol not in self._buy_records:
             return
 
+        self._realized_pnl.setdefault(symbol, 0.0)
         remaining = volume
         for record in self._buy_records[symbol]:
             if remaining <= 0:
@@ -214,6 +210,8 @@ class T1Simulator:
             if available > 0:
                 sold = min(remaining, available)
                 record.sold_volume += sold
+                # 在同一次 FIFO 匹配中累加已实现盈亏（避免二次匹配）
+                self._realized_pnl[symbol] += sold * (sell_price - record.price)
                 remaining -= sold
 
     def _update_position(
@@ -274,6 +272,7 @@ class T1Simulator:
         """重置模拟器"""
         self._buy_records.clear()
         self._positions.clear()
+        self._realized_pnl.clear()
 
     def get_buy_records(self, symbol: str) -> List[BuyRecord]:
         """获取买入记录
