@@ -162,8 +162,8 @@ class MySQLDatabaseLayer:
         try:
             yield conn
         finally:
-            # 连接自动归还到池中，无需显式关闭
-            pass
+            # 显式归还连接到池（DBUtils 的 close() 是归还而非物理关闭）
+            conn.close()
 
     def _ensure_connection(self) -> bool:
         """确保连接池有效"""
