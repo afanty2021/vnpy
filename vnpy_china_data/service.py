@@ -233,6 +233,9 @@ class ChinaDataService(
         Returns:
             下载的K线数据列表
         """
+        import logging
+        logger = logging.getLogger("vnpy_china_data")
+
         # 转换为datetime
         start_datetime = datetime.combine(start, datetime.min.time())
         end_datetime = datetime.combine(end, datetime.max.time())
@@ -245,6 +248,15 @@ class ChinaDataService(
         # 存储到数据库
         if api_data:
             self.database.save_bar_data(api_data)
+        else:
+            # 区分性日志：与 _fetch_bars_from_api 的 QMT→Tushare 回退链对应
+            # 仅当两个数据源均未连接时才记 warning，否则视为"无新数据"
+            qmt_ok = self.qmt_adapter and self.qmt_adapter.connected
+            ts_ok = self.tushare_adapter and self.tushare_adapter.connected
+            if not qmt_ok and not ts_ok:
+                logger.warning(f"下载失败: {symbol} 数据源均未连接")
+            else:
+                logger.info(f"无新数据: {symbol} 该区间无回补")
 
         return api_data
 
