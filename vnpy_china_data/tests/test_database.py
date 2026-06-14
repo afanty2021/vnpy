@@ -43,3 +43,25 @@ class TestGetConnection:
                 raise ValueError("test")
 
         mock_conn.close.assert_called_once()
+
+
+class TestDatabaseStatsTableNameValidation:
+    """get_database_stats 表名白名单校验测试"""
+
+    def test_valid_table_names_accepted(self):
+        """合法表名通过白名单"""
+        assert MySQLDatabaseLayer._is_valid_table_name("db_bar_data") is True
+        assert MySQLDatabaseLayer._is_valid_table_name("db_stock_info") is True
+        assert MySQLDatabaseLayer._is_valid_table_name("db_hk_connect_stocks") is True
+
+    def test_invalid_table_names_rejected(self):
+        """恶意表名被白名单拒绝"""
+        # SQL 注入尝试
+        assert MySQLDatabaseLayer._is_valid_table_name("db_evil; DROP TABLE x") is False
+        assert MySQLDatabaseLayer._is_valid_table_name("db_x'); --") is False
+        assert MySQLDatabaseLayer._is_valid_table_name("db_x` OR 1=1") is False
+        # 非法前缀
+        assert MySQLDatabaseLayer._is_valid_table_name("information_schema") is False
+        assert MySQLDatabaseLayer._is_valid_table_name("mysql.user") is False
+        # 含大写/特殊字符
+        assert MySQLDatabaseLayer._is_valid_table_name("db_BarData") is False

@@ -7,6 +7,7 @@ MySQL数据库操作层
 from typing import List, Optional, Any, Dict, TYPE_CHECKING
 from datetime import datetime
 from contextlib import contextmanager
+import re
 
 from vnpy.trader.logger import logger
 
@@ -1232,6 +1233,20 @@ class MySQLDatabaseLayer:
             logger.error(f"获取表信息异常: {e}", exc_info=True)
             return None
 
+    @staticmethod
+    def _is_valid_table_name(table_name: str) -> bool:
+        """校验表名是否合法（白名单：仅允许 db_ 前缀的小写字母与下划线）
+
+        Args:
+            table_name: 待校验的表名
+
+        Returns:
+            是否合法
+        """
+        if not table_name or not isinstance(table_name, str):
+            return False
+        return bool(re.match(r"^db_[a-z_]+$", table_name))
+
     def get_database_stats(self) -> Dict[str, Any]:
         """获取数据库统计信息
 
@@ -1263,6 +1278,10 @@ class MySQLDatabaseLayer:
             # 使用 COUNT(*) 获取精确行数
             tables = []
             for table_name, size_mb in size_rows:
+                # 白名单校验：拒绝非 db_ 前缀或含特殊字符的表名
+                if not self._is_valid_table_name(table_name):
+                    logger.warning(f"get_database_stats 跳过非法表名: {table_name}")
+                    continue
                 try:
                     count_sql = f"SELECT COUNT(*) FROM `{table_name}`"
                     cursor.execute(count_sql)
