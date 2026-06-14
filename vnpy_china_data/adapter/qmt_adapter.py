@@ -1064,6 +1064,10 @@ class QMTDataAdapter(BaseDataAdapter):
     ) -> List[BarData]:
         """获取板块指数数据
 
+        使用 miniQMT 两步下载流程（与 get_bar_data 一致）：
+        1. download_history_data2 异步下载到本地
+        2. get_local_data 读取本地数据
+
         Args:
             sector_code: 板块代码
             start_date: 开始日期 (YYYYMMDD)
@@ -1072,39 +1076,80 @@ class QMTDataAdapter(BaseDataAdapter):
         Returns:
             K线数据列表
         """
-        if not self._connected or not self._qmt_api:
+        import time
+        import logging
+
+        logger = logging.getLogger("vnpy_china_data")
+
+        if not self._connected:
+            logger.debug("QMT未连接，无法获取板块指数数据")
             return []
 
         try:
-            # QMT API: 获取板块指数K线
-            if hasattr(self._qmt_api, 'download_history_data'):
-                bars = self._qmt_api.download_history_data(
-                    stock_code=sector_code,
+            from xtquant import xtdata
+
+            logger.debug(
+                f"QMT正在下载板块指数: {sector_code}, "
+                f"start={start_date}, end={end_date}"
+            )
+
+            # 第1步：异步下载数据到本地
+            if hasattr(xtdata, 'download_history_data2'):
+                xtdata.download_history_data2(
+                    stock_list=[sector_code],
                     period="1d",
                     start_time=start_date,
                     end_time=end_date
                 )
+                time.sleep(3)
+            else:
+                logger.warning("xtdata不支持download_history_data2方法")
+                return []
 
-                result = []
-                for bar in bars:
-                    bar_data = BarData(
+            # 第2步：读取本地数据
+            if hasattr(xtdata, 'get_local_data'):
+                data_list = xtdata.get_local_data(
+                    field_list=['time', 'open', 'high', 'low', 'close', 'volume', 'amount'],
+                    stock_list=[sector_code],
+                    period="1d",
+                    start_time=start_date,
+                    end_time=end_date
+                )
+            else:
+                logger.warning("xtdata不支持get_local_data方法")
+                return []
+
+            if data_list is None or len(data_list) == 0:
+                logger.debug(f"QMT未获取到板块指数数据: {sector_code}")
+                return []
+
+            # 第3步：转换为 BarData 列表
+            result: List[BarData] = []
+            if hasattr(data_list, 'iterrows'):
+                for _, row in data_list.iterrows():
+                    bar = BarData(
+                        gateway_name="QMT",
                         symbol=sector_code,
                         exchange=Exchange.SSE if sector_code.startswith("80") else Exchange.SZSE,
-                        datetime=datetime.strptime(bar["time"], "%Y%m%d %H:%M:%S"),
+                        datetime=self._parse_qmt_time(row.get('time')),
                         interval=Interval.DAILY,
-                        open_price=bar.get("open", 0),
-                        high_price=bar.get("high", 0),
-                        low_price=bar.get("low", 0),
-                        close_price=bar.get("close", 0),
-                        volume=bar.get("volume", 0),
-                        turnover=bar.get("amount", 0),
+                        open_price=float(row.get('open', 0)),
+                        high_price=float(row.get('high', 0)),
+                        low_price=float(row.get('low', 0)),
+                        close_price=float(row.get('close', 0)),
+                        volume=float(row.get('volume', 0)),
+                        turnover=float(row.get('amount', 0)),
                     )
-                    result.append(bar_data)
+                    result.append(bar)
 
-                return result
+            logger.debug(f"QMT获取板块指数: {sector_code}, 共{len(result)}条")
+            return result
+
+        except ImportError:
+            logger.warning("xtdata模块未安装，无法获取板块指数数据")
             return []
         except Exception as e:
-            print(f"QMT获取板块指数失败: {e}")
+            logger.warning(f"QMT获取板块指数失败: {e}")
             return []
 
     # ========== 龙虎榜数据 ==========

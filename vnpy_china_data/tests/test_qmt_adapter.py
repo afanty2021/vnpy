@@ -132,6 +132,73 @@ class TestQMTAdapterHistoryData:
             else:
                 sys.modules.pop('xtquant', None)
 
+    def test_get_sector_index_two_step_download(self, adapter):
+        """测试 get_sector_index 两步下载模式"""
+        from unittest.mock import MagicMock
+        import sys
+
+        # mock xtdata 模块
+        mock_xtdata = MagicMock()
+        mock_xtdata.download_history_data2 = MagicMock(return_value=None)
+
+        mock_df = MagicMock()
+        mock_df.iterrows = MagicMock(return_value=[
+            (0, {
+                'time': '20240101',
+                'open': 100.0,
+                'high': 110.0,
+                'low': 95.0,
+                'close': 105.0,
+                'volume': 10000,
+                'amount': 1000000.0,
+            })
+        ])
+        mock_df.__len__ = MagicMock(return_value=1)
+        mock_xtdata.get_local_data = MagicMock(return_value=mock_df)
+
+        mock_xtquant = MagicMock()
+        mock_xtquant.xtdata = mock_xtdata
+
+        original_xtquant = sys.modules.get('xtquant')
+        sys.modules['xtquant'] = mock_xtquant
+
+        try:
+            adapter._connected = True
+
+            bars = adapter.get_sector_index(
+                sector_code="801010",
+                start_date="20240101",
+                end_date="20240131"
+            )
+
+            # 验证返回 1 条 BarData
+            assert len(bars) == 1
+            assert bars[0].symbol == "801010"
+            assert bars[0].open_price == 100.0
+            assert bars[0].close_price == 105.0
+            assert bars[0].interval == Interval.DAILY
+
+            # 验证两步调用链
+            mock_xtdata.download_history_data2.assert_called_once()
+            mock_xtdata.get_local_data.assert_called_once()
+
+        finally:
+            if original_xtquant:
+                sys.modules['xtquant'] = original_xtquant
+            else:
+                sys.modules.pop('xtquant', None)
+
+    def test_get_sector_index_not_connected(self, adapter):
+        """未连接时返回空列表"""
+        adapter._connected = False
+
+        bars = adapter.get_sector_index(
+            sector_code="801010",
+            start_date="20240101",
+            end_date="20240131"
+        )
+        assert bars == []
+
 
 class TestRealtimeBarGenerator:
     """实时K线生成器测试"""
