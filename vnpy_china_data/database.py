@@ -34,6 +34,8 @@ DEFAULT_MAX_OVERFLOW = 10
 from vnpy.trader.object import BarData, TickData
 from vnpy.trader.constant import Exchange, Interval
 
+from .validator import DataValidator
+
 
 class MySQLDatabaseLayer:
     """MySQL数据库层
@@ -205,6 +207,20 @@ class MySQLDatabaseLayer:
         Returns:
             是否保存成功
         """
+        if not bars:
+            return True
+
+        # 数据校验：过滤无效 bar
+        original_count = len(bars)
+        bars = DataValidator.validate_bar_list(bars)
+        filtered_count = original_count - len(bars)
+        if filtered_count > 0:
+            sample_symbols = [b.symbol for b in bars[:5]] if bars else []
+            logger.warning(
+                f"save_bar_data 过滤 {filtered_count}/{original_count} 条无效 bar，"
+                f"保留示例: {sample_symbols}"
+            )
+
         if not bars:
             return True
 
