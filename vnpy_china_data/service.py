@@ -161,7 +161,7 @@ class ChinaDataService(
             return True
 
         except Exception as e:
-            print(f"数据服务连接失败: {e}")
+            logger.error(f"数据服务连接失败: {e}")
             return False
 
     def disconnect(self) -> None:
