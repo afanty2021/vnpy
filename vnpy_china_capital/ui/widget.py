@@ -271,7 +271,12 @@ class ChinaCapitalWidget(QtWidgets.QWidget):
             # 买入日期（从交易历史获取）
             buy_date = data.get("buy_date")
             if buy_date:
-                date_str = buy_date.strftime("%Y-%m-%d")
+                # 类型防御：datetime 直接格式化；字符串取日期部分（与 trade_time 防御一致）
+                if isinstance(buy_date, datetime):
+                    date_str = buy_date.strftime("%Y-%m-%d")
+                else:
+                    s = str(buy_date)
+                    date_str = s.split(" ")[0] if " " in s else s
             else:
                 # 如果没有买入记录，显示未知
                 date_str = "未知"

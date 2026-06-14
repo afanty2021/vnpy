@@ -2,6 +2,10 @@
 A股资金管理数据库操作
 
 提供资金流水的持久化存储和查询功能。
+
+依赖说明：底层为 vnpy_china_data.MySQLDatabaseLayer，SQL 使用 MySQL 方言
+（ON DUPLICATE KEY UPDATE、DELETE t1 FROM ... INNER JOIN）。如需支持其他
+数据库（如 SQLite），相关语句需另行适配。
 """
 
 from typing import List, Optional, Any
@@ -196,7 +200,15 @@ class CapitalFlowDatabase:
             ]
 
             result = self.db._execute_sql(sql, values, fetch_all=False, many=True)
-            return result if isinstance(result, int) and result > 0 else len(flows)
+            if isinstance(result, int) and result > 0:
+                return result
+            # 批量未返回有效影响行数：降级逐条确认，不谎报 len(flows) 成功
+            logger.warning("批量导入未返回有效影响行数，降级逐条确认")
+            count = 0
+            for flow in flows:
+                if self.save_capital_flow(flow):
+                    count += 1
+            return count
 
         except Exception as e:
             logger.error(f"批量导入资金流水失败: {e}", exc_info=True)

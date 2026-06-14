@@ -1,7 +1,9 @@
 """Tests for CapitalFlowData - REQ-008 资金流水数据模型"""
 
+import os
 import sys
-sys.path.insert(0, '/Users/berton/Github/vnpy')
+# 项目根目录（本文件上溯三级：tests -> vnpy_china_capital -> 项目根）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import pytest
 from datetime import datetime

@@ -99,8 +99,8 @@ class QMTHistoryImporter:
                 "trade_id": trade.vt_tradeid,
                 "symbol": trade.symbol,
                 "exchange": trade.exchange.value,
-                "direction": trade.direction,
-                "offset": trade.offset,
+                "direction": trade.direction.value if trade.direction else "",
+                "offset": trade.offset.value if trade.offset else "",
                 "price": trade.price,
                 "volume": trade.volume,
                 "amount": trade.price * trade.volume if trade.price and trade.volume else 0.0,
@@ -109,7 +109,7 @@ class QMTHistoryImporter:
                 "trade_time": trade.datetime or datetime.now(),
                 "created_at": datetime.now(),
                 "flow_type": "trade",
-                "description": f"历史成交导入-{trade.direction.value}{trade.offset.value}"
+                "description": f"历史成交导入-{trade.direction.value if trade.direction else ''}{trade.offset.value if trade.offset else ''}"
             }
             flows.append(flow)
 
@@ -197,8 +197,8 @@ class QMTHistoryImporter:
                             "trade_id": row.get("合同编号", row.get("合同序号", "")),
                             "symbol": row.get("证券代码", ""),
                             "exchange": "SSE" if row.get("证券代码", "").startswith("6") else "SZSE",
-                            "direction": Direction.LONG if row.get("买卖方向") == "买入" else Direction.SHORT,
-                            "offset": Offset.OPEN,  # QMT成交默认为开仓
+                            "direction": Direction.LONG.value if row.get("买卖方向") == "买入" else Direction.SHORT.value,
+                            "offset": Offset.OPEN.value,  # QMT成交默认为开仓
                             "price": float(row.get("成交价格", 0)),
                             "volume": float(row.get("成交数量", 0)),
                             "amount": float(row.get("成交金额", 0)),

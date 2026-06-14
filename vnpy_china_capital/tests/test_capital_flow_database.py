@@ -4,8 +4,10 @@ Tests for CapitalFlowDatabase - REQ-008 资金流水数据库操作
 测试数据库表的创建、资金流水的保存和查询功能。
 """
 
+import os
 import sys
-sys.path.insert(0, '/Users/berton/Github/vnpy')
+# 项目根目录（本文件上溯三级：tests -> vnpy_china_capital -> 项目根）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from datetime import datetime, date, timedelta
 from typing import Optional
@@ -196,14 +198,24 @@ class TestCapitalFlowDatabase:
         assert flow is None
 
     def test_import_historical_flows(self, capital_flow_db, mock_db_layer, sample_flow):
-        """测试批量导入历史流水"""
+        """测试批量导入历史流水（有效 rowcount）"""
         flows = [sample_flow] * 10
-        mock_db_layer.save_capital_flow.return_value = True
+        mock_db_layer._execute_sql.return_value = 10  # 批量返回有效影响行数
 
         count = capital_flow_db.import_historical_flows(flows)
 
         assert count == 10
-        assert mock_db_layer.save_capital_flow.call_count == 10
+
+    def test_import_historical_flows_degrade_on_invalid_result(self, capital_flow_db, mock_db_layer, sample_flow):
+        """C2: _execute_sql 返回无效值时降级逐条确认（不谎报 len(flows)）"""
+        flows = [sample_flow] * 3
+        mock_db_layer._execute_sql.return_value = None  # 批量未返回有效 rowcount
+        mock_db_layer.save_capital_flow.side_effect = [True, False, True]  # 第2条失败
+
+        count = capital_flow_db.import_historical_flows(flows)
+
+        # 旧代码会谎报 len(flows)=3；新代码降级逐条返回真实成功数 2
+        assert count == 2
 
     def test_delete_duplicate_flows(self, capital_flow_db, mock_db_layer):
         """测试删除重复流水"""

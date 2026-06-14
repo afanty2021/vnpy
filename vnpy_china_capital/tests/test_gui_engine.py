@@ -1,12 +1,13 @@
 """测试ChinaCapitalGuiEngine功能"""
+import os
 import sys
 from datetime import date, datetime
 from unittest.mock import Mock, MagicMock, patch
 
 import pytest
 
-# 添加项目路径
-sys.path.insert(0, "/Users/berton/Github/vnpy")
+# 添加项目路径（跨平台：本文件上溯三级 tests -> vnpy_china_capital -> 项目根）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from vnpy.event import EventEngine, Event
 from vnpy.trader.constant import Exchange, Direction, Offset
@@ -29,6 +30,10 @@ class TestChinaCapitalGuiEngine:
 
         # 创建GUI引擎
         self.gui_engine = ChinaCapitalGuiEngine(self.main_engine, self.event_engine)
+        # 强制内存模式：本测试类不依赖真实DB（环境可能连了MySQL，否则
+        # process_trade_event/get_capital_flows 走DB路径而非cache，断言失效）
+        self.gui_engine.capital_db = None
+        self.gui_engine.capital_flow_db = None
 
     def teardown_method(self):
         """每个测试后的清理"""
@@ -270,6 +275,30 @@ class TestChinaCapitalGuiEngine:
         # 验证结果
         assert result["success_count"] == 2  # 两条有效数据
         assert result["error_count"] == 1  # 一条错误数据
+
+    def test_process_trade_event_multi_gateway(self):
+        """C5: 多账户场景按 gateway_name 匹配（非 accounts[0]）"""
+        acc_ctp = AccountData(gateway_name="CTP", accountid="A", balance=100000.0, frozen=0.0)
+        acc_es = AccountData(gateway_name="ESUNNY", accountid="B", balance=200000.0, frozen=0.0)
+        self.main_engine.get_all_accounts = Mock(return_value=[acc_ctp, acc_es])
+
+        trade = TradeData(
+            gateway_name="ESUNNY",
+            symbol="000001",
+            exchange=Exchange.SZSE,
+            orderid="o_multi",
+            tradeid="t_multi",
+            direction=Direction.LONG,
+            offset=Offset.OPEN,
+            price=10.0,
+            volume=100,
+            datetime=datetime.now()
+        )
+        self.gui_engine.process_trade_event(Event(type="trade", data=trade))
+
+        # 应选中 ESUNNY 账户(balance 200000)，而非 accounts[0](CTP 100000)
+        assert len(self.gui_engine.flows_cache) == 1
+        assert self.gui_engine.flows_cache[0]["balance"] == 200000.0
 
 
 class TestChinaCapitalGuiEngineWithDatabase:

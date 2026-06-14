@@ -4,8 +4,10 @@ CapitalFlowData 使用示例
 演示如何创建和使用资金流水数据对象。
 """
 
+import os
 import sys
-sys.path.insert(0, '/Users/berton/Github/vnpy')
+# 项目根目录（本文件上溯三级：examples -> vnpy_china_capital -> 项目根）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from datetime import datetime
 from vnpy.trader.constant import Direction, Offset, Exchange

@@ -92,7 +92,15 @@ class ChinaCapitalGuiEngine(BaseEngine):
                 logger.warning("无法获取账户信息，跳过资金流水记录")
                 return
 
-            account = accounts[0]
+            # 按 trade.gateway_name 匹配账户（多 gateway 场景）；无匹配回退 accounts[0]
+            # 注：TradeData 不携带 accountid，gateway_name 是可匹配的最高精度
+            account = None
+            for acc in accounts:
+                if acc.gateway_name == trade.gateway_name:
+                    account = acc
+                    break
+            if account is None:
+                account = accounts[0]
 
             # 保存流水
             if self.capital_flow_db:
@@ -145,6 +153,28 @@ class ChinaCapitalGuiEngine(BaseEngine):
         # 可以扩展记录出入金、手续费等操作
         pass
 
+    @staticmethod
+    def _flow_to_dict(flow: "CapitalFlowData") -> Dict[str, Any]:
+        """CapitalFlowData → 字典（统一映射，消除 get_capital_flows/import_historical_data 重复）"""
+        return {
+            "flow_id": flow.flow_id,
+            "gateway_name": flow.gateway_name,
+            "trade_id": flow.trade_id,
+            "symbol": flow.symbol,
+            "exchange": flow.exchange,
+            "direction": flow.direction.value if flow.direction else "",
+            "offset": flow.offset.value if flow.offset else "",
+            "price": float(flow.price) if flow.price is not None else 0.0,
+            "volume": float(flow.volume) if flow.volume is not None else 0.0,
+            "amount": float(flow.amount) if flow.amount is not None else 0.0,
+            "balance": float(flow.balance) if flow.balance is not None else 0.0,
+            "available": float(flow.available) if flow.available is not None else 0.0,
+            "trade_time": flow.trade_time,
+            "created_at": flow.created_at,
+            "flow_type": flow.flow_type,
+            "description": flow.description,
+        }
+
     def get_capital_flows(
         self,
         start_date: Optional[date] = None,
@@ -170,27 +200,7 @@ class ChinaCapitalGuiEngine(BaseEngine):
                 )
 
                 # 转换为字典列表
-                return [
-                    {
-                        "flow_id": f.flow_id,
-                        "gateway_name": f.gateway_name,
-                        "trade_id": f.trade_id,
-                        "symbol": f.symbol,
-                        "exchange": f.exchange,
-                        "direction": f.direction.value if f.direction else "",
-                        "offset": f.offset.value if f.offset else "",
-                        "price": float(f.price) if f.price is not None else 0.0,
-                        "volume": float(f.volume) if f.volume is not None else 0.0,
-                        "amount": float(f.amount) if f.amount is not None else 0.0,
-                        "balance": float(f.balance) if f.balance is not None else 0.0,
-                        "available": float(f.available) if f.available is not None else 0.0,
-                        "trade_time": f.trade_time,
-                        "created_at": f.created_at,
-                        "flow_type": f.flow_type,
-                        "description": f.description
-                    }
-                    for f in flows
-                ]
+                return [self._flow_to_dict(f) for f in flows]
             except Exception as e:
                 logger.error(f"查询资金流水失败: {e}", exc_info=True)
 
@@ -227,24 +237,7 @@ class ChinaCapitalGuiEngine(BaseEngine):
                         self.flows_cache.append(flow)
                     else:
                         # 假设是CapitalFlowData对象
-                        self.flows_cache.append({
-                            "flow_id": flow.flow_id,
-                            "gateway_name": flow.gateway_name,
-                            "trade_id": flow.trade_id,
-                            "symbol": flow.symbol,
-                            "exchange": flow.exchange,
-                            "direction": flow.direction.value if flow.direction else "",
-                            "offset": flow.offset.value if flow.offset else "",
-                            "price": float(flow.price) if flow.price is not None else 0.0,
-                            "volume": float(flow.volume) if flow.volume is not None else 0.0,
-                            "amount": float(flow.amount) if flow.amount is not None else 0.0,
-                            "balance": float(flow.balance) if flow.balance is not None else 0.0,
-                            "available": float(flow.available) if flow.available is not None else 0.0,
-                            "trade_time": flow.trade_time,
-                            "created_at": flow.created_at,
-                            "flow_type": flow.flow_type,
-                            "description": flow.description
-                        })
+                        self.flows_cache.append(self._flow_to_dict(flow))
                     success_count += 1
             except Exception as e:
                 error_count += 1
