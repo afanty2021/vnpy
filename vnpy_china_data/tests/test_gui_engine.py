@@ -70,6 +70,20 @@ class TestChinaDataGuiEngineHkConnect:
         assert gui_engine._parse_exchange("600000.SH") == Exchange.SSE
         assert gui_engine._parse_exchange("000001.SZ") == Exchange.SZSE
 
+    def test_parse_exchange_edge_cases(self, gui_engine):
+        """测试 _parse_exchange 边缘用例（标准格式，纯 endswith 行为）"""
+        # 港股通各后缀 → SEHK
+        assert gui_engine._parse_exchange("0700.SHHK") == Exchange.SEHK
+        assert gui_engine._parse_exchange("2318.SZHK") == Exchange.SEHK
+        assert gui_engine._parse_exchange("09988.SEHK") == Exchange.SEHK
+        assert gui_engine._parse_exchange("00700.HK") == Exchange.SEHK
+        # A股各后缀
+        assert gui_engine._parse_exchange("600000.SH") == Exchange.SSE
+        assert gui_engine._parse_exchange("000001.SZ") == Exchange.SZSE
+        # 无后缀纯代码（按首位判断）
+        assert gui_engine._parse_exchange("600000") == Exchange.SSE
+        assert gui_engine._parse_exchange("000001") == Exchange.SZSE
+
     def test_get_hk_symbols_from_database(self, gui_engine, mock_data_service):
         """测试从数据库获取港股通股票列表"""
         # Mock数据库返回

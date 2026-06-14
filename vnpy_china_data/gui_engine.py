@@ -420,28 +420,16 @@ class ChinaDataGuiEngine(BaseEngine):
         Returns:
             交易所枚举（港股通统一返回 SEHK）
         """
-        # 港股通：沪港通 -> 转换为香港本地交易所
-        if symbol.endswith(".SHHK") or ".SHHK" in symbol:
-            # 注意：历史数据下载使用 SEHK（香港本地）
+        # 港股通：沪港通/深港通/香港本地 → 统一 SEHK
+        if symbol.endswith((".SHHK", ".SZHK", ".SEHK", ".HK")):
             return Exchange.SEHK
-        # 港股通：深港通 -> 转换为香港本地交易所
-        elif symbol.endswith(".SZHK") or ".SZHK" in symbol:
-            # 注意：历史数据下载使用 SEHK（香港本地）
-            return Exchange.SEHK
-        # 香港本地：.SEHK（显示格式）
-        elif symbol.endswith(".SEHK") or ".SEHK" in symbol:
-            return Exchange.SEHK
-        # 香港本地：.HK
-        elif symbol.endswith(".HK") or ".HK" in symbol:
-            return Exchange.SEHK
-        # A股：上海证券交易所
-        elif symbol.endswith(".SH") or ".SH" in symbol:
+        # A股：上海/深圳
+        elif symbol.endswith(".SH"):
             return Exchange.SSE
-        # A股：深圳证券交易所
-        elif symbol.endswith(".SZ") or ".SZ" in symbol:
+        elif symbol.endswith(".SZ"):
             return Exchange.SZSE
         else:
-            # 默认判断（A 股）
+            # 默认按首位字符判断（A 股）
             if symbol.startswith("6"):
                 return Exchange.SSE
             else:
