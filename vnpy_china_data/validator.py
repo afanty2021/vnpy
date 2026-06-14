@@ -52,11 +52,11 @@ class DataValidator:
 
         # 检查成交量
         if bar.volume < 0:
-            return True
+            return False
 
-    return False
+        return True
 
-        @staticmethod
+    @staticmethod
     def validate_bar_list(bars: List[BarData]) -> List[BarData]:
         """验证并过滤K线数据列表
 
@@ -137,6 +137,9 @@ class DataValidator:
             Exchange.SSE,   # 上交所
             Exchange.SZSE,  # 深交所
             Exchange.BSE,   # 北交所
+            Exchange.SHHK,  # 沪港通
+            Exchange.SZHK,  # 深港通
+            Exchange.SEHK,  # 香港联交所
         ]
 
     @staticmethod
@@ -150,14 +153,10 @@ class DataValidator:
             是否有效
         """
         return interval in [
-            Interval.MINUTE_1,
-            Interval.MINUTE_5,
-            Interval.MINUTE_15,
-            Interval.MINUTE_30,
-            Interval.HOUR_1,
+            Interval.MINUTE,
+            Interval.HOUR,
             Interval.DAILY,
             Interval.WEEKLY,
-            Interval.MONTHLY,
         ]
 
     @staticmethod
