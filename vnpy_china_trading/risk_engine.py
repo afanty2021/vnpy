@@ -203,7 +203,7 @@ class RiskEngine:
         passed = len(all_reasons) == 0
 
         if passed:
-            logger.info(
+            logger.debug(
                 f"信号风控通过: {signal.vt_symbol}, "
                 f"方向: {signal.direction.value}, "
                 f"规则数: {len(self.rules)}"
