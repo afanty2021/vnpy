@@ -9,12 +9,6 @@ from setuptools import setup, find_packages
 this_directory = Path(__file__).parent
 long_description = (this_directory / "CLAUDE.md").read_text(encoding="utf-8") if (this_directory / "CLAUDE.md").exists() else ""
 
-# 读取requirements
-requirements = []
-if (this_directory / "requirements.txt").exists():
-    requirements = (this_directory / "requirements.txt").read_text(encoding="utf-8").strip().split("\n")
-    requirements = [r for r in requirements if r and not r.startswith("#")]
-
 setup(
     name="vnpy_china_monitor",
     version="0.1.0",
@@ -36,18 +30,26 @@ setup(
         "Programming Language :: Python :: 3.12",
     ],
     python_requires=">=3.10",
-    install_requires=requirements,
+    # 核心依赖：仅 alert/monitor 子系统所需，pip install 本包即装齐
+    install_requires=[
+        "psutil>=5.9.0",
+        "loguru>=0.7.0",
+        "vnpy",
+    ],
     extras_require={
+        # Web 监控面板：pip install vnpy_china_monitor[web]
         "web": [
-            "fastapi>=0.100.0",
-            "uvicorn[standard]>=0.23.0",
-            "websockets>=11.0",
-            "pydantic>=2.0.0",
+            "fastapi>=0.104.0",
+            "uvicorn[standard]>=0.24.0",
+            "websockets>=12.0",
+            "pydantic>=2.5.0",
             "pydantic-settings>=2.0.0",
             "python-multipart>=0.0.6",
             "python-jose[cryptography]>=3.3.0",
             "passlib[bcrypt]>=1.7.4",
+            "email-validator>=2.1.0",
             "aiofiles>=23.0.0",
+            "pyyaml>=6.0.1",
         ],
         "dev": [
             "pytest>=7.0.0",

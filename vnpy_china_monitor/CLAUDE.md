@@ -312,7 +312,7 @@ monitor_system.start()
 
 ### 外部依赖
 - `psutil` - 系统监控 >=5.9.0
-- `requests` - HTTP请求 >=2.28.0
+- `loguru` - 日志 >=0.7.0
 
 ## 测试
 

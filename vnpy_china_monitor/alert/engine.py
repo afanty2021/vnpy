@@ -1,14 +1,12 @@
 """
 告警引擎
 
-管理告警事件、优先级队列、去重和多通道通知
+管理告警事件、去重和多通道通知
 """
 
-from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Callable, Dict, Optional, Any
 import uuid
-import heapq
 
 from loguru import logger
 
@@ -20,41 +18,10 @@ from vnpy_china_monitor.alert.deduplicator import AlertDeduplicator, DedupeConfi
 from vnpy_china_monitor.alert.channels.base import AlertChannel, AlertMessage
 
 
-@dataclass
-class AlertEvent(AlertEvent):
-    """告警事件
-
-    Attributes:
-        id: 告警唯一标识
-        priority: 告警优先级
-        title: 告警标题
-        message: 告警消息
-        severity: 严重程度
-        source: 告警来源
-        timestamp: 告警时间
-        data: 附加数据
-        acknowledged: 是否已确认
-        acknowledged_by: 确认人
-        acknowledged_time: 确认时间
-    """
-
-    def to_message(self) -> AlertMessage:
-        """转换为告警消息"""
-        return AlertMessage(
-            title=self.title,
-            message=self.message,
-            severity=self.severity.value,
-            priority=self.priority,
-            timestamp=self.timestamp,
-            source=self.source,
-            data=self.data,
-        )
-
-
 class AlertEngine:
     """告警引擎
 
-    负责告警事件的管理、优先级队列、去重和多通道通知
+    负责告警事件的管理、去重和多通道通知
     """
 
     def __init__(
@@ -75,9 +42,6 @@ class AlertEngine:
 
         # 去重器
         self._deduplicator = AlertDeduplicator(dedupe_config or DedupeConfig())
-
-        # 告警队列（优先级堆）
-        self._alert_queue: List[AlertEvent] = []
 
         # 活跃告警字典
         self._active_alerts: Dict[str, AlertEvent] = {}
@@ -151,9 +115,6 @@ class AlertEngine:
 
         # 记录已发送
         self._deduplicator.record_alert(fingerprint)
-
-        # 添加到队列（负优先级用于堆排序）
-        heapq.heappush(self._alert_queue, (-priority.value, alert))
 
         # 添加到活跃告警
         self._active_alerts[alert_id] = alert
@@ -280,7 +241,15 @@ class AlertEngine:
         Args:
             alert: 告警事件
         """
-        message = alert.to_message()
+        message = AlertMessage(
+            title=alert.title,
+            message=alert.message,
+            severity=alert.severity.value,
+            priority=alert.priority,
+            timestamp=alert.timestamp,
+            source=alert.source,
+            data=alert.data,
+        )
 
         for channel in self._channels:
             if not channel.enabled:
@@ -344,7 +313,6 @@ class AlertEngine:
         return {
             "active_count": len(self._active_alerts),
             "history_count": len(self._alert_history),
-            "queue_count": len(self._alert_queue),
             "channels_count": len(self._channels),
             "total_sent": self._stats["total_sent"],
             "total_deduped": self._stats["total_deduped"],
