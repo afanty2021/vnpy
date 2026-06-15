@@ -124,7 +124,7 @@ class HkConnectCrawler:
                     stock_name = str(row[1]).strip()
 
                     # 港股代码通常是4-5位数字
-                    if stock_code.isdigit() and 4 <= len(stock_code) <= 5:
+                    if stock_code.isdigit() and 1 <= len(stock_code) <= 5:
                         stock = HkConnectStock(
                             symbol=stock_code.zfill(5),
                             name=stock_name,
@@ -175,7 +175,7 @@ class HkConnectCrawler:
                     stock_name = str(row[1]).strip()
 
                     # 港股代码通常是4-5位数字
-                    if stock_code.isdigit() and 4 <= len(stock_code) <= 5:
+                    if stock_code.isdigit() and 1 <= len(stock_code) <= 5:
                         stock = HkConnectStock(
                             symbol=stock_code.zfill(5),
                             name=stock_name,

@@ -74,9 +74,8 @@ class QMTDataAdapter(BaseDataAdapter):
         try:
             # 尝试导入xtquant
             try:
-                from xtquant import xtquant
-                from xtquant.xttype import Stock
-                self._qmt_api = xtquant
+                from xtquant import xtdata
+                self._qmt_api = xtdata
             except ImportError:
                 print("警告: 未安装xtquant库，QMT适配器无法使用")
                 return False
@@ -1132,6 +1131,13 @@ class QMTDataAdapter(BaseDataAdapter):
                 return []
 
             # 第3步：转换为 BarData 列表
+            # 根据代码后缀/代码段判断交易所：
+            #   .SH / 80xxxx(申万行业) / 000xxx(上交所指数) → SSE
+            #   .SZ / 399xxx(深交所指数) → SZSE
+            if sector_code.endswith(".SZ") or sector_code.startswith("399"):
+                bar_exchange = Exchange.SZSE
+            else:
+                bar_exchange = Exchange.SSE
             result: List[BarData] = []
             for df in data.values():
                 if df is None or not hasattr(df, "iterrows"):
@@ -1146,7 +1152,7 @@ class QMTDataAdapter(BaseDataAdapter):
                     bar = BarData(
                         gateway_name="QMT",
                         symbol=sector_code,
-                        exchange=Exchange.SSE if sector_code.startswith("80") else Exchange.SZSE,
+                        exchange=bar_exchange,
                         datetime=bar_dt,
                         interval=Interval.DAILY,
                         open_price=float(row.get("open", 0)),
