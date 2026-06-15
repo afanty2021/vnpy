@@ -192,7 +192,7 @@ class QMTDataAdapter(BaseDataAdapter):
 
             # 第2步：读取本地数据
             if hasattr(xtdata, 'get_local_data'):
-                data_list = xtdata.get_local_data(
+                data = xtdata.get_local_data(
                     field_list=['time', 'open', 'high', 'low', 'close', 'volume', 'amount'],
                     stock_list=[qmt_code],
                     period=period,
@@ -203,28 +203,35 @@ class QMTDataAdapter(BaseDataAdapter):
                 logger.warning("xtdata不支持get_local_data方法")
                 return []
 
-            # 第3步：转换为BarData列表
-            bars: List[BarData] = []
-
-            if data_list is None or len(data_list) == 0:
+            # xtdata.get_local_data 返回 dict[str, DataFrame]（key=stock_code, value=K线DataFrame）
+            if not data:
                 logger.debug(f"QMT未获取到数据: {qmt_code}")
                 return []
 
-            # 处理DataFrame数据
-            if hasattr(data_list, 'iterrows'):
-                for _, row in data_list.iterrows():
+            # 第3步：转换为BarData列表
+            bars: List[BarData] = []
+            for df in data.values():
+                if df is None or not hasattr(df, "iterrows"):
+                    continue
+                for _, row in df.iterrows():
+                    # xtdata 的 time 列是毫秒时间戳（int），转 datetime
+                    time_value = row.get("time")
+                    if isinstance(time_value, (int, float)):
+                        bar_dt = datetime.fromtimestamp(time_value / 1000)
+                    else:
+                        bar_dt = self._parse_qmt_time(time_value)
                     bar = BarData(
                         gateway_name="QMT",
                         symbol=symbol,
                         exchange=exchange,
                         interval=interval,
-                        datetime=self._parse_qmt_time(row.get('time')),
-                        open_price=float(row.get('open', 0)),
-                        high_price=float(row.get('high', 0)),
-                        low_price=float(row.get('low', 0)),
-                        close_price=float(row.get('close', 0)),
-                        volume=float(row.get('volume', 0)),
-                        turnover=float(row.get('amount', 0)),
+                        datetime=bar_dt,
+                        open_price=float(row.get("open", 0)),
+                        high_price=float(row.get("high", 0)),
+                        low_price=float(row.get("low", 0)),
+                        close_price=float(row.get("close", 0)),
+                        volume=float(row.get("volume", 0)),
+                        turnover=float(row.get("amount", 0)),
                     )
                     bars.append(bar)
 

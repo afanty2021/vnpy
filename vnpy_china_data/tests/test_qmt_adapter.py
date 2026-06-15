@@ -83,11 +83,11 @@ class TestQMTAdapterHistoryData:
         mock_xtdata = MagicMock()
         mock_xtdata.download_history_data2 = Mock(return_value=None)
 
-        # 创建模拟的DataFrame数据
+        # 创建模拟的DataFrame数据（time 为毫秒时间戳，匹配 xtdata 真实返回）
         mock_df = Mock()
         mock_df.iterrows = Mock(return_value=[
             (0, {
-                'time': '20240101 09:30:00',
+                'time': 1704067200000,  # 2024-01-01 UTC 毫秒
                 'open': 10.0,
                 'high': 11.0,
                 'low': 9.5,
@@ -97,7 +97,8 @@ class TestQMTAdapterHistoryData:
             })
         ])
         mock_df.__len__ = Mock(return_value=1)
-        mock_xtdata.get_local_data = Mock(return_value=mock_df)
+        # xtdata.get_local_data 真实返回 dict[str, DataFrame]（key=stock_code）
+        mock_xtdata.get_local_data = Mock(return_value={"000001.SZ": mock_df})
 
         # 创建mock的xtquant模块
         mock_xtquant = MagicMock()
@@ -124,6 +125,10 @@ class TestQMTAdapterHistoryData:
             assert bars[0].exchange == Exchange.SZSE
             assert bars[0].open_price == 10.0
             assert bars[0].close_price == 10.5
+            # 毫秒时间戳正确解析为 2024-01-01
+            assert bars[0].datetime.year == 2024
+            assert bars[0].datetime.month == 1
+            assert bars[0].datetime.day == 1
 
         finally:
             # 恢复原始模块
