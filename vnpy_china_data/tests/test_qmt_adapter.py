@@ -144,7 +144,7 @@ class TestQMTAdapterHistoryData:
         mock_df = MagicMock()
         mock_df.iterrows = MagicMock(return_value=[
             (0, {
-                'time': '20240101',
+                'time': 1704067200000,  # 毫秒时间戳（2024-01-01 UTC），匹配 xtdata 真实返回
                 'open': 100.0,
                 'high': 110.0,
                 'low': 95.0,
@@ -154,7 +154,8 @@ class TestQMTAdapterHistoryData:
             })
         ])
         mock_df.__len__ = MagicMock(return_value=1)
-        mock_xtdata.get_local_data = MagicMock(return_value=mock_df)
+        # xtdata.get_local_data 真实返回 dict[str, DataFrame]（key=stock_code）
+        mock_xtdata.get_local_data = MagicMock(return_value={"801010": mock_df})
 
         mock_xtquant = MagicMock()
         mock_xtquant.xtdata = mock_xtdata
@@ -177,6 +178,10 @@ class TestQMTAdapterHistoryData:
             assert bars[0].open_price == 100.0
             assert bars[0].close_price == 105.0
             assert bars[0].interval == Interval.DAILY
+            # 毫秒时间戳正确解析为 2024-01-01
+            assert bars[0].datetime.year == 2024
+            assert bars[0].datetime.month == 1
+            assert bars[0].datetime.day == 1
 
             # 验证两步调用链
             mock_xtdata.download_history_data2.assert_called_once()
