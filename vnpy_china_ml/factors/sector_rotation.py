@@ -2,6 +2,12 @@
 板块轮动因子模块
 
 提供行业/板块轮动相关的因子计算功能。
+
+数据格式说明：
+    本模块使用 pandas 进行数据处理。vnpy_china_ml 的 dataset/、backtesting/、
+    gui_engine.py 等模块使用 polars。跨模块传递 DataFrame 时需要进行转换：
+        - pandas → polars:  pl.from_pandas(df)
+        - polars → pandas:  df.to_pandas()
 """
 
 from typing import Dict, List, Optional

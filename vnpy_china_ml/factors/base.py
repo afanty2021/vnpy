@@ -2,6 +2,12 @@
 因子基类模块
 
 定义所有因子的抽象基类，提供统一的接口和规范。
+
+数据格式说明：
+    本模块使用 pandas 进行数据处理。vnpy_china_ml 的 dataset/、backtesting/、
+    gui_engine.py 等模块使用 polars。跨模块传递 DataFrame 时需要进行转换：
+        - pandas → polars:  pl.from_pandas(df)
+        - polars → pandas:  df.to_pandas()
 """
 
 from abc import ABC, abstractmethod

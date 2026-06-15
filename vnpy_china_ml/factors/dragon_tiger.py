@@ -2,6 +2,12 @@
 龙虎榜因子模块
 
 提供龙虎榜相关的因子计算功能，包括机构净买入、换手率等。
+
+数据格式说明：
+    本模块使用 pandas 进行数据处理。vnpy_china_ml 的 dataset/、backtesting/、
+    gui_engine.py 等模块使用 polars。跨模块传递 DataFrame 时需要进行转换：
+        - pandas → polars:  pl.from_pandas(df)
+        - polars → pandas:  df.to_pandas()
 """
 
 from typing import Dict, List, Optional
