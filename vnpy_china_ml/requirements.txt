@@ -5,9 +5,14 @@ numpy>=1.24.0
 pandas>=2.0.0
 polars>=0.20.0
 
-# 机器学习
+# 机器学习（核心）
 scikit-learn>=1.4.0
 scipy>=1.12.0
+
+# 机器学习（可选——按需安装对应模型类型）
+# lightgbm>=4.0.0    # LightGBM 模型（ModelType.LIGHTGBM）
+# xgboost>=2.0.0     # XGBoost 模型（ModelType.XGBOOST）
+# torch>=2.0.0       # LSTM 模型（ModelType.LSTM）
 
 # 数据服务
 vnpy_china_data

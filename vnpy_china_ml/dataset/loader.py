@@ -3,10 +3,11 @@
 负责从数据库或API加载历史K线数据，支持多种数据源。
 """
 
+import numpy as np
 import polars as pl
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from vnpy.trader.object import BarData
 from vnpy.trader.database import get_database, BaseDatabase
@@ -495,4 +496,283 @@ class Alpha158Calculator:
         return result
 
 
-__all__ = ["ChinaDataLoader", "Alpha158Calculator"]
+# ==================== 模块级数据准备函数 ====================
+# 以下三个函数从 gui_engine 提取的纯逻辑版本，不依赖 self._log；
+# 进度日志由调用方（gui_engine 薄包装）负责记录，数据为空抛 RuntimeError（消息文本契约保持）。
+
+
+# 训练数据准备默认使用的股票池（与原 gui_engine._prepare_training_data 保持一致）
+_DEFAULT_TRAINING_SYMBOLS: List[str] = [
+    "000001.SZ", "000002.SZ", "000063.SZ", "000066.SZ",
+    "600000.SH", "600036.SH", "600519.SH", "600887.SH",
+    "601318.SH", "601398.SH", "601857.SH", "601988.SH"
+]
+
+# 预测数据的股票名称映射（与原 gui_engine._prepare_prediction_data 保持一致）
+_SYMBOL_NAMES: dict = {
+    "000001.SZ": "平安银行", "000002.SZ": "万科A",
+    "600000.SH": "浦发银行", "600036.SH": "招商银行",
+    "600519.SH": "贵州茅台"
+}
+
+
+def prepare_training_data(
+    start_date: date,
+    end_date: date,
+    lookback_days: int,
+    forward_days: int
+) -> Tuple[np.ndarray, np.ndarray, List[str]]:
+    """准备训练数据
+
+    内部使用 create_alpha_dataset 加载并构造特征/标签。
+    数据为空时抛 RuntimeError，消息必须包含「本地数据库中没有训练数据」。
+
+    Args:
+        start_date: 训练开始日期
+        end_date: 训练结束日期
+        lookback_days: 回看天数
+        forward_days: 预测天数
+
+    Returns:
+        (X, y, feature_names) 元组
+
+    Raises:
+        RuntimeError: 数据集模块不可用或数据为空时
+    """
+    # 延迟导入 create_alpha_dataset（与原方法一致的错误处理）
+    try:
+        from vnpy_china_ml.dataset import create_alpha_dataset
+    except ImportError as e:
+        raise RuntimeError(
+            f"数据集模块不可用: {e}\n"
+            f"请确保已正确安装 vnpy_china_ml 模块"
+        )
+
+    # 创建数据集
+    dataset = create_alpha_dataset(
+        symbols=_DEFAULT_TRAINING_SYMBOLS,
+        start_date=start_date,
+        end_date=end_date,
+        lookback_days=lookback_days,
+        forward_days=forward_days
+    )
+
+    # 获取训练数据
+    X, y = dataset.get_all_data()
+    feature_names = dataset.get_feature_names()
+
+    if len(X) == 0:
+        raise RuntimeError(
+            f"本地数据库中没有训练数据\n"
+            f"请先下载历史数据:\n"
+            f"  1. 打开「A股数据」模块\n"
+            f"  2. 点击「下载历史数据」\n"
+            f"  3. 选择股票代码和日期范围\n"
+            f"  4. 确保下载范围包含 {start_date} 到 {end_date}\n"
+            f"训练需要至少 {lookback_days} 天的历史数据"
+        )
+
+    return X, y, feature_names
+
+
+def prepare_prediction_data(
+    symbols: List[str],
+    predict_date: date
+) -> Tuple[np.ndarray, List[str], List[str]]:
+    """准备预测数据
+
+    使用 ChinaDataLoader 加载 K 线，Alpha158Calculator 计算因子，
+    提取预测日期的最新横截面特征。返回的 vt_symbol 列与 _SYMBOL_NAMES 保持映射。
+
+    数据为空时抛 RuntimeError，消息必须包含「本地数据库中没有股票数据」。
+
+    Args:
+        symbols: 股票代码列表
+        predict_date: 预测日期
+
+    Returns:
+        (X, valid_symbols, valid_names) 元组，valid_symbols 来自 vt_symbol 列
+
+    Raises:
+        RuntimeError: 数据集模块不可用、K线数据为空、无可用预测数据或无因子特征
+    """
+    # 延迟导入（与原方法一致的错误处理）
+    try:
+        from vnpy_china_ml.dataset import ChinaDataLoader, Alpha158Calculator
+    except ImportError as e:
+        raise RuntimeError(
+            f"数据集模块不可用: {e}\n"
+            f"请确保已安装 vnpy.alpha 模块\n"
+            f"安装命令: pip install vnpy-alpha"
+        )
+
+    # 数据加载器
+    loader = ChinaDataLoader()
+    factor_calc = Alpha158Calculator()
+
+    # 计算数据起始日期（需要足够的历史数据计算因子）
+    start_date = predict_date - timedelta(days=90)
+
+    # 加载K线数据
+    df = loader.load_bars(
+        symbols=symbols,
+        start_date=start_date,
+        end_date=predict_date,
+        interval="1d"
+    )
+
+    if len(df) == 0:
+        raise RuntimeError(
+            f"本地数据库中没有股票数据\n"
+            f"请先下载历史数据:\n"
+            f"  1. 打开「A股数据」模块\n"
+            f"  2. 点击「下载历史数据」\n"
+            f"  3. 选择股票代码和日期范围\n"
+            f"  4. 确保下载范围包含 {start_date} 到 {predict_date}\n"
+            f"当前请求的股票: {', '.join(symbols[:5])}{'...' if len(symbols) > 5 else ''}"
+        )
+
+    # 计算因子
+    df = factor_calc.calculate_all(df)
+
+    # 获取预测日期的最新数据
+    predict_datetime = datetime.combine(predict_date, datetime.min.time())
+    latest_df = df.filter(
+        pl.col("datetime") <= pl.lit(predict_datetime)
+    ).group_by("vt_symbol").last()
+
+    if len(latest_df) == 0:
+        raise RuntimeError(
+            f"没有可用的预测数据 (截至 {predict_date})\n"
+            f"请确保:\n"
+            f"  1. 已下载至少90天的历史数据（用于计算Alpha158因子）\n"
+            f"  2. 预测日期在已下载数据范围内"
+        )
+
+    # 提取特征
+    base_cols = ["datetime", "vt_symbol", "open_price", "high_price",
+                 "low_price", "close_price", "volume", "turnover"]
+    feature_cols = [col for col in latest_df.columns if col not in base_cols]
+
+    if not feature_cols:
+        raise RuntimeError(
+            f"未能计算出任何因子特征\n"
+            f"请检查 Alpha158 计算器是否正常工作\n"
+            f"可能需要更多的历史数据来计算因子"
+        )
+
+    X = latest_df.select(feature_cols).to_numpy()
+
+    # 获取有效的股票列表（vt_symbol + 名称映射）
+    valid_symbols = latest_df["vt_symbol"].to_list()
+    valid_names = [_SYMBOL_NAMES.get(s, s) for s in valid_symbols]
+
+    return X, valid_symbols, valid_names
+
+
+def calculate_alpha158_features(
+    symbols: List[str],
+    start_date: date,
+    end_date: date,
+    infer_factor_type: Optional[Callable[[str], str]] = None
+) -> pl.DataFrame:
+    """计算 Alpha 158 因子并构造特征 DataFrame
+
+    内部流程：加载 K 线数据 -> 计算 Alpha158 因子 -> 按 _infer_factor_type 推断
+    每个因子的类型 -> 计算重要性/相关性 -> 按重要性降序排序 -> 构造特征 DataFrame。
+
+    数据为空时抛 RuntimeError（消息文本保持与原 gui_engine.calculate_features 一致）。
+
+    Args:
+        symbols: 股票代码列表
+        start_date: 用户请求的开始日期（不含 90 天 buffer）
+        end_date: 用户请求的结束日期
+        infer_factor_type: 因子类型推断函数。为 None 时使用模块内置的简单实现
+            （将所有因子归类为 "其他"）。gui_engine 通常传入 self._infer_factor_type。
+
+    Returns:
+        特征 DataFrame，包含 factor_name / factor_type / importance / correlation 列
+
+    Raises:
+        RuntimeError: K线数据为空或未能计算出任何因子特征
+    """
+    from vnpy_china_ml.dataset import ChinaDataLoader, Alpha158Calculator
+
+    # 因子类型推断回退：所有因子归到 "其他"
+    if infer_factor_type is None:
+        def infer_factor_type(name: str) -> str:
+            return "其他"
+
+    # 数据加载器
+    loader = ChinaDataLoader()
+    factor_calc = Alpha158Calculator()
+
+    # 计算数据起始日期（需要足够的历史数据计算因子）
+    calc_start_date = start_date - timedelta(days=90)
+
+    # 加载K线数据
+    df = loader.load_bars(
+        symbols=symbols,
+        start_date=calc_start_date,
+        end_date=end_date,
+        interval="1d"
+    )
+
+    if len(df) == 0:
+        raise RuntimeError(
+            f"本地数据库中没有K线数据\n"
+            f"请先下载历史数据:\n"
+            f"  1. 打开「A股数据」模块\n"
+            f"  2. 点击「下载历史数据」\n"
+            f"  3. 选择股票代码和日期范围\n"
+            f"  4. 确保下载范围包含 {calc_start_date} 到 {end_date}\n"
+            f"当前请求的股票: {', '.join(symbols[:5])}{'...' if len(symbols) > 5 else ''}"
+        )
+
+    # 计算因子
+    df = factor_calc.calculate_all(df)
+
+    # 提取特征列（calculate_features 里的 base_cols 多了 "label"，保持一致）
+    base_cols = ["datetime", "vt_symbol", "open_price", "high_price",
+                 "low_price", "close_price", "volume", "turnover", "label"]
+    feature_cols = [col for col in df.columns if col not in base_cols]
+
+    if not feature_cols:
+        raise RuntimeError(
+            f"未能计算出任何因子特征\n"
+            f"请确保:\n"
+            f"  1. 已下载至少90天的历史数据（用于计算Alpha158因子）\n"
+            f"  2. 日期范围包含 {start_date} 到 {end_date}"
+        )
+
+    # 计算每个因子的类型
+    features_data = []
+    for col in feature_cols:
+        ftype = infer_factor_type(col)
+        # 使用最后一行的数据作为示例
+        last_row = df.select(pl.col(col).last()).row(0)
+        importance = abs(float(last_row[0])) if last_row[0] is not None else 0.0
+        correlation = min(importance, 0.99)
+
+        features_data.append({
+            "factor_name": col,
+            "factor_type": ftype,
+            "importance": importance,
+            "correlation": correlation
+        })
+
+    # 按重要性排序
+    features_data.sort(key=lambda x: x["importance"], reverse=True)
+
+    result_df = pl.DataFrame(features_data)
+
+    return result_df
+
+
+__all__ = [
+    "ChinaDataLoader",
+    "Alpha158Calculator",
+    "prepare_training_data",
+    "prepare_prediction_data",
+    "calculate_alpha158_features",
+]

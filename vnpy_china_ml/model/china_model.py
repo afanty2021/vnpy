@@ -39,7 +39,7 @@ class ChinaAlphaModel:
         """初始化模型
 
         Args:
-            model_type: 模型类型，默认为LIGHTGBM
+            model_type: 模型类型，默认为RANDOM_FOREST
         """
         # 处理 model_type 可能是字符串的情况
         if isinstance(model_type, str):

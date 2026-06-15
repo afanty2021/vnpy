@@ -4,11 +4,12 @@
 """
 
 import os
+import json
 import pickle
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List, Optional
 from datetime import datetime
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from .china_model import ChinaAlphaModel
 from ..utils.types import ModelType, PredictionResult
@@ -34,6 +35,10 @@ class ModelMetadata:
         version_tag: 版本标签（production/staging/development）
         changelog: 变更日志
     """
+
+    # to_dict / from_dict 共用的训练时间格式，修改时两处需保持一致
+    _DATE_FORMAT: ClassVar[str] = "%Y-%m-%d %H:%M:%S"
+
     model_id: str
     model_name: str
     model_type: ModelType
@@ -50,13 +55,20 @@ class ModelMetadata:
     changelog: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        """转换为字典"""
+        """转换为字典
+
+        将 model_type 枚举与 training_date datetime 序列化为可写入 JSON 的字符串；
+        与 from_dict 严格对称。
+        """
         return {
             "model_id": self.model_id,
             "model_name": self.model_name,
             "model_type": self.model_type.value,
             "is_trained": self.is_trained,
-            "training_date": self.training_date.strftime("%Y-%m-%d %H:%M:%S") if self.training_date else "",
+            "training_date": (
+                self.training_date.strftime(self._DATE_FORMAT)
+                if self.training_date else ""
+            ),
             "accuracy": self.accuracy,
             "feature_count": self.feature_count,
             "status": self.status,
@@ -67,6 +79,31 @@ class ModelMetadata:
             "version_tag": self.version_tag,
             "changelog": self.changelog
         }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "ModelMetadata":
+        """从字典构造 ModelMetadata（to_dict 的逆操作）
+
+        还原 to_dict 中被字符串化的字段：
+            - model_type: 字符串（如 "random_forest"）-> ModelType 枚举
+            - training_date: "%Y-%m-%d %H:%M:%S" 字符串或空串 -> datetime | None
+
+        Args:
+            d: 由 to_dict 生成的字典（或同构字典）
+
+        Returns:
+            还原类型后的 ModelMetadata 实例
+        """
+        restored = dict(d)  # 浅拷贝，避免修改入参
+        # 还原 model_type: str -> ModelType
+        restored["model_type"] = ModelType(restored["model_type"])
+        # 还原 training_date: 空串/None -> None；非空字符串 -> datetime
+        date_str = restored.get("training_date")
+        if date_str:
+            restored["training_date"] = datetime.strptime(date_str, cls._DATE_FORMAT)
+        else:
+            restored["training_date"] = None
+        return cls(**restored)
 
 
 class ModelManager:
@@ -92,11 +129,36 @@ class ModelManager:
         self._load_metadata()
 
     def _load_metadata(self) -> None:
-        """从文件加载模型元数据（向后兼容旧版本）"""
-        metadata_file = self.model_dir / "metadata.pkl"
-        if metadata_file.exists():
+        """从文件加载模型元数据
+
+        优先读取 JSON 格式的 metadata.json；
+        若仅存在旧版 metadata.pkl，则加载并迁移为 JSON，随后删除旧文件。
+        """
+        json_file = self.model_dir / "metadata.json"
+        pickle_file = self.model_dir / "metadata.pkl"
+
+        # 优先加载 JSON 格式
+        if json_file.exists():
             try:
-                with open(metadata_file, 'rb') as f:
+                with open(json_file, "r", encoding="utf-8") as f:
+                    raw_data = json.load(f)
+
+                loaded_models: Dict[str, ModelMetadata] = {}
+                for model_id, d in raw_data.items():
+                    # 反序列化集中在 ModelMetadata.from_dict，保持与 to_dict 对称
+                    loaded_models[model_id] = ModelMetadata.from_dict(d)
+
+                self._models = loaded_models
+                return
+            except Exception as e:
+                print(f"加载模型元数据失败: {e}")
+                self._models = {}
+                return
+
+        # 向后兼容：迁移旧版 pickle 文件
+        if pickle_file.exists():
+            try:
+                with open(pickle_file, 'rb') as f:
                     loaded_models = pickle.load(f)
 
                 # 确保向后兼容：为旧元数据添加新字段
@@ -112,16 +174,36 @@ class ModelManager:
                         metadata.changelog = ""
 
                 self._models = loaded_models
+
+                # 迁移为 JSON 格式
+                self._save_metadata()
+
+                # 删除旧 pickle 文件
+                try:
+                    pickle_file.unlink()
+                except Exception as e:
+                    print(f"删除旧元数据文件失败: {e}")
             except Exception as e:
                 print(f"加载模型元数据失败: {e}")
                 self._models = {}
+                return
 
     def _save_metadata(self) -> None:
-        """保存模型元数据到文件"""
-        metadata_file = self.model_dir / "metadata.pkl"
+        """保存模型元数据到 JSON 文件"""
+        metadata_file = self.model_dir / "metadata.json"
         try:
-            with open(metadata_file, 'wb') as f:
-                pickle.dump(self._models, f)
+            # 将每个 ModelMetadata 序列化为字典
+            serializable = {
+                model_id: metadata.to_dict()
+                for model_id, metadata in self._models.items()
+            }
+            with open(metadata_file, "w", encoding="utf-8") as f:
+                json.dump(
+                    serializable,
+                    f,
+                    indent=2,
+                    ensure_ascii=False
+                )
         except Exception as e:
             print(f"保存模型元数据失败: {e}")
 
@@ -299,7 +381,9 @@ class ModelManager:
     def create_preset_models(self) -> int:
         """创建预置模型（用于首次使用或演示）
 
-        使用模拟数据创建简单预训练模型，让用户可以快速体验功能。
+        仅用于界面功能体验，使用随机模拟数据（np.random.randn）训练，
+        预测结果无实际意义，不可用于实盘决策。
+        实盘使用前必须用真实历史数据重新训练。
 
         Returns:
             创建的模型数量
@@ -311,19 +395,19 @@ class ModelManager:
             {
                 "name": "random_forest_preset",
                 "type": ModelType.RANDOM_FOREST,
-                "description": "[预置] 随机森林模型 - 使用模拟数据训练",
+                "description": "[预置·仅供演示] 随机森林模型 - 随机数据训练，预测无意义，不可用于实盘",
                 "accuracy": 0.65
             },
             {
                 "name": "lightgbm_preset",
                 "type": ModelType.LIGHTGBM,
-                "description": "[预置] LightGBM模型 - 使用模拟数据训练",
+                "description": "[预置·仅供演示] LightGBM模型 - 随机数据训练，预测无意义，不可用于实盘",
                 "accuracy": 0.68
             },
             {
                 "name": "lasso_preset",
                 "type": ModelType.LASSO,
-                "description": "[预置] Lasso回归模型 - 使用模拟数据训练",
+                "description": "[预置·仅供演示] Lasso回归模型 - 随机数据训练，预测无意义，不可用于实盘",
                 "accuracy": 0.62
             }
         ]
