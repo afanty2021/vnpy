@@ -99,13 +99,15 @@ class StrategyScheduler:
                 logger.warning(f"策略不存在: {name}")
                 return False
 
-            # 停止策略线程
-            if name in self._threads:
-                self._stop_strategy_thread(name)
-
             del self.strategies[name]
-            logger.info(f"移除策略: {name}")
-            return True
+            # 锁内仅摘除线程引用，避免持锁 join 阻塞其他操作
+            thread = self._threads.pop(name, None)
+
+        logger.info(f"移除策略: {name}")
+
+        # 释放锁后再 join，防止长时间持锁阻塞调度器其他操作
+        self._wait_thread_exit(name, thread)
+        return True
 
     def get_strategy(self, name: str) -> Optional[StrategyConfig]:
         """获取策略
@@ -160,21 +162,34 @@ class StrategyScheduler:
             self._running = False
             self._stop_event.set()
 
-            # 停止所有策略线程
-            for name in list(self._threads.keys()):
-                self._stop_strategy_thread(name)
+            # 锁内仅快照并清空线程引用，避免持锁 join 阻塞
+            pending_threads = list(self._threads.items())
+            self._threads.clear()
 
-            logger.info("调度器停止")
+        # 释放锁后逐个 join，防止长时间持锁阻塞调度器其他操作
+        for name, thread in pending_threads:
+            self._wait_thread_exit(name, thread)
+
+        logger.info("调度器停止")
 
     def _start_strategy_thread(self, config: StrategyConfig) -> None:
         """启动策略执行线程
 
         Args:
             config: 策略配置
+
+        Note:
+            此方法在调用者持有 self._lock 时调用。若发现同名残留线程
+            （异常情况），仅从字典摘除并告警，不在持锁状态下 join ——
+            残留的 daemon 线程会随 _running/_stop_event 检查自行退出。
         """
-        # 如果线程已存在，先停止
-        if config.name in self._threads:
-            self._stop_strategy_thread(config.name)
+        # 处理同名残留线程（异常路径：正常 add_strategy 同名会先抛 ValueError）
+        stale_thread = self._threads.pop(config.name, None)
+        if stale_thread is not None and stale_thread.is_alive():
+            logger.warning(
+                f"发现同名残留线程未清理: {config.name}，"
+                f"将随调度状态检查自行退出"
+            )
 
         # 创建并启动新线程
         thread = threading.Thread(
@@ -188,25 +203,24 @@ class StrategyScheduler:
 
         logger.debug(f"策略线程启动: {config.name}")
 
-    def _stop_strategy_thread(self, name: str) -> None:
-        """停止策略执行线程
+    def _wait_thread_exit(
+        self, name: str, thread: Optional[threading.Thread]
+    ) -> None:
+        """等待策略线程结束（必须在释放 self._lock 后调用）
 
         Args:
             name: 策略名称
+            thread: 待等待的线程，None 时直接返回
         """
-        if name not in self._threads:
+        if thread is None:
             return
 
-        # 设置策略的停止标志（通过修改配置实现）
-        # 注意：由于策略执行循环检查调度器状态，这里只需等待线程结束
-        thread = self._threads[name]
         if thread.is_alive():
             # 等待线程结束（最多等待5秒）
             thread.join(timeout=5.0)
             if thread.is_alive():
                 logger.warning(f"策略线程无法正常结束: {name}")
 
-        del self._threads[name]
         logger.debug(f"策略线程停止: {name}")
 
     def _run_strategy(self, config: StrategyConfig) -> None:
