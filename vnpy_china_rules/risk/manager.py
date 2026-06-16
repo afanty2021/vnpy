@@ -14,6 +14,21 @@ if TYPE_CHECKING:
 from vnpy_china_rules.engine import ChinaStockRulesEngine
 from vnpy_china_rules.datasource import DataSourceManager
 
+try:
+    from vnpy_china_rules.risk.rules import (
+        CapitalRiskRule,
+        PositionControlRule,
+        StopProfitLossRule,
+        TradingLimitRule,
+    )
+except ImportError:
+    # vnpy_riskmanager 缺失时降级为 None；_register_custom_rules 仅在
+    # _init_risk_manager 成功后调用（vnpy_riskmanager 已安装），运行时非 None。
+    CapitalRiskRule = None
+    PositionControlRule = None
+    StopProfitLossRule = None
+    TradingLimitRule = None
+
 
 @dataclass
 class RiskAlertEvent:
@@ -103,25 +118,79 @@ class AStockRiskManager(IRiskAlertProvider):
         self._register_custom_rules()
 
     def _register_custom_rules(self):
-        """注册自定义规则"""
-        # 动态加载 rules/ 目录下的规则
-        from pathlib import Path
-        import importlib.util
+        """注册 A股自定义风控规则到 vnpy_riskmanager 引擎
 
-        rules_path = Path(__file__).parent / "rules"
-        for file in rules_path.glob("*_rule.py"):
-            if file.name.startswith("_"):
-                continue
+        前置：仅 _init_risk_manager 成功后调用（vnpy_riskmanager 已安装），
+        故顶部导入的 4 个规则类必非 None。
+        add_rule 用 rule_class.name（类属性）作 setting key 与 rules 字典 key，
+        与实例 rule.name（继承类属性）一致——隐含契约：规则不在 on_init 中
+        动态修改 self.name（当前 4 个规则均无此行为）。
+        """
+        rule_classes = [
+            CapitalRiskRule, PositionControlRule,
+            StopProfitLossRule, TradingLimitRule,
+        ]
 
-            # 动态导入模块
+        registered_rules = []
+        for rule_class in rule_classes:
             try:
-                module_name = f"vnpy_china_rules.risk.rules.{file.stem}"
-                spec = importlib.util.spec_from_file_location(module_name, file)
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                self.write_log(f"成功加载风控规则: {file.stem}")
+                self.risk_engine.add_rule(rule_class)
+                rule = self.risk_engine.rules.get(rule_class.name)
+                if rule is not None:
+                    registered_rules.append(rule)
+                else:
+                    self.write_log(f"注册风控规则未找到实例: {rule_class.name}")
             except Exception as e:
-                self.write_log(f"加载风控规则失败 {file.stem}: {str(e)}")
+                self.write_log(f"注册风控规则失败 {rule_class.__name__}: {e}")
+
+        if not registered_rules:
+            self.write_log("全部风控规则注册失败，请检查 vnpy_riskmanager 与规则类")
+
+        try:
+            self._register_rule_events(registered_rules)
+        except Exception as e:
+            self.write_log(f"风控规则事件回调注册失败: {e}")
+
+        # 告警联动：仅 CapitalRiskRule/PositionControlRule 有 set_risk_manager
+        for rule in registered_rules:
+            try:
+                if hasattr(rule, "set_risk_manager"):
+                    rule.set_risk_manager(self)
+            except Exception as e:
+                self.write_log(f"风控规则告警联动失败 {rule.name}: {e}")
+            self.write_log(f"成功注册风控规则: {rule.name}")
+
+    def _register_rule_events(self, rules):
+        """为新注册的规则补注册事件回调
+
+        register_events 已在 RiskEngine.__init__ 跑完，后 add_rule 的规则需手动补。
+        needs_callback 在 add_rule（实例化）后调用，规则方法已绑定子类重写版本。
+        每事件类型显式 register 一次（不依赖 EventEngine.register 内部幂等性）。
+        """
+        from vnpy.trader.event import (
+            EVENT_TICK, EVENT_ORDER, EVENT_TRADE, EVENT_TIMER,
+        )
+
+        engine = self.risk_engine
+        buckets = [
+            ("on_tick", engine.tick_rules, EVENT_TICK, engine.process_tick_event),
+            ("on_order", engine.order_rules, EVENT_ORDER, engine.process_order_event),
+            ("on_trade", engine.trade_rules, EVENT_TRADE, engine.process_trade_event),
+            ("on_timer", engine.timer_rules, EVENT_TIMER, engine.process_timer_event),
+        ]
+
+        events_to_register = []
+        for method_name, bucket, event_type, handler in buckets:
+            added = False
+            for rule in rules:
+                if engine.needs_callback(rule, method_name) and rule not in bucket:
+                    bucket.append(rule)
+                    added = True
+            if added:
+                events_to_register.append((event_type, handler))
+
+        for event_type, handler in events_to_register:
+            engine.event_engine.register(event_type, handler)
 
     def write_log(self, msg: str):
         """写日志"""
