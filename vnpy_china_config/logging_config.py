@@ -17,17 +17,6 @@ LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 LOG_FORMAT_DETAILED = "%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
-# 模块日志名称
-MODULE_NAMES = [
-    "vnpy_china_config",
-    "vnpy_china_data",
-    "vnpy_china_rules",
-    "vnpy_china_analysis",
-    "vnpy_china_backtest",
-    "vnpy_china_capital",
-    "vnpy_china_ml",
-]
-
 
 def setup_logging(
     level: int = logging.INFO,
