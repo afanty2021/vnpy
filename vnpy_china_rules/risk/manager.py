@@ -4,11 +4,13 @@ A股风险管理器
 整合 vnpy_riskmanager 和 A股规则引擎
 """
 
-from typing import Optional, List, Callable
+from typing import Optional, List, Callable, TYPE_CHECKING
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from vnpy_riskmanager.engine import RiskEngine
+if TYPE_CHECKING:
+    from vnpy_riskmanager.engine import RiskEngine
+
 from vnpy_china_rules.engine import ChinaStockRulesEngine
 from vnpy_china_rules.datasource import DataSourceManager
 
@@ -48,7 +50,7 @@ class AStockRiskManager(IRiskAlertProvider):
         self.event_engine = event_engine
 
         # 初始化 vnpy_riskmanager
-        self.risk_engine: Optional[RiskEngine] = None
+        self.risk_engine: Optional["RiskEngine"] = None
 
         # 初始化 A股规则引擎
         self.china_rules_engine: Optional[ChinaStockRulesEngine] = None
@@ -91,6 +93,7 @@ class AStockRiskManager(IRiskAlertProvider):
     def _init_risk_manager(self):
         """初始化风控引擎"""
         from vnpy_riskmanager import RiskManagerApp
+        from vnpy_riskmanager.engine import RiskEngine
 
         # 添加风控应用
         self.main_engine.add_app(RiskManagerApp)
@@ -132,7 +135,7 @@ class AStockRiskManager(IRiskAlertProvider):
         # 降级使用 print
         print(f"[AStockRiskManager] {msg}")
 
-    def get_risk_engine(self) -> RiskEngine:
+    def get_risk_engine(self) -> "RiskEngine":
         """获取风控引擎"""
         return self.risk_engine
 

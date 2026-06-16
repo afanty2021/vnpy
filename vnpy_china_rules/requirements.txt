@@ -14,6 +14,9 @@ vnpy_china_data
 vnpy
 vnpy_ctastrategy
 
+# 风控规则（vnpy_china_rules.risk）可选运行时依赖，启用 risk 规则时安装：
+#   pip install vnpy_riskmanager
+
 # T+1持仓持久化（vnpy_china_rules.t1_store）可选运行时依赖，启用 T+1 跨重启恢复时安装：
 #   pip install pymysql dbutils
 #   （复用 vnpy_china_reporting.data_source.db.DataSourceDB）

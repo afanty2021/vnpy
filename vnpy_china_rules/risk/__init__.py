@@ -18,12 +18,22 @@ from vnpy_china_rules.risk.manager import (
     IRiskAlertProvider,
     RiskAlertEvent,
 )
-from vnpy_china_rules.risk.rules import (
-    PositionControlRule,
-    StopProfitLossRule,
-    CapitalRiskRule,
-    TradingLimitRule,
-)
+
+# 风控规则继承 vnpy_riskmanager.template.RuleTemplate，属于可选运行时依赖。
+# 缺失时降级：管理器与告警接口仍可用，规则类置空，避免阻断整个 risk 包导入
+# （与 vnpy_china_monitor.risk_connector 的 try/except 容错设计一致）。
+try:
+    from vnpy_china_rules.risk.rules import (
+        PositionControlRule,
+        StopProfitLossRule,
+        CapitalRiskRule,
+        TradingLimitRule,
+    )
+except ImportError:
+    PositionControlRule = None
+    StopProfitLossRule = None
+    CapitalRiskRule = None
+    TradingLimitRule = None
 
 __all__ = [
     "AStockRiskManager",
