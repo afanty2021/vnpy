@@ -201,6 +201,21 @@ def start_gui_with_rpc():
     print("  ✓ A股机器学习模块")
     print("✓ A股增强模块加载完成")
 
+    # 报表数据源：每日18:30自动落库权益快照（权益变化法盈亏的期初权益源）
+    reporting_svc = None
+    try:
+        from vnpy_china_reporting.data_source import ReportingDataService
+        ConfigManager.reset_instance()
+        _cm = ConfigManager()
+        _cm.set_config_path(Path(__file__).parent.parent.parent / ".vntrader_china/config")
+        _global_config = _cm.load_config(force_reload=True)
+        reporting_svc = ReportingDataService(main_engine=main_engine, config=_global_config)
+        reporting_svc.setup()
+        reporting_svc.start_daily_equity("18:30")
+        print("  ✓ 报表数据源已启动（每日18:30自动落库权益快照，跳过周末）")
+    except Exception as e:
+        print(f"  ⚠ 报表数据源启动失败（不影响交易主流程）: {e}")
+
     # 创建主窗口
     main_window = MainWindow(main_engine, event_engine)
 
@@ -222,6 +237,10 @@ def start_gui_with_rpc():
     print("=" * 60)
 
     qapp.exec()
+
+    # 主窗口关闭后停止报表定时任务（scheduler 为 daemon 线程，此处优雅退出）
+    if reporting_svc:
+        reporting_svc.stop()
 
 
 if __name__ == "__main__":
