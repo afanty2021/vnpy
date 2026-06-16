@@ -83,11 +83,18 @@ class ConfigManager:
                     cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self) -> None:
-        """初始化配置管理器"""
+    def __init__(self, config_path: Optional[Union[str, Path]] = None) -> None:
+        """初始化配置管理器
+
+        Args:
+            config_path: 可选的配置根目录，显式指定时绕过 cwd 自动探测。
+                适用于进程工作目录不在项目树内（如已安装包、跨目录调用）
+                的场景，避免路径解析漂移。
+        """
         if not self._initialized:
             self._configs: Dict[str, BaseConfig] = {}
-            self._config_path: Path = self._find_config_path()
+            self._config_path: Path = self._find_config_path(config_path)
+            self._config_source: str = self._last_config_source
             self._environment: Environment = self._detect_environment()
             self._project_root: Path = self._detect_project_root()
             self._initialized = True
@@ -145,22 +152,37 @@ class ConfigManager:
 
         return False
 
-    def _find_config_path(self) -> Path:
+    def _find_config_path(
+        self, explicit_path: Optional[Union[str, Path]] = None
+    ) -> Path:
         """查找配置文件路径
 
         按优先级查找：
+        0. 显式传入的路径（最高优先级，绕过 cwd 探测）
         1. 当前目录下的 .vntrader_china/config
         2. 向上递归查找项目根目录（带项目标识验证）
         3. 用户主目录下的 .vntrader_china/config（最后才使用）
 
+        解析来源会写入 self._last_config_source 以便诊断（见 get_config_info）。
+
+        Args:
+            explicit_path: 显式指定的配置根目录，优先级最高
+
         Returns:
             配置文件路径
         """
+        # 0. 显式路径优先（绕过 cwd 探测）
+        if explicit_path is not None:
+            path = Path(explicit_path)
+            self._last_config_source = "explicit"
+            return path
+
         current_path = Path.cwd()
 
         # 1. 尝试当前目录
         config_path = current_path / ".vntrader_china/config"
         if config_path.exists() and self._has_config_files(config_path):
+            self._last_config_source = "cwd"
             return config_path
 
         # 2. 向上查找项目根目录（带项目标识验证）
@@ -186,14 +208,17 @@ class ConfigManager:
 
         # 如果找到项目配置，优先使用
         if project_config_path:
+            self._last_config_source = "project_root"
             return project_config_path
 
         # 3. 使用用户主目录（作为最后的fallback）
         home_config = Path.home() / ".vntrader_china/config"
         if home_config.exists() and self._has_config_files(home_config):
+            self._last_config_source = "home"
             return home_config
 
         # 默认使用当前目录（稍后会创建）
+        self._last_config_source = "default_cwd"
         return current_path / ".vntrader_china/config"
 
     def _detect_project_root(self) -> Path:
@@ -227,10 +252,19 @@ class ConfigManager:
         return {
             "environment": self._environment.value,
             "config_path": str(self._config_path),
+            "config_source": self._config_source,
             "project_root": str(self._detect_project_root()),
             "config_exists": str(self._config_path.exists()),
             "has_config_files": str(self._has_config_files(self._config_path) if self._config_path.exists() else False),
         }
+
+    @property
+    def config_source(self) -> str:
+        """返回配置路径的解析来源（explicit / cwd / project_root / home / default_cwd）
+
+        用于诊断路径解析是否正确、排查工作目录相关故障。
+        """
+        return self._config_source
 
     def _detect_environment(self) -> Environment:
         """自动检测运行环境
