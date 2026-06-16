@@ -48,6 +48,27 @@ class ConfigValidator:
     """
 
     @staticmethod
+    def _get_nested_attr(config: BaseConfig, field_path: str) -> Any:
+        """按点号路径解析嵌套字段
+
+        支持单层字段名（如 "level"）与嵌套路径（如 "database.pool_size"）。
+        任一层级属性缺失或字段路径不存在时返回 None。
+
+        Args:
+            config: 配置对象
+            field_path: 点号分隔的字段路径
+
+        Returns:
+            字段值；路径不可达时返回 None
+        """
+        current: Any = config
+        for part in field_path.split("."):
+            if current is None:
+                return None
+            current = getattr(current, part, None)
+        return current
+
+    @staticmethod
     def validate_required_fields(
         config: BaseConfig,
         required_fields: List[str],
@@ -75,7 +96,7 @@ class ConfigValidator:
         errors: List[str] = []
 
         for field in required_fields:
-            value = getattr(config, field, None)
+            value = ConfigValidator._get_nested_attr(config, field)
             if value is None:
                 errors.append(f"必需字段 '{field}' 未设置")
             elif isinstance(value, str) and not value.strip():
@@ -116,7 +137,7 @@ class ConfigValidator:
             )
             ```
         """
-        value = getattr(config, field, None)
+        value = ConfigValidator._get_nested_attr(config, field)
 
         if value is None:
             return {"valid": True, "errors": []}
@@ -168,7 +189,7 @@ class ConfigValidator:
             )
             ```
         """
-        value = getattr(config, field, None)
+        value = ConfigValidator._get_nested_attr(config, field)
 
         if value is None:
             return {"valid": True, "errors": []}
@@ -235,12 +256,12 @@ class ConfigValidator:
         errors: List[str] = []
 
         for field, dependent_fields in rules.items():
-            field_value = getattr(config, field, None)
+            field_value = ConfigValidator._get_nested_attr(config, field)
 
             # 如果主字段存在且为 True，检查依赖字段
             if field_value:
                 for dependent_field in dependent_fields:
-                    dependent_value = getattr(config, dependent_field, None)
+                    dependent_value = ConfigValidator._get_nested_attr(config, dependent_field)
                     if dependent_value is None or (
                         isinstance(dependent_value, str) and not dependent_value.strip()
                     ):
