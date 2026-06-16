@@ -726,7 +726,7 @@ class ChinaStockRulesEngine:
     LIMIT_RATIO_BSE: float = 0.30  # 北交所30%
     LIMIT_RATIO_ST: float = 0.05   # ST股票5%
 
-    def __init__(self, datasource_manager: DataSourceManager) -> None:
+    def __init__(self, datasource_manager: DataSourceManager, db: Optional[Any] = None) -> None:
         """
         初始化A股交易规则引擎
 
@@ -734,6 +734,9 @@ class ChinaStockRulesEngine:
         ----------
         datasource_manager : DataSourceManager
             数据源管理器
+        db : Optional[Any]
+            可选持久化连接（需实现 execute(sql,args)->int、query(sql,args)->List[dict]，
+            如 vnpy_china_reporting.data_source.db.DataSourceDB）。为 None 时纯内存模式。
         """
         self.dm = datasource_manager
 
@@ -744,7 +747,52 @@ class ChinaStockRulesEngine:
         self.unit_rules = UnitRulesEngine(self)
         self.ipo_rules = IpoRulesEngine(self)
 
+        # T+1 持久化（可选）：db 注入时建表并重放，失败降级纯内存。
+        # 降级时已建好的 t1_trade_flow 表会保留（CREATE TABLE IF NOT EXISTS 幂等，
+        # 下次启动复用），不影响纯内存模式的正确性。
+        self.store = None
+        if db is not None:
+            try:
+                from vnpy_china_rules.t1_store import T1PositionStore
+                self.store = T1PositionStore(db)
+                self.store.init_schema()
+                self._replay()
+            except Exception as e:
+                self.store = None
+                logger.exception(f"T+1持久化初始化失败，降级纯内存模式: {e}")
+
         logger.info("A股交易规则引擎初始化成功")
+
+    def _replay(self) -> None:
+        """从流水重放重建T+1内存持仓
+
+        读取 t1_trade_flow 全表（已按 trade_time, id 排序），逐条喂给
+        record_buy/record_sell，与正常成交路径复用同一逻辑。
+        单条脏数据（类型异常等）只告警跳过、不中断整体重放，避免持久
+        脏数据导致每次启动都降级。
+        """
+        if self.store is None:
+            return
+        processed = 0
+        skipped = 0
+        for row in self.store.load_all():
+            try:
+                symbol = row["symbol"]
+                volume = int(row["volume"])
+                dt = row["trade_time"]
+                if row["direction"] == Direction.LONG.value:      # "多"
+                    self.t1_rules.record_buy(symbol, volume, dt)
+                    processed += 1
+                elif row["direction"] == Direction.SHORT.value:   # "空"
+                    self.t1_rules.record_sell(symbol, volume, dt)
+                    processed += 1
+                else:
+                    # NET 或异常值：跳过（不应出现在成交流水）
+                    skipped += 1
+            except Exception as e:
+                skipped += 1
+                logger.warning(f"T+1重放跳过异常流水行: {row}, 原因: {e}")
+        logger.info(f"T+1持仓重放完成，重放 {processed} 条，跳过 {skipped} 条")
 
     def check_order(self, order: OrderData) -> List[RuleResult]:
         """
@@ -811,27 +859,46 @@ class ChinaStockRulesEngine:
         """
         成交回调
 
-        更新T+1持仓记录。
+        先落 T+1 流水（崩溃恢复权威），再更新内存持仓（T+1 检查权威）。
+        DB 与内存共用单次计算的 trade_time，保证原始执行与重放一致。
+        重复 vt_tradeid 时 DB 层 INSERT IGNORE 返回 0，内存同步跳过以保持幂等。
 
         Parameters
         ----------
         trade : TradeData
             成交数据
         """
-        # 买入成交：记录持仓
-        if trade.direction == Direction.LONG:
-            self.t1_rules.record_buy(
-                symbol=trade.symbol,
-                volume=int(trade.volume),
-                datetime=trade.datetime or datetime.now()
-            )
+        # 单次计算时间戳，DB 与内存共用（避免 now() 不幂等导致重放漂移）
+        trade_time = trade.datetime or datetime.now()
 
-        # 卖出成交：扣减持仓
-        elif trade.direction == Direction.SHORT:
-            self.t1_rules.record_sell(
-                symbol=trade.symbol,
-                volume=int(trade.volume),
-                datetime=trade.datetime or datetime.now()
-            )
+        # 先落库；失败降级纯内存，不阻断成交回调
+        update_memory = True
+        if self.store is not None:
+            try:
+                rows = self.store.append_trade(
+                    trade.vt_tradeid, trade.symbol,
+                    trade.direction.value, int(trade.volume), trade_time,
+                )
+                if rows == 0:
+                    # 重复 trade_id：DB 已忽略，内存同步跳过以保持一致（幂等）
+                    update_memory = False
+                    logger.info(f"重复成交已忽略，不重复记录T+1持仓: {trade.vt_tradeid}")
+            except Exception as e:
+                logger.warning(f"T+1流水写入失败，降级纯内存: {e}")
+
+        # 再更新内存（T+1 检查权威；重复成交或 store=None 时仍按需更新）
+        if update_memory:
+            if trade.direction == Direction.LONG:
+                self.t1_rules.record_buy(
+                    symbol=trade.symbol,
+                    volume=int(trade.volume),
+                    datetime=trade_time,
+                )
+            elif trade.direction == Direction.SHORT:
+                self.t1_rules.record_sell(
+                    symbol=trade.symbol,
+                    volume=int(trade.volume),
+                    datetime=trade_time,
+                )
 
         logger.debug(f"成交回调处理完成: {trade.symbol} {trade.direction.value} {trade.volume}股")

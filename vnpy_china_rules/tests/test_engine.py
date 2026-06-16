@@ -710,5 +710,197 @@ class TestChinaStockRulesEngine(unittest.TestCase):
         self.assertEqual(self.rules_engine.LIMIT_RATIO_ST, 0.05)
 
 
+class TestT1PersistenceEngineInit(unittest.TestCase):
+    """T+1持久化：db 注入与向后兼容"""
+
+    def test_no_db_keeps_store_none_and_existing_behavior(self):
+        """db=None 时 store 为 None，维持纯内存（现有行为不破坏）"""
+        mock_dm = Mock(spec=DataSourceManager)
+        engine = ChinaStockRulesEngine(mock_dm)
+        self.assertIsNone(engine.store)
+
+    def test_db_injected_creates_store_and_init_schema(self):
+        """db 注入时创建 store、调用 init_schema、空流水重放无副作用"""
+        mock_dm = Mock(spec=DataSourceManager)
+        db = MagicMock()
+        db.query.return_value = []  # 空流水
+        engine = ChinaStockRulesEngine(mock_dm, db=db)
+        self.assertIsNotNone(engine.store)
+        # init_schema 触发过 execute(DDL)
+        self.assertTrue(db.execute.called)
+
+    def test_db_protocol_mismatch_falls_back_to_inmemory(self):
+        """db 不满足协议时降级 store=None，不抛异常"""
+        mock_dm = Mock(spec=DataSourceManager)
+        engine = ChinaStockRulesEngine(mock_dm, db=object())  # object() 无 execute/query
+        self.assertIsNone(engine.store)
+
+    def test_init_schema_failure_falls_back_to_inmemory(self):
+        """db 协议正确但建表抛异常时降级 store=None，不抛异常"""
+        mock_dm = Mock(spec=DataSourceManager)
+        db = MagicMock()
+        db.execute.side_effect = RuntimeError("db connection refused")
+        engine = ChinaStockRulesEngine(mock_dm, db=db)
+        self.assertIsNone(engine.store)
+
+    def test_replay_rebuilds_same_as_continuous_record(self):
+        """重放结果与连续 record_buy/sell 等价（含 FIFO 扣减）"""
+        flow = [
+            {"symbol": "000001", "direction": Direction.LONG.value,
+             "volume": 1000, "trade_time": datetime(2024, 2, 23, 9, 30)},
+            {"symbol": "000001", "direction": Direction.LONG.value,
+             "volume": 500, "trade_time": datetime(2024, 2, 24, 9, 30)},
+            {"symbol": "000001", "direction": Direction.SHORT.value,
+             "volume": 300, "trade_time": datetime(2024, 2, 24, 14, 0)},
+        ]
+        mock_dm = Mock(spec=DataSourceManager)
+        db = MagicMock()
+        db.query.return_value = flow
+
+        replayed = ChinaStockRulesEngine(mock_dm, db=db)
+
+        # 参考引擎：连续 record
+        ref = ChinaStockRulesEngine(mock_dm)
+        ref.t1_rules.record_buy("000001", 1000, datetime(2024, 2, 23, 9, 30))
+        ref.t1_rules.record_buy("000001", 500, datetime(2024, 2, 24, 9, 30))
+        ref.t1_rules.record_sell("000001", 300, datetime(2024, 2, 24, 14, 0))
+
+        # positions 逐批次相等
+        rp = replayed.t1_rules.positions["000001"]
+        fp = ref.t1_rules.positions["000001"]
+        self.assertEqual(len(rp), len(fp))
+        for r, f in zip(rp, fp):
+            self.assertEqual((r.volume, r.available, r.buy_datetime),
+                             (f.volume, f.available, f.buy_datetime))
+
+        # 可卖量一致（2/25 视角：前日批次均可卖）
+        self.assertEqual(
+            replayed.t1_rules.get_sellable_volume("000001", datetime(2024, 2, 25, 9, 0)),
+            ref.t1_rules.get_sellable_volume("000001", datetime(2024, 2, 25, 9, 0)),
+        )
+
+    def test_replay_skips_corrupt_row_without_aborting(self):
+        """单条脏数据只跳过不中断重放，其余行正常重建，store 不被降级"""
+        flow = [
+            {"symbol": "000001", "direction": Direction.LONG.value,
+             "volume": 1000, "trade_time": datetime(2024, 2, 23, 9, 30)},
+            {"symbol": "000001", "direction": Direction.LONG.value,
+             "volume": "not-a-number",  # 脏数据：int() 抛 ValueError
+             "trade_time": datetime(2024, 2, 24, 9, 30)},
+            {"symbol": "000001", "direction": Direction.SHORT.value,
+             "volume": 300, "trade_time": datetime(2024, 2, 24, 14, 0)},
+        ]
+        mock_dm = Mock(spec=DataSourceManager)
+        db = MagicMock()
+        db.query.return_value = flow
+
+        engine = ChinaStockRulesEngine(mock_dm, db=db)
+
+        # 重放未被降级
+        self.assertIsNotNone(engine.store)
+        # 正常行被重建：买入1000(2/23) → 脏行跳过 → 卖出300(2/24) FIFO 扣减
+        positions = engine.t1_rules.positions["000001"]
+        self.assertEqual(len(positions), 1)
+        self.assertEqual(positions[0].volume, 1000)
+        self.assertEqual(positions[0].available, 700)  # 1000 - 300
+
+    def _make_trade(self, symbol, direction, volume, dt, tradeid):
+        return TradeData(
+            gateway_name="TEST",
+            symbol=symbol,
+            exchange=Exchange.SZSE,
+            orderid="o1",
+            tradeid=tradeid,
+            direction=direction,
+            offset=Offset.OPEN if direction == Direction.LONG else Offset.CLOSE,
+            price=10.0,
+            volume=volume,
+            datetime=dt,
+        )
+
+    def test_on_trade_appends_to_store_then_memory(self):
+        """on_trade 先落库后内存，DB 与内存共用同一 trade_time"""
+        mock_dm = Mock(spec=DataSourceManager)
+        engine = ChinaStockRulesEngine(mock_dm)   # store=None
+        engine.store = MagicMock()                # 注入可验证 mock
+        engine.store.append_trade.return_value = 1
+
+        dt = datetime(2024, 2, 24, 9, 30)
+        trade = self._make_trade("000001", Direction.LONG, 1000, dt, "t1")
+        engine.on_trade(trade)
+
+        # vt_tradeid = f"{gateway_name}.{tradeid}" = "TEST.t1"
+        engine.store.append_trade.assert_called_once_with(
+            "TEST.t1", "000001", Direction.LONG.value, 1000, dt
+        )
+        # 内存已更新且 buy_datetime == trade_time（共用，非 now()）
+        rec = engine.t1_rules.positions["000001"][0]
+        self.assertEqual(rec.volume, 1000)
+        self.assertEqual(rec.buy_datetime, dt)
+
+    def test_on_trade_store_failure_falls_back_to_memory(self):
+        """store 写入抛异常时，内存仍更新，on_trade 不阻断"""
+        mock_dm = Mock(spec=DataSourceManager)
+        engine = ChinaStockRulesEngine(mock_dm)
+        engine.store = MagicMock()
+        engine.store.append_trade.side_effect = RuntimeError("db down")
+
+        dt = datetime(2024, 2, 24, 9, 30)
+        trade = self._make_trade("000001", Direction.LONG, 1000, dt, "t1")
+        engine.on_trade(trade)   # 不抛异常
+
+        self.assertEqual(engine.t1_rules.positions["000001"][0].volume, 1000)
+
+    def test_on_trade_duplicate_trade_id_is_idempotent(self):
+        """重复 vt_tradeid：append_trade 返回 0 时内存不重复记录（幂等）"""
+        mock_dm = Mock(spec=DataSourceManager)
+        engine = ChinaStockRulesEngine(mock_dm)
+        engine.store = MagicMock()
+        engine.store.append_trade.return_value = 0  # 重复 trade_id，DB 已忽略
+
+        dt = datetime(2024, 2, 24, 9, 30)
+        trade = self._make_trade("000001", Direction.LONG, 1000, dt, "t1")
+        engine.on_trade(trade)
+
+        # append_trade 仍被调用（去重判定发生在 DB 层）
+        engine.store.append_trade.assert_called_once_with(
+            "TEST.t1", "000001", Direction.LONG.value, 1000, dt
+        )
+        # 但内存不更新（与 DB 一致，不虚增）
+        self.assertNotIn("000001", engine.t1_rules.positions)
+
+    def test_on_trade_store_none_updates_memory_only(self):
+        """store=None（纯内存模式）时 on_trade 正常更新内存，不触碰 store"""
+        mock_dm = Mock(spec=DataSourceManager)
+        engine = ChinaStockRulesEngine(mock_dm)  # store 自然为 None
+        self.assertIsNone(engine.store)
+
+        dt = datetime(2024, 2, 24, 9, 30)
+        trade = self._make_trade("000001", Direction.LONG, 1000, dt, "t1")
+        engine.on_trade(trade)
+
+        self.assertEqual(engine.t1_rules.positions["000001"][0].volume, 1000)
+        self.assertEqual(engine.t1_rules.positions["000001"][0].buy_datetime, dt)
+
+    def test_on_trade_short_direction_double_writes(self):
+        """SHORT 成交：先落库后内存 FIFO 扣减"""
+        mock_dm = Mock(spec=DataSourceManager)
+        engine = ChinaStockRulesEngine(mock_dm)
+        engine.store = MagicMock()
+        engine.store.append_trade.return_value = 1
+        # 预置持仓 1000（前日买入）
+        engine.t1_rules.record_buy("000001", 1000, datetime(2024, 2, 23, 9, 30))
+
+        dt = datetime(2024, 2, 24, 14, 0)
+        trade = self._make_trade("000001", Direction.SHORT, 300, dt, "t2")
+        engine.on_trade(trade)
+
+        engine.store.append_trade.assert_called_once_with(
+            "TEST.t2", "000001", Direction.SHORT.value, 300, dt
+        )
+        # FIFO 扣减：1000 - 300 = 700
+        self.assertEqual(engine.t1_rules.positions["000001"][0].available, 700)
+
+
 if __name__ == '__main__':
     unittest.main()
