@@ -108,11 +108,11 @@ class AStockRiskManager(IRiskAlertProvider):
     def _init_risk_manager(self):
         """初始化风控引擎"""
         from vnpy_riskmanager import RiskManagerApp
-        from vnpy_riskmanager.engine import RiskEngine
 
-        # 添加风控应用
-        self.main_engine.add_app(RiskManagerApp)
-        self.risk_engine = self.main_engine.get_engine(RiskEngine)
+        # 添加风控应用并获取引擎（add_app 返回 engine 实例）。
+        # 勿用 get_engine(RiskEngine)——vnpy 4.4.0 的 engines 字典 key 是
+        # engine_name 字符串（如 "RiskManager"），传类对象会查不到返回 None。
+        self.risk_engine = self.main_engine.add_app(RiskManagerApp)
 
         # 注册自定义规则
         self._register_custom_rules()

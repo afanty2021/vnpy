@@ -27,8 +27,7 @@ class TestRiskRuleRegistrationIntegration(unittest.TestCase):
 
         self.event_engine = EventEngine()
         self.main_engine = MainEngine(self.event_engine)
-        self.main_engine.add_app(RiskManagerApp)
-        self.risk_engine = self.main_engine.get_engine(RiskEngine)
+        self.risk_engine = self.main_engine.add_app(RiskManagerApp)
 
         self.manager = AStockRiskManager(self.main_engine, self.event_engine)
         self.manager.risk_engine = self.risk_engine
