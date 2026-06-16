@@ -4,9 +4,16 @@
 pandas>=2.0.0
 numpy>=1.24.0
 
+# 日志
+loguru>=0.7.3
+
 # A股数据服务
 vnpy_china_data
 
 # A股交易相关
 vnpy
 vnpy_ctastrategy
+
+# T+1持仓持久化（vnpy_china_rules.t1_store）可选运行时依赖，启用 T+1 跨重启恢复时安装：
+#   pip install pymysql dbutils
+#   （复用 vnpy_china_reporting.data_source.db.DataSourceDB）
