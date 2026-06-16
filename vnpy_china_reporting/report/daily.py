@@ -2,13 +2,14 @@
 日报生成器
 
 生成每日交易报表，包含当日交易记录、持仓状况和盈亏情况。
+盈亏采用权益变化法：当日盈亏 = 期末权益 - 期初权益。
 """
 
-from datetime import date, timedelta
+from datetime import date
 from typing import List, Dict, Optional, Any
 
 from .base import BaseReportGenerator
-from ..core.models import ReportData, TradeRecord, AccountData
+from ..core.models import ReportData
 from ..core.enums import ReportType
 
 
@@ -19,40 +20,49 @@ class DailyReportGenerator(BaseReportGenerator):
     生成每日交易报表，包含当日交易记录、持仓状况和盈亏情况。
     """
 
-    def __init__(self, main_engine: Optional[Any] = None) -> None:
+    def __init__(
+        self,
+        main_engine: Optional[Any] = None,
+        equity_source: Optional[Any] = None,
+        industry_source: Optional[Any] = None,
+    ) -> None:
         """
         初始化日报生成器
 
         Args:
             main_engine: 主引擎实例
+            equity_source: 期初权益源（见 BaseReportGenerator）
+            industry_source: 行业映射源（见 BaseReportGenerator）
         """
-        super().__init__(main_engine)
+        super().__init__(main_engine, equity_source, industry_source)
         self.report_type = ReportType.DAILY
 
-    def generate_daily(self, report_date: date) -> ReportData:
+    def generate_daily(
+        self,
+        report_date: date,
+        start_equity: Optional[float] = None
+    ) -> ReportData:
         """
         生成日报数据
 
         Args:
             report_date: 报表日期
+            start_equity: 期初权益（权益变化法所需，vnpy 不提供历史权益，
+                需调用方传入；为 None 时当日盈亏记为 None）
 
         Returns:
             日报数据
         """
-        # 获取当日交易
+        # 获取当日交易、持仓、账户
         trades = self.get_trades(report_date, report_date)
-
-        # 获取持仓
         positions = self.get_positions()
-
-        # 获取账户数据
         account = self.get_account()
 
-        # 计算当日盈亏
-        daily_pnl = self.calculate_daily_pnl(trades)
-        daily_pnl_ratio = 0.0
-        if account.total_equity > 0:
-            daily_pnl_ratio = daily_pnl / account.total_equity
+        # 权益变化法计算当日盈亏
+        start_equity = self._resolve_start_equity(report_date, start_equity)
+        end_equity = account.total_equity if account else None
+        daily_pnl = self.calculate_pnl(start_equity, end_equity)
+        daily_pnl_ratio = self.calculate_pnl_ratio(daily_pnl, start_equity)
 
         return ReportData(
             report_type=self.report_type,
@@ -64,21 +74,6 @@ class DailyReportGenerator(BaseReportGenerator):
             daily_pnl=daily_pnl,
             daily_pnl_ratio=daily_pnl_ratio
         )
-
-    def get_trades(self, start_date: date, end_date: date) -> List[TradeRecord]:
-        """
-        获取指定日期的交易记录
-
-        Args:
-            start_date: 开始日期
-            end_date: 结束日期
-
-        Returns:
-            交易记录列表
-        """
-        # 实际实现应从主引擎获取数据
-        # 这里返回模拟数据用于测试
-        return super().get_trades(start_date, end_date)
 
     def get_trades_detail(self, report_date: date) -> List[Dict]:
         """
@@ -119,17 +114,23 @@ class DailyReportGenerator(BaseReportGenerator):
         sell_trades = len([t for t in report.trades if t.direction == "sell"])
         total_amount = sum(t.amount for t in report.trades)
 
+        acc = report.account
+        # 期初余额 = 期末权益 - 当日盈亏（盈亏可得时反推）
+        start_balance: Optional[float] = None
+        if acc is not None and report.daily_pnl is not None:
+            start_balance = acc.total_equity - report.daily_pnl
+
         return {
             "报表日期": report.start_date.strftime("%Y-%m-%d") if report.start_date else "",
-            "期初余额": f"{report.account.total_equity - report.daily_pnl:.2f}",
-            "期末余额": f"{report.account.total_equity:.2f}",
-            "当日盈亏": f"{report.daily_pnl:.2f}",
-            "收益率": f"{report.daily_pnl_ratio:.2%}",
+            "期初余额": self._fmt(start_balance),
+            "期末余额": self._fmt(acc.total_equity if acc else None),
+            "当日盈亏": self._fmt(report.daily_pnl),
+            "收益率": self._fmt_pct(report.daily_pnl_ratio),
             "交易次数": len(report.trades),
             "买入次数": buy_trades,
             "卖出次数": sell_trades,
             "成交金额": f"{total_amount:.2f}",
-            "手续费": f"{report.account.commission:.2f}",
-            "持仓市值": f"{report.account.market_value:.2f}",
+            "手续费": self._fmt(acc.commission if acc else None),
+            "持仓市值": self._fmt(acc.market_value if acc else None),
             "持仓数量": len(report.positions)
         }

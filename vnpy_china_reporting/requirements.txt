@@ -1,0 +1,24 @@
+# vnpy_china_reporting 依赖清单
+#
+# 安装方式：
+#   pip install -r requirements.txt            # 全部依赖（含可选导出，开发用）
+#   pip install vnpy_china_reporting           # 仅核心依赖（报表生成+分析）
+#   pip install vnpy_china_reporting[all]      # 核心 + PDF/图表导出
+
+# ===== 核心依赖（import 即需）=====
+# 数值计算（analysis/risk、export/charts 顶层依赖）
+numpy>=1.24.0
+# Excel导出（export/excel 顶层依赖，export 包级导出触发）
+openpyxl>=3.1.0
+# 交易框架
+vnpy
+
+# 数据源持久化（权益快照 + 行业映射：pymysql + DBUtils 连接池）
+pymysql>=1.1.0
+dbutils>=3.1.0
+
+# ===== 可选依赖（延迟导入 + fallback）=====
+# PDF导出（缺失时自动回退为文本报告）
+reportlab>=4.0.0
+# 图表生成（缺失时禁用图表功能，其余报表不受影响）
+matplotlib>=3.7.0

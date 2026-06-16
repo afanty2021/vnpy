@@ -188,6 +188,17 @@ class RiskAnalyzer:
 
         return float(max_dd)
 
+    @staticmethod
+    def _returns_to_equity(returns: List[float]) -> List[float]:
+        """收益率序列 → 归一化权益曲线（初始为1，cumprod(1+r)）
+
+        calculate_max_drawdown 要求资金曲线而非收益率序列，调用前需先转换。
+        """
+        if not returns:
+            return []
+        arr = np.array(returns, dtype=float)
+        return np.cumprod(1.0 + arr).tolist()
+
     def calculate_calmar_ratio(
         self,
         returns: List[float],
@@ -252,7 +263,7 @@ class RiskAnalyzer:
         # 组合风险指标
         portfolio_vol = self.calculate_volatility(history_returns)
         portfolio_var_95 = self.calculate_var(history_returns, 0.95)
-        max_dd = self.calculate_max_drawdown(history_returns)
+        max_dd = self.calculate_max_drawdown(self._returns_to_equity(history_returns))
 
         # 收益指标
         sharpe = self.calculate_sharpe_ratio(history_returns)
@@ -328,7 +339,7 @@ class RiskAnalyzer:
         volatility = self.calculate_volatility(returns)
         sharpe = self.calculate_sharpe_ratio(returns)
         sortino = self.calculate_sortino_ratio(returns)
-        max_dd = self.calculate_max_drawdown(returns)
+        max_dd = self.calculate_max_drawdown(self._returns_to_equity(returns))
         calmar = self.calculate_calmar_ratio(returns, max_dd)
         risk_level = self.calculate_risk_level(volatility, max_dd)
 

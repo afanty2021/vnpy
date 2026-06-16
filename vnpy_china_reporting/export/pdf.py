@@ -178,8 +178,8 @@ class PDFExporter:
 
             # 当期盈亏
             pnl_data = [
-                ["当日盈亏", f"{report.daily_pnl:.2f}"],
-                ["盈亏比例", f"{report.daily_pnl_ratio:.2%}"]
+                ["当日盈亏", f"{report.daily_pnl:.2f}" if report.daily_pnl is not None else "N/A"],
+                ["盈亏比例", f"{report.daily_pnl_ratio:.2%}" if report.daily_pnl_ratio is not None else "N/A"]
             ]
             elements.extend(self._create_section("当日盈亏", pnl_data))
 
@@ -261,8 +261,8 @@ class PDFExporter:
 
             # 月度盈亏
             pnl_data = [
-                ["月度盈亏", f"{report.daily_pnl:.2f}"],
-                ["盈亏比例", f"{report.daily_pnl_ratio:.2%}"]
+                ["月度盈亏", f"{report.daily_pnl:.2f}" if report.daily_pnl is not None else "N/A"],
+                ["盈亏比例", f"{report.daily_pnl_ratio:.2%}" if report.daily_pnl_ratio is not None else "N/A"]
             ]
             elements.extend(self._create_section("月度盈亏", pnl_data))
 
@@ -537,8 +537,10 @@ class PDFExporter:
 
                 f.write("当日盈亏\n")
                 f.write("-" * 30 + "\n")
-                f.write(f"当日盈亏: {report.daily_pnl:.2f}\n")
-                f.write(f"盈亏比例: {report.daily_pnl_ratio:.2%}\n\n")
+                _pnl = f"{report.daily_pnl:.2f}" if report.daily_pnl is not None else "N/A"
+                _ratio = f"{report.daily_pnl_ratio:.2%}" if report.daily_pnl_ratio is not None else "N/A"
+                f.write(f"当日盈亏: {_pnl}\n")
+                f.write(f"盈亏比例: {_ratio}\n\n")
 
             return True
 

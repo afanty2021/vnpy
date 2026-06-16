@@ -17,31 +17,71 @@ class StrategyAnalyzer:
     分析交易策略的表现，包括胜率、盈亏比等。
     """
 
+    def _realized_pnls(self, trades: List[TradeRecord]) -> List[float]:
+        """FIFO 配对买卖，返回每笔平仓的实现盈亏（卖出金额 - 对应买入成本）
+
+        未平仓的买入不计入；卖出成交量按 FIFO 抵扣买入成本，部分平仓按
+        实际配对数量计算盈亏。
+
+        Args:
+            trades: 交易记录
+
+        Returns:
+            实现盈亏列表（每笔有效平仓一项）
+        """
+        symbol_trades: Dict[str, List[TradeRecord]] = defaultdict(list)
+        for trade in trades:
+            symbol_trades[trade.symbol].append(trade)
+
+        pnls: List[float] = []
+        for symbol_trade_list in symbol_trades.values():
+            symbol_trade_list.sort(key=lambda t: t.timestamp)
+            buy_queue: List[List[float]] = []  # [price, remaining_volume]
+
+            for trade in symbol_trade_list:
+                direction = trade.direction.lower() if trade.direction else ""
+                if direction == "buy":
+                    buy_queue.append([trade.price, trade.volume])
+                elif direction == "sell":
+                    remaining = trade.volume
+                    cost = 0.0
+                    while remaining > 0 and buy_queue:
+                        buy = buy_queue[0]
+                        matched = min(buy[1], remaining)
+                        cost += buy[0] * matched
+                        buy[1] -= matched
+                        remaining -= matched
+                        if buy[1] <= 0:
+                            buy_queue.pop(0)
+                    matched_volume = trade.volume - remaining
+                    if matched_volume > 0:
+                        pnls.append(trade.price * matched_volume - cost)
+        return pnls
+
     def calculate_win_rate(
         self,
         trades: List[TradeRecord]
     ) -> float:
-        """
-        计算胜率
+        """计算胜率（基于 FIFO 配对的实现盈亏）
 
         Args:
             trades: 交易列表
 
         Returns:
-            胜率
+            胜率（盈利平仓数 / 总平仓数）
         """
-        if not trades:
+        pnls = self._realized_pnls(trades)
+        if not pnls:
             return 0.0
 
-        wins = sum(1 for t in trades if t.amount > 0)
-        return wins / len(trades)
+        wins = sum(1 for p in pnls if p > 0)
+        return wins / len(pnls)
 
     def calculate_profit_loss_ratio(
         self,
         trades: List[TradeRecord]
     ) -> float:
-        """
-        计算盈亏比
+        """计算盈亏比（平均盈利 / 平均亏损，基于实现盈亏）
 
         Args:
             trades: 交易列表
@@ -49,11 +89,12 @@ class StrategyAnalyzer:
         Returns:
             盈亏比
         """
-        profits = [t.amount for t in trades if t.amount > 0]
-        losses = [abs(t.amount) for t in trades if t.amount < 0]
+        pnls = self._realized_pnls(trades)
+        profits = [p for p in pnls if p > 0]
+        losses = [abs(p) for p in pnls if p < 0]
 
-        avg_profit = sum(profits) / len(profits) if profits else 0
-        avg_loss = sum(losses) / len(losses) if losses else 0
+        avg_profit = sum(profits) / len(profits) if profits else 0.0
+        avg_loss = sum(losses) / len(losses) if losses else 0.0
 
         if avg_loss == 0:
             return 0.0
@@ -64,8 +105,7 @@ class StrategyAnalyzer:
         self,
         trades: List[TradeRecord]
     ) -> Dict:
-        """
-        计算策略摘要
+        """计算策略摘要（基于 FIFO 配对的实现盈亏）
 
         Args:
             trades: 交易列表
@@ -79,22 +119,25 @@ class StrategyAnalyzer:
                 "win_rate": 0.0,
                 "profit_loss_ratio": 0.0,
                 "total_pnl": 0.0,
-                "total_commission": 0.0
+                "total_commission": 0.0,
+                "winning_trades": 0,
+                "losing_trades": 0,
             }
 
-        profits = [t.amount for t in trades if t.amount > 0]
-        losses = [abs(t.amount) for t in trades if t.amount < 0]
+        pnls = self._realized_pnls(trades)
+        profits = [p for p in pnls if p > 0]
+        losses = [abs(p) for p in pnls if p < 0]
 
         return {
             "total_trades": len(trades),
             "win_rate": self.calculate_win_rate(trades),
             "profit_loss_ratio": self.calculate_profit_loss_ratio(trades),
-            "total_pnl": sum(t.amount for t in trades),
+            "total_pnl": sum(pnls),
             "total_commission": sum(t.commission for t in trades),
             "winning_trades": len(profits),
             "losing_trades": len(losses),
             "avg_profit": sum(profits) / len(profits) if profits else 0.0,
-            "avg_loss": sum(losses) / len(losses) if losses else 0.0
+            "avg_loss": sum(losses) / len(losses) if losses else 0.0,
         }
 
     def analyze_performance(

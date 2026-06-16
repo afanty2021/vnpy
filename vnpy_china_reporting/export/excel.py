@@ -106,8 +106,8 @@ class ExcelExporter:
             # 当期盈亏
             row = self._write_section(
                 ws, row, "当日盈亏", [
-                    ["当日盈亏", f"{report.daily_pnl:.2f}"],
-                    ["盈亏比例", f"{report.daily_pnl_ratio:.2%}"]
+                    ["当日盈亏", f"{report.daily_pnl:.2f}" if report.daily_pnl is not None else "N/A"],
+                    ["盈亏比例", f"{report.daily_pnl_ratio:.2%}" if report.daily_pnl_ratio is not None else "N/A"]
                 ]
             )
 
@@ -178,11 +178,12 @@ class ExcelExporter:
                 )
 
             # 月度盈亏
+            acc = report.account
             row = self._write_section(
                 ws, row, "月度盈亏", [
-                    ["月度盈亏", f"{report.daily_pnl:.2f}"],
-                    ["盈亏比例", f"{report.daily_pnl_ratio:.2%}"],
-                    ["手续费", f"{report.account.commission:.2f}"]
+                    ["月度盈亏", f"{report.daily_pnl:.2f}" if report.daily_pnl is not None else "N/A"],
+                    ["盈亏比例", f"{report.daily_pnl_ratio:.2%}" if report.daily_pnl_ratio is not None else "N/A"],
+                    ["手续费", f"{acc.commission:.2f}" if acc else "N/A"]
                 ]
             )
 

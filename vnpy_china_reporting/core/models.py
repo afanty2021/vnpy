@@ -56,6 +56,7 @@ class PositionRecord:
     market_value: float                   # 市值
     unrealized_pnl: float                 # 未实现盈亏
     unrealized_pnl_ratio: float          # 未实现盈亏比例
+    industry: str = ""                   # 行业（数据源需外部填充，如 tushare 行业接口）
 
 
 @dataclass
@@ -99,11 +100,11 @@ class ReportData:
     report_type: ReportType              # 报表类型
     start_date: date                     # 开始日期
     end_date: date                       # 结束日期
-    account: AccountData                  # 账户数据
+    account: Optional[AccountData] = None  # 账户数据（主引擎缺失时为 None）
     positions: List[PositionRecord] = field(default_factory=list)   # 持仓列表
     trades: List[TradeRecord] = field(default_factory=list)          # 交易列表
-    daily_pnl: float = 0.0               # 当期盈亏
-    daily_pnl_ratio: float = 0.0         # 当期盈亏比例
+    daily_pnl: Optional[float] = None    # 当期盈亏（权益变化法，期初权益缺失时为 None）
+    daily_pnl_ratio: Optional[float] = None  # 当期盈亏比例
 
 
 @dataclass

@@ -219,7 +219,7 @@ class TestReportData(unittest.TestCase):
         )
         self.assertEqual(empty_report.positions, [])
         self.assertEqual(empty_report.trades, [])
-        self.assertEqual(empty_report.daily_pnl, 0.0)
+        self.assertIsNone(empty_report.daily_pnl)  # 权益变化法：期初权益缺失时为 None
 
 
 class TestPositionAnalysis(unittest.TestCase):
