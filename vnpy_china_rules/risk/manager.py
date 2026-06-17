@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 from vnpy_china_rules.engine import ChinaStockRulesEngine
 from vnpy_china_rules.datasource import DataSourceManager
+from vnpy_china_rules.risk._helpers import get_first_account
 
 try:
     from vnpy_china_rules.risk.rules import (
@@ -237,7 +238,7 @@ class AStockRiskManager(IRiskAlertProvider):
     def get_risk_status(self) -> dict:
         """获取风控状态摘要"""
         # 获取账户信息
-        account = self.main_engine.get_account() if hasattr(self.main_engine, "get_account") else None
+        account = get_first_account(self.main_engine)
 
         # 计算风控指标
         total_pnl = 0.0
