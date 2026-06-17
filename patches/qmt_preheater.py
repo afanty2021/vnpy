@@ -104,6 +104,11 @@ class QmtDailyBarPreheater:
         t.start()
         t.join(timeout=self.BATCH_TIMEOUT)
 
+        # 超时竞态（TOCTOU）设计取舍：真实形态是"误判超时"而非"读错结果"——
+        # is_alive()==True 直接 return False 不读 result；仅 is_alive()==False（线程已结束、
+        # result 必已写完）才读 result。理论窗口是 join 到期判定瞬间线程恰好跑完，此时已走
+        # 超时分支，丢失的仅是一个本可成功的批次（下次启动增量补，后果轻微）。
+        # Python 无法安全强制终止线程，daemon=True 进程退出时回收即可，不强 kill（KISS）。
         if t.is_alive():
             self._log(
                 f"批次下载超时 {self.BATCH_TIMEOUT}s，"
