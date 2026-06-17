@@ -90,10 +90,19 @@ class BaseCell(QtWidgets.QTableWidgetItem):
 
     def __lt__(self, other: "BaseCell") -> bool:        # type: ignore
         """
-        Sort by text content.
+        Sort by content, numeric-aware.
+
+        优先按 _sort_value（格式化前原始数值，如成交额格式化成"5.12亿"后仍按
+        原值排），其次尝试 float(text)（纯数值文本），最后字符串兜底。
         """
-        result: bool = self._text < other._text
-        return result
+        sv1 = getattr(self, "_sort_value", None)
+        sv2 = getattr(other, "_sort_value", None)
+        if sv1 is not None and sv2 is not None:
+            return sv1 < sv2
+        try:
+            return float(self._text) < float(other._text)
+        except (ValueError, TypeError):
+            return self._text < other._text
 
 
 class EnumCell(BaseCell):
@@ -265,8 +274,8 @@ class BaseMonitor(QtWidgets.QTableWidget):
     def _get_attr(self, data: Any, attr_name: str, default: Any = None) -> Any:
         """安全获取对象属性
 
-        如果属性不存在，返回默认值而不是抛出异常。
-        这允许扩展数据对象添加额外字段而不需要修改基类。
+        优先取原生属性；缺失时 fallback 到 data.extra（扩展字段，如 A 股成交额/量比/
+        涨幅/分时均价，这些通过 extra 跨 RPC 传输）。两者都没有返回默认值。
 
         Args:
             data: 数据对象
@@ -279,7 +288,12 @@ class BaseMonitor(QtWidgets.QTableWidget):
         try:
             return data.__getattribute__(attr_name)
         except AttributeError:
-            return default
+            pass
+
+        extra: Any = getattr(data, "extra", None)
+        if isinstance(extra, dict) and attr_name in extra:
+            return extra[attr_name]
+        return default
 
     def init_ui(self) -> None:
         """"""

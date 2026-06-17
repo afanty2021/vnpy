@@ -21,6 +21,7 @@ from vnpy_qmt.utils import (
 from vnpy.trader.utility import ZoneInfo
 from typing import List, Optional
 from datetime import datetime as dt
+import datetime
 
 ZONE_INFO = ZoneInfo("Asia/Shanghai")
 
@@ -32,17 +33,27 @@ class MD:
         self.th = None
         self.limit_ups = {}
         self.limit_downs = {}
+        # 量比分母缓存：{vt_symbol: 过去5日平均日成交量}，惰性查询，避免每 tick 重复取数
+        self._avg_daily_vol_cache: dict = {}
 
     def close(self) -> None:
         pass
 
     def subscribe(self, req: SubscribeRequest) -> None:
-
-        return xtquant.xtdata.subscribe_quote(
-            stock_code=f'{req.symbol}.{From_VN_Exchange_map[req.exchange]}',
+        code = f'{req.symbol}.{From_VN_Exchange_map[req.exchange]}'
+        xtquant.xtdata.subscribe_quote(
+            stock_code=code,
             period='tick',
             callback=self.on_tick
         )
+        # 订阅后主动拉一次最新 tick 快照并推送（解决收盘后/盘前无推送导致行情表格空白）
+        # get_full_tick 返回 {code: tick_dict}，包装成 on_tick 期望的 {code: [tick_dict]} 格式
+        try:
+            snapshot = xtquant.xtdata.get_full_tick([code])
+            if snapshot and code in snapshot and snapshot[code]:
+                self.on_tick({code: [snapshot[code]]})
+        except Exception as e:
+            self.write_log(f'订阅 {code} 拉取快照失败: {e}')
 
     def connect(self, setting: dict) -> None:
         self.get_contract()
@@ -147,7 +158,96 @@ class MD:
                     tick.name = contract.name
                 tick.limit_up = self.limit_ups.get(tick.vt_symbol, None)
                 tick.limit_down = self.limit_downs.get(tick.vt_symbol, None)
+
+                # 填充 A 股增强字段到 extra（TickMonitor 显示成交额/量比/涨幅/分时均价）
+                self._fill_tick_extra(tick, data, symbol, exchange, dt)
+
                 self.gateway.on_tick(tick)
+
+    def _fill_tick_extra(self, tick, data, symbol, exchange, dt) -> None:
+        """计算 A 股增强字段，供 TickMonitor 显示成交额/量比/涨幅/分时均价。
+
+        实盘口径：
+            成交额 turnover     = amount（TickData 原生字段，直接赋值）
+            涨幅 change_pct     = (last - pre_close) / pre_close * 100  → extra
+            分时均价 avg_price  = amount / volume                        → extra
+            量比 volume_ratio   = (volume/已交易分钟) / (5日日均量/240)   → extra
+
+        turnover 是 TickData 原生字段直接赋值；其余3字段非原生，写入 extra（TickMonitor
+        经 BaseMonitor._get_attr 的 extra fallback 读取）。
+        """
+        last: float = data['lastPrice']
+        pre_close: float = data['lastClose']
+        volume: float = data['volume']
+        amount: float = data.get('amount', 0) or 0
+
+        # 成交额（TickData 原生字段）
+        tick.turnover = float(amount)
+
+        # 涨幅（pre_close 为 0 时不除零）
+        change_pct: float = (last - pre_close) / pre_close * 100 if pre_close else 0.0
+        # 分时均价（xtdata volume 单位为"手"=×100股，amount 为元，须 /100 得每股均价）
+        avg_price: float = amount / (volume * 100) if volume else 0.0
+
+        # 量比
+        trading_min: int = self._trading_minutes(dt)
+        volume_ratio: float = 0.0
+        if trading_min > 0:
+            avg_daily_vol: float = self._get_avg_daily_vol(symbol, exchange, tick.vt_symbol)
+            if avg_daily_vol > 0:
+                avg_vol_per_min: float = avg_daily_vol / 240
+                vol_per_min_today: float = volume / trading_min
+                volume_ratio = vol_per_min_today / avg_vol_per_min
+
+        if tick.extra is None:
+            tick.extra = {}
+        tick.extra['change_pct'] = change_pct
+        tick.extra['avg_price'] = avg_price
+        tick.extra['volume_ratio'] = volume_ratio
+
+    @staticmethod
+    def _trading_minutes(dt) -> int:
+        """A 股当日已交易分钟数（9:30-11:30 + 13:00-15:00，剔除午休）。
+
+        开盘前返回 0，收盘后返回 240。
+        """
+        t = dt.time()
+        if t < datetime.time(9, 30):
+            return 0
+        if t >= datetime.time(15, 0):
+            return 240
+        if t <= datetime.time(11, 30):
+            return (t.hour - 9) * 60 + (t.minute - 30)
+        if t < datetime.time(13, 0):
+            return 120
+        return 120 + (t.hour - 13) * 60 + t.minute
+
+    def _get_avg_daily_vol(self, symbol, exchange, vt_symbol) -> float:
+        """惰性查询过去5日平均日成交量（股），作为量比分母。失败/无数据返回 0。
+
+        查询结果按 vt_symbol 缓存，每个标的仅首次 tick 触发一次取数。
+        """
+        if vt_symbol in self._avg_daily_vol_cache:
+            return self._avg_daily_vol_cache[vt_symbol]
+
+        avg: float = 0.0
+        try:
+            qmt_code = to_qmt_code(symbol, exchange)
+            result = xtquant.xtdata.get_local_data(
+                field_list=['time', 'volume'],
+                stock_list=[qmt_code],
+                period='1d',
+                count=5,
+            )
+            if isinstance(result, dict) and qmt_code in result:
+                df = result[qmt_code]
+                if df is not None and len(df) > 0 and 'volume' in df:
+                    avg = float(df['volume'].iloc[-5:].mean())
+        except Exception:
+            avg = 0.0
+
+        self._avg_daily_vol_cache[vt_symbol] = avg
+        return avg
 
     def query_history(self, req) -> List[BarData]:
         """查询历史K线数据

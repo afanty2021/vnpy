@@ -147,6 +147,19 @@ def main():
     print(f"  账号: {QMT_SETTING['交易账号']}")
     print(f"  路径: {QMT_SETTING['mini路径']}")
 
+    # 启动日线数据预热（后台 daemon 线程，不阻塞 RPC 服务；量比计算依赖近5日日线）
+    import threading
+    from vnpy_qmt.qmt_preheater import QmtDailyBarPreheater
+
+    def _preheat_in_background():
+        try:
+            QmtDailyBarPreheater(main_engine).preheat()
+        except Exception as e:
+            main_engine.write_log(f"日线预热异常（不影响交易）: {e}")
+
+    threading.Thread(target=_preheat_in_background, daemon=True, name="qmt-preheater").start()
+    print("日线预热已在后台启动（全市场 A股+ETF 增量下载，日志可见进度）")
+
     print("\n" + "=" * 60)
     print("服务运行中，按Ctrl+C停止")
     print("=" * 60)

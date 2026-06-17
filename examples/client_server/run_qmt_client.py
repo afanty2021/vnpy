@@ -24,10 +24,22 @@ from vnpy.trader.ui.widget import BaseCell
 _original_set_content = BaseCell.set_content
 
 def _new_set_content(self, content: Any, data: Any) -> None:
-    """自定义格式化 - 保留2位小数"""
+    """自定义格式化 - 成交额等大数显示亿/万，其余保留2位小数。
+
+    保留原始数值到 _sort_value 供 BaseCell.__lt__ 数值排序（格式化成"5.12亿"后
+    仍按原值排序，避免字符串排序错乱）。
+    """
     if isinstance(content, float):
-        # 格式化浮点数，保留2位小数
-        content = f"{content:.2f}"
+        self._sort_value = content
+        abs_v = abs(content)
+        if abs_v >= 1e8:        # ≥1亿：显示 X.XX亿（成交额）
+            content = f"{content/1e8:.2f}亿"
+        elif abs_v >= 1e4:      # ≥1万：<1亿的成交额显示 X.XX万
+            content = f"{content/1e4:.2f}万"
+        else:                   # 价格/量比/均价等小数：保留2位
+            content = f"{content:.2f}"
+    else:
+        self._sort_value = None
     _original_set_content(self, content, data)
 
 # 应用修改
@@ -166,6 +178,111 @@ def load_rpc_config() -> dict:
     }
 
 
+def rearrange_dock_layout(main_window) -> None:
+    """重组 dock 布局：持仓停靠右上，行情/委托/成交/活动在持仓下方 tab，日志/资金底部。
+
+    关键：先 setFloating(False) 取消浮动（否则 addDockWidget 不停靠，dock 保持浮动）。
+    带诊断日志 + try/except 兜底：布局失败不影响客户端启动。
+    """
+    import sys
+    from PySide6 import QtCore, QtWidgets
+
+    try:
+        all_docks = main_window.findChildren(QtWidgets.QDockWidget)
+        docks = {d.windowTitle(): d for d in all_docks}
+        print(f"[布局] dock: {[d.windowTitle() for d in all_docks]}", flush=True)
+
+        pos_d = docks.get("持仓")
+        tick_d = docks.get("行情")
+        order_d = docks.get("委托")
+        trade_d = docks.get("成交")
+        active_d = docks.get("活动")
+        log_d = docks.get("日志")
+        account_d = docks.get("资金")
+        if not all([pos_d, tick_d, order_d, trade_d, active_d]):
+            print("⚠ 未找到全部交易 dock（持仓/行情/委托/成交/活动），跳过布局重组", flush=True)
+            return
+
+        # step1: 取消浮动 + 各自独立停靠到右侧（打破 init_dock 的 tabify(活动,委托) 关系，
+        #        避免对已 tabbed 的 dock 重复 tabify 触发 segfault——这是之前 step5 崩溃根因）
+        for d in [pos_d, tick_d, order_d, trade_d, active_d]:
+            d.setFloating(False)
+            main_window.addDockWidget(QtCore.Qt.DockWidgetArea.RightDockWidgetArea, d)
+        print("[布局] step1: 取消浮动 + 独立停靠（打破 tab 组）", flush=True)
+
+        # step2: 行情放持仓下方（垂直分割）
+        main_window.splitDockWidget(pos_d, tick_d, QtCore.Qt.Orientation.Vertical)
+        print("[布局] step2: 行情放持仓下方", flush=True)
+
+        # step3: 委托/成交/活动 tab 到行情（此时各 dock 独立，无 tab 关系冲突）
+        main_window.tabifyDockWidget(tick_d, order_d)
+        main_window.tabifyDockWidget(tick_d, trade_d)
+        main_window.tabifyDockWidget(tick_d, active_d)
+        tick_d.raise_()
+        print("[布局] step3: 委托/成交/活动 tab 化", flush=True)
+
+        # step4: 日志、资金停靠底部（横跨窗口最下方）
+        for d in [log_d, account_d]:
+            if d:
+                d.setFloating(False)
+                main_window.addDockWidget(QtCore.Qt.DockWidgetArea.BottomDockWidgetArea, d)
+        print("[布局] step4: 日志/资金底部", flush=True)
+
+        pos_d.raise_()
+        pos_d.show()
+        print("✓ 布局已重组：持仓右上 + 行情/委托/成交/活动 tab + 日志/资金底部", flush=True)
+    except Exception as e:
+        import traceback
+        print(f"⚠ 布局重组失败（不影响启动，使用默认/custom 布局）: {e}", flush=True)
+        traceback.print_exc()
+        sys.stdout.flush()
+
+
+def restore_submitted_layout(main_window) -> None:
+    """从项目文件恢复提交的布局，跨平台兼容。
+
+    1. 给所有 dock 设固定英文 objectName（saveState/restoreState 用 objectName 匹配，
+       不依赖 windowTitle，保证 Windows ↔ macOS 之间正确识别）。
+    2. 若布局文件存在：restoreState（文件布局覆盖注册表 custom 布局）。
+    3. 若文件不存在：保持 load_window_setting("custom") 的注册表布局。
+    """
+    import json
+    from PySide6 import QtCore, QtWidgets
+
+    # 给 dock 设固定英文 objectName（跨平台一致）
+    _DOCK_NAMES: dict[str, str] = {
+        "交易": "trade_input",
+        "行情": "tick_monitor",
+        "委托": "order_monitor",
+        "活动": "active_order_monitor",
+        "成交": "trade_monitor",
+        "日志": "log_monitor",
+        "资金": "account_monitor",
+        "持仓": "position_monitor",
+    }
+    for dock in main_window.findChildren(QtWidgets.QDockWidget):
+        name = _DOCK_NAMES.get(dock.windowTitle())
+        if name:
+            dock.setObjectName(name)
+
+    layout_path = Path(__file__).parent / "layout" / "custom_layout.json"
+    if not layout_path.exists():
+        return
+    try:
+        layout = json.loads(layout_path.read_text(encoding="utf-8"))
+        state_b64 = layout.get("state", "")
+        if state_b64:
+            state = QtCore.QByteArray.fromBase64(state_b64.encode())
+            main_window.restoreState(state)
+        geo_b64 = layout.get("geometry", "")
+        if geo_b64:
+            geom = QtCore.QByteArray.fromBase64(geo_b64.encode())
+            main_window.restoreGeometry(geom)
+        print(f"✓ 已加载提交的布局: {layout_path.name}")
+    except Exception as e:
+        print(f"⚠ 加载布局文件失败（使用注册表布局）: {e}")
+
+
 def start_gui_with_rpc():
     """启动带RPC的GUI界面"""
     # 加载RPC配置
@@ -221,6 +338,15 @@ def start_gui_with_rpc():
 
     # 加载之前保存的窗口布局
     main_window.load_window_setting("custom")
+
+    # 恢复 git 提交的布局文件（如存在，跨平台兼容；否则用注册表 custom 布局）
+    restore_submitted_layout(main_window)
+
+    # dock 布局重组已禁用：Qt dock API（splitDockWidget/tabifyDockWidget）在已有布局上
+    # 编程重组偶发 segfault（崩点在 split/tabify 间漂移），导致客户端启动退出。
+    # 布局请手动调整：拖动 dock 至期望位置 → 关闭客户端时 vnpy 自动保存 custom 布局 →
+    # 下次启动自动加载。如需代码固化布局，改用 QTabWidget 方案（避免 dock API）。
+    # rearrange_dock_layout(main_window)
 
     main_window.showMaximized()
 

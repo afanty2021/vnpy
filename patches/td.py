@@ -124,7 +124,9 @@ class TD(XtQuantTraderCallback):
             gateway_name=self.gateway.gateway_name
         )
 
-        # 通过 extra 字段传递可用现金给客户端
+        # 通过 extra 字段传递可用现金给客户端（BaseData.extra 默认 None，需先初始化）
+        if account.extra is None:
+            account.extra = {}
         account.extra["cash"] = cash if cash is not None else asset.total_asset
         account.extra["market_value"] = getattr(asset, 'market_value', 0)
 
