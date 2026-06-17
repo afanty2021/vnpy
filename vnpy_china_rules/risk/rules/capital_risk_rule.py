@@ -9,6 +9,8 @@ from vnpy.trader.constant import Direction
 from vnpy_riskmanager.template import RuleTemplate
 from datetime import datetime
 
+from vnpy_china_rules.risk._helpers import get_first_account
+
 
 class CapitalRiskRule(RuleTemplate):
     """资金风控规则"""
@@ -80,7 +82,7 @@ class CapitalRiskRule(RuleTemplate):
 
     def on_trade(self, trade: TradeData) -> None:
         """成交推送 - 更新资金"""
-        account = self.risk_engine.main_engine.get_account()
+        account = get_first_account(self.risk_engine.main_engine)
         if not account:
             return
 
@@ -106,7 +108,7 @@ class CapitalRiskRule(RuleTemplate):
 
     def on_timer(self) -> None:
         """定时检查"""
-        account = self.risk_engine.main_engine.get_account()
+        account = get_first_account(self.risk_engine.main_engine)
         if not account:
             return
 
@@ -142,7 +144,7 @@ class CapitalRiskRule(RuleTemplate):
 
     def _check_capital_usage(self, req: OrderRequest) -> bool:
         """检查资金使用比例"""
-        account = self.risk_engine.main_engine.get_account()
+        account = get_first_account(self.risk_engine.main_engine)
         if not account:
             return False
 

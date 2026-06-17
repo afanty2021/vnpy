@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime
 
+from vnpy_china_rules.risk._helpers import get_first_account
+
 
 @dataclass
 class StopLossRecord:
@@ -169,7 +171,7 @@ class StopProfitLossRule(RuleTemplate):
     def on_timer(self) -> None:
         """定时检查组合止损"""
         if self.enable_combo_stop:
-            account = self.risk_engine.main_engine.get_account()
+            account = get_first_account(self.risk_engine.main_engine)
             if account:
                 # 计算当前资金比例
                 current_ratio = (account.balance - account.frozen) / account.balance

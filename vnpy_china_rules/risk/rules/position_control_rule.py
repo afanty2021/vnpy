@@ -8,6 +8,8 @@ from vnpy.trader.object import OrderRequest, TradeData, PositionData, ContractDa
 from vnpy.trader.constant import Direction
 from vnpy_riskmanager.template import RuleTemplate
 
+from vnpy_china_rules.risk._helpers import get_first_account
+
 
 class PositionControlRule(RuleTemplate):
     """仓位控制风控规则"""
@@ -131,7 +133,7 @@ class PositionControlRule(RuleTemplate):
         # 计算持仓比例
         position_value = new_volume * req.price * contract.size
         # 需要获取账户总资金
-        account = self.risk_engine.main_engine.get_account()
+        account = get_first_account(self.risk_engine.main_engine)
         if not account:
             return False
 
@@ -166,7 +168,7 @@ class PositionControlRule(RuleTemplate):
             total_value += order_value
 
         # 获取账户总资金
-        account = self.risk_engine.main_engine.get_account()
+        account = get_first_account(self.risk_engine.main_engine)
         if not account:
             return False
 
@@ -204,7 +206,7 @@ class PositionControlRule(RuleTemplate):
                 industry_value += order_value
 
         # 获取账户总资金
-        account = self.risk_engine.main_engine.get_account()
+        account = get_first_account(self.risk_engine.main_engine)
         if not account:
             return False
 
