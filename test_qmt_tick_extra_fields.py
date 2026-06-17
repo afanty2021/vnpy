@@ -150,9 +150,51 @@ def test_get_attr_fallback_extra():
     print("[PASS] _get_attr 原生属性优先 + extra fallback 正确")
 
 
+def test_avg_daily_vol_cache_within_same_day():
+    """同一交易日内，_get_avg_daily_vol 首次取数后缓存，第二次不重复查 xtdata。"""
+    import pandas as pd
+    gw = FakeGateway()
+    md = MD(gw)
+    df = pd.DataFrame({"time": [1, 2, 3, 4, 5], "volume": [240000] * 5})
+
+    def fake_get_local_data(**kwargs):
+        return {c: df for c in kwargs.get("stock_list", [])}
+
+    with patch("xtquant.xtdata.get_local_data", side_effect=fake_get_local_data) as m:
+        dt = datetime.datetime(2024, 6, 3, 10, 0)
+        v1 = md._get_avg_daily_vol("000001", Exchange.SZSE, "000001.SZSE", dt)
+        v2 = md._get_avg_daily_vol("000001", Exchange.SZSE, "000001.SZSE", dt)
+    assert v1 == 240000.0 and v2 == 240000.0
+    assert m.call_count == 1, f"同一交易日应只取数一次，实际 {m.call_count} 次"
+    print("[PASS] 同交易日缓存复用，xtdata 仅查询 1 次")
+
+
+def test_avg_daily_vol_cache_invalidates_next_day():
+    """跨交易日缓存失效：clear 后重新取数（5日均量次日纳入新交易日数据）。"""
+    import pandas as pd
+    gw = FakeGateway()
+    md = MD(gw)
+    df = pd.DataFrame({"time": [1], "volume": [240000]})
+
+    def fake_get_local_data(**kwargs):
+        return {c: df for c in kwargs.get("stock_list", [])}
+
+    with patch("xtquant.xtdata.get_local_data", side_effect=fake_get_local_data) as m:
+        dt1 = datetime.datetime(2024, 6, 3, 10, 0)
+        v1 = md._get_avg_daily_vol("000001", Exchange.SZSE, "000001.SZSE", dt1)
+        dt2 = datetime.datetime(2024, 6, 4, 10, 0)
+        v2 = md._get_avg_daily_vol("000001", Exchange.SZSE, "000001.SZSE", dt2)
+    assert v1 == 240000.0 and v2 == 240000.0
+    assert m.call_count == 2, f"跨交易日应重新取数，实际 {m.call_count} 次"
+    assert md._avg_daily_vol_date == dt2.date(), "缓存日期应更新为次日"
+    print("[PASS] 跨交易日缓存失效，重新取数")
+
+
 if __name__ == "__main__":
     test_trading_minutes()
     test_tick_extra_fields()
     test_change_pct_zero_pre_close()
     test_get_attr_fallback_extra()
+    test_avg_daily_vol_cache_within_same_day()
+    test_avg_daily_vol_cache_invalidates_next_day()
     print("\n全部通过")

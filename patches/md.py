@@ -33,8 +33,10 @@ class MD:
         self.th = None
         self.limit_ups = {}
         self.limit_downs = {}
-        # 量比分母缓存：{vt_symbol: 过去5日平均日成交量}，惰性查询，避免每 tick 重复取数
+        # 量比分母缓存：{vt_symbol: 过去5日平均日成交量}，惰性查询，避免每 tick 重复取数。
+        # 按交易日失效（5日均量次日会纳入新交易日数据），跨日 clear 重算；内存只留当天。
         self._avg_daily_vol_cache: dict = {}
+        self._avg_daily_vol_date = None
 
     def close(self) -> None:
         pass
@@ -193,7 +195,7 @@ class MD:
         trading_min: int = self._trading_minutes(dt)
         volume_ratio: float = 0.0
         if trading_min > 0:
-            avg_daily_vol: float = self._get_avg_daily_vol(symbol, exchange, tick.vt_symbol)
+            avg_daily_vol: float = self._get_avg_daily_vol(symbol, exchange, tick.vt_symbol, dt)
             if avg_daily_vol > 0:
                 avg_vol_per_min: float = avg_daily_vol / 240
                 vol_per_min_today: float = volume / trading_min
@@ -222,11 +224,17 @@ class MD:
             return 120
         return 120 + (t.hour - 13) * 60 + t.minute
 
-    def _get_avg_daily_vol(self, symbol, exchange, vt_symbol) -> float:
+    def _get_avg_daily_vol(self, symbol, exchange, vt_symbol, dt) -> float:
         """惰性查询过去5日平均日成交量（股），作为量比分母。失败/无数据返回 0。
 
-        查询结果按 vt_symbol 缓存，每个标的仅首次 tick 触发一次取数。
+        查询结果按 vt_symbol 缓存：同一交易日内每个标的仅首次 tick 触发一次取数；
+        跨交易日时 clear 重算（5日均量次日会纳入新数据，旧值失真）。内存只保留当天。
         """
+        today = dt.date()
+        if self._avg_daily_vol_date != today:
+            self._avg_daily_vol_cache.clear()
+            self._avg_daily_vol_date = today
+
         if vt_symbol in self._avg_daily_vol_cache:
             return self._avg_daily_vol_cache[vt_symbol]
 
