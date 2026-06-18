@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 """QMT 日线预热器测试。开发期 import patches 源，mock qmt_preheater.xtdata。"""
+import json
 import sys
+import subprocess
 from pathlib import Path
-import time
 from unittest.mock import MagicMock, patch
 
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root / "patches"))
 
 import qmt_preheater  # noqa: E402
-from qmt_preheater import QmtDailyBarPreheater  # noqa: E402
+from qmt_preheater import QmtDailyBarPreheater, _worker_main  # noqa: E402
 
 
 def _fake_get_stock_list(mapping):
@@ -102,54 +103,113 @@ def test_calc_start_time_custom_lookback():
     assert start == expected
 
 
-# ===== _download_batch =====
-def test_download_batch_success_with_callback():
+# ===== _download_batch (subprocess 隔离) =====
+# fresh-subprocess-per-batch：每批 Popen 子进程下载，超时硬杀，失败下次增量补。
+# 单元测试 mock subprocess.Popen；preheat 集成测试见下方 mock _download_batch。
+def _fake_proc(stdout=b"", stderr=b"", exc=None):
+    """构造 fake Popen：communicate 返回 (stdout, stderr)，或抛 exc。"""
+    proc = MagicMock()
+    if exc is not None:
+        proc.communicate.side_effect = exc
+    else:
+        proc.communicate.return_value = (stdout, stderr)
+    return proc
+
+
+def test_download_batch_success():
+    """worker 输出 ok=true → 批次成功，Popen 被调一次。"""
     ph = QmtDailyBarPreheater()
-    fake_xt = MagicMock()
-    fake_xt.download_history_data2.return_value = {}  # 真实异步 API 返回空 dict（非 bool）
-    with patch("qmt_preheater.xtdata", fake_xt):
+    fake = _fake_proc(stdout=b'{"ok": true, "error": null, "elapsed": 0.5}\n')
+    with patch("qmt_preheater.xtdata", MagicMock()), \
+         patch("qmt_preheater.subprocess.Popen", return_value=fake) as mp:
         ok = ph._download_batch(["000001.SZ", "000002.SZ"], "20260518")
     assert ok is True
-    fake_xt.download_history_data2.assert_called_once()
-    kwargs = fake_xt.download_history_data2.call_args.kwargs
-    assert kwargs["stock_list"] == ["000001.SZ", "000002.SZ"]
-    assert kwargs["period"] == "1d"
-    assert kwargs["start_time"] == "20260518"
-    assert "callback" in kwargs
+    mp.assert_called_once()
 
 
-def test_download_batch_return_value_ignored():
-    """download_history_data2 异步返回空 dict {}（实测），非 bool。
-    成功判定不看返回值（bool({})=False 会误判），只看是否抛异常——返回 {} 仍判成功。"""
+def test_download_batch_worker_failure_logged(capsys):
+    """worker 内异常（ok=false）→ 返回 False 且日志含 error。"""
     ph = QmtDailyBarPreheater()
-    fake_xt = MagicMock()
-    fake_xt.download_history_data2.return_value = {}  # 真实异步返回
-    with patch("qmt_preheater.xtdata", fake_xt):
+    fake = _fake_proc(stdout=b'{"ok": false, "error": "miniQMT down"}\n')
+    with patch("qmt_preheater.xtdata", MagicMock()), \
+         patch("qmt_preheater.subprocess.Popen", return_value=fake):
         ok = ph._download_batch(["000001.SZ"], "20260518")
-    assert ok is True  # 未抛异常即成功，空 dict 不影响判定
-
-
-def test_download_batch_exception_returns_false(capsys):
-    ph = QmtDailyBarPreheater()
-    fake_xt = MagicMock()
-    fake_xt.download_history_data2.side_effect = Exception("miniQMT 未运行")
-    with patch("qmt_preheater.xtdata", fake_xt):
-        ok = ph._download_batch(["000001.SZ"], "20260518")
+    out = capsys.readouterr().out
     assert ok is False
-    assert "批次下载失败" in capsys.readouterr().out
+    assert "批次下载失败" in out
+    assert "miniQMT down" in out
 
 
-def test_download_batch_timeout():
-    """超时保护：_do 线程无限阻塞 → join(timeout) 到期 → 返回 False + 日志。"""
+def test_download_batch_timeout_kills_subprocess(capsys):
+    """超时 → communicate 抛 TimeoutExpired → kill 硬杀子进程 → 返回 False（核心价值）。"""
     ph = QmtDailyBarPreheater()
-    ph.BATCH_TIMEOUT = 0.1  # 0.1s 超时便于测试
-    fake_xt = MagicMock()
-    fake_xt.download_history_data2.side_effect = lambda **kwargs: time.sleep(5)  # 远长于 timeout
-    with patch("qmt_preheater.xtdata", fake_xt):
+    ph.BATCH_TIMEOUT = 0.1
+    fake = _fake_proc(exc=subprocess.TimeoutExpired(cmd=["x"], timeout=0.1))
+    with patch("qmt_preheater.xtdata", MagicMock()), \
+         patch("qmt_preheater.subprocess.Popen", return_value=fake):
         ok = ph._download_batch(["000001.SZ"], "20260518")
+    out = capsys.readouterr().out
     assert ok is False
-    # 超时时 join 到期 is_alive()=True → 记录超时日志
-    # 注：_log 内部 print 不捕获（capsys 在超时测试可选，仅验证返回值），线程不被强制杀死但因 daemon=True 无害
+    assert "超时" in out
+    fake.kill.assert_called_once()  # 硬杀
+
+
+def test_download_batch_unparseable_output_includes_stderr(capsys):
+    """子进程输出非 JSON → 无法解析 → 返回 False，且日志附 stderr 尾行辅助诊断。
+
+    worker 的 try/except 已把 connect/download 异常写入 stdout JSON；但当 worker 在
+    json.dumps 之前崩溃（import 失败 / C 扩展 segfault / 进程异常终止）时 stdout 无 JSON，
+    stderr 是此时唯一的诊断线索，应透出到日志。
+    """
+    ph = QmtDailyBarPreheater()
+    fake = _fake_proc(stdout=b"garbage\n", stderr=b"FATAL: xtdata crash\nstack...\n")
+    with patch("qmt_preheater.xtdata", MagicMock()), \
+         patch("qmt_preheater.subprocess.Popen", return_value=fake):
+        ok = ph._download_batch(["000001.SZ"], "20260518")
+    out = capsys.readouterr().out
+    assert ok is False
+    assert "无法解析" in out
+    assert "xtdata crash" in out  # stderr 内容应透出到日志
+
+
+def test_download_batch_popen_failure(capsys):
+    """Popen 自身失败（python 路径错等）→ 返回 False。"""
+    ph = QmtDailyBarPreheater()
+    with patch("qmt_preheater.xtdata", MagicMock()), \
+         patch("qmt_preheater.subprocess.Popen", side_effect=OSError("python not found")):
+        ok = ph._download_batch(["000001.SZ"], "20260518")
+    out = capsys.readouterr().out
+    assert ok is False
+    assert "启动" in out
+
+
+# ===== _worker_main (子进程入口) =====
+def test_worker_main_success(capsys):
+    """worker 正常：argv 解析 + connect/download + 输出 ok=true JSON。"""
+    fake_xt = MagicMock()
+    with patch("qmt_preheater.xtdata", fake_xt):
+        _worker_main(["--worker", "000001.SZ,000002.SZ", "1d", "20260518"])
+    out = capsys.readouterr().out
+    data = json.loads(out.strip().splitlines()[-1])
+    assert data["ok"] is True
+    assert data["error"] is None
+    assert data["elapsed"] >= 0
+    fake_xt.connect.assert_called_once()
+    fake_xt.download_history_data2.assert_called_once_with(
+        ["000001.SZ", "000002.SZ"], "1d", "20260518"
+    )
+
+
+def test_worker_main_exception_written_as_json(capsys):
+    """worker 内异常 → ok=false 且 error 含异常，stdout 仍是合法 JSON（父进程可解析）。"""
+    fake_xt = MagicMock()
+    fake_xt.download_history_data2.side_effect = RuntimeError("miniQMT down")
+    with patch("qmt_preheater.xtdata", fake_xt):
+        _worker_main(["--worker", "000001.SZ", "1d", "20260518"])
+    out = capsys.readouterr().out
+    data = json.loads(out.strip().splitlines()[-1])
+    assert data["ok"] is False
+    assert "miniQMT down" in data["error"]
 
 
 # ===== preheat + _format_elapsed =====
@@ -169,10 +229,14 @@ def test_preheat_batching_and_summary(capsys):
         "沪深A股": ["000001.SZ", "000002.SZ", "300001.SZ", "688001.SH"],
         "创业板": [], "科创板": [], "沪深ETF": ["510050.SH"],
     })
-    fake_xt.download_history_data2.return_value = {}  # 真实异步返回
-    with patch("qmt_preheater.xtdata", fake_xt):
+    # 集成测试只验证 preheat 的分批/进度/汇总，下载委托给 _download_batch（此处 mock）
+    with patch("qmt_preheater.xtdata", fake_xt), \
+         patch.object(ph, "_download_batch", return_value=True) as mock_dl:
         ph.preheat()
-    assert fake_xt.download_history_data2.call_count == 3
+    assert mock_dl.call_count == 3  # 5只 / BATCH_SIZE=2 → 3 批
+    # 首批切分正确 + start_time 透传
+    assert mock_dl.call_args_list[0].args[0] == ["000001.SZ", "000002.SZ"]
+    assert mock_dl.call_args_list[0].args[1] == ph._calc_start_time()
     out = capsys.readouterr().out
     assert "batches_ok=3" in out
     assert "batches_fail=0" in out
@@ -191,9 +255,9 @@ def test_preheat_failure_tolerance(capsys):
         "沪深A股": ["A.SZ", "B.SZ", "C.SZ", "D.SZ"],
         "创业板": [], "科创板": [], "沪深ETF": [],
     })
-    # 第1批正常（返回{}不抛异常→成功），第2批抛异常→失败；验证成功判定基于异常而非返回值
-    fake_xt.download_history_data2.side_effect = [{}, Exception("第2批失败")]
-    with patch("qmt_preheater.xtdata", fake_xt):
+    # 第1批成功，第2批失败：验证失败容错与计数（不中断后续，下次启动增量补）
+    with patch("qmt_preheater.xtdata", fake_xt), \
+         patch.object(ph, "_download_batch", side_effect=[True, False]):
         ph.preheat()
     out = capsys.readouterr().out
     assert "batches_ok=1" in out
@@ -205,11 +269,12 @@ def test_preheat_empty_symbols(capsys):
     ph = QmtDailyBarPreheater()
     fake_xt = MagicMock()
     fake_xt.get_stock_list_in_sector.return_value = []
-    with patch("qmt_preheater.xtdata", fake_xt):
+    with patch("qmt_preheater.xtdata", fake_xt), \
+         patch.object(ph, "_download_batch") as mock_dl:
         ph.preheat()
     out = capsys.readouterr().out
     assert "无可预热标的" in out
-    fake_xt.download_history_data2.assert_not_called()
+    mock_dl.assert_not_called()  # 空标的不触发下载
 
 
 def test_preheat_outer_exception_swallowed(capsys, monkeypatch):

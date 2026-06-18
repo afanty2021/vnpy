@@ -5,7 +5,10 @@ QMT 日线数据预热器：服务端启动时后台增量下载全市场（A股
 
 设计文档：docs/superpowers/specs/2026-06-17-qmt-daily-bar-preheater-design.md
 """
-import threading
+import json
+import os
+import subprocess
+import sys
 import time
 from datetime import datetime, timedelta
 
@@ -17,14 +20,15 @@ class QmtDailyBarPreheater:
 
     # 显式列举全部所需板块 + set 去重，不依赖"沪深A股是否含子板块"的假设
     SECTORS: list[str] = ["沪深A股", "创业板", "科创板", "沪深ETF"]
+    PERIOD: str = "1d"          # 量比只需日线（md._get_avg_daily_vol 消费 1d）
     LOOKBACK_DAYS: int = 30
     BATCH_SIZE: int = 100
-    # 批间等待（秒）：实测 download_history_data2 返回即落盘可读，sleep 非为等异步落盘；
-    # 保留微小缓冲避免密集请求 miniQMT。真实耗时由下载重写开销主导（实测约 0.05s/只）。
+    # 批间等待（秒）：子进程退出后再起下一批，留微小缓冲避免密集请求 miniQMT。
     BATCH_SLEEP: float = 0.2
-    # 单批下载超时（秒）：防止个别标的致 download_history_data2 同步阻塞卡死全局。
-    # 正常 100 只约 5s，30s 为 6 倍冗余；超时则跳过本批，下次启动增量补。
-    BATCH_TIMEOUT: float = 30.0
+    # 单批下载超时（秒）：每批在独立子进程内执行，超时则 kill 硬杀（OS 级，不受 GIL 限制），
+    # 跳过本批下次启动增量补。实测正常批 ~10s + 子进程 setup 2.5s ≈ 12.5s，60s ≈ 5x 冗余
+    # （旧线程版 30s/6x 在 GIL 阻塞下兜底失效）；进程隔离后 kill 可靠，冗余可按需收紧。
+    BATCH_TIMEOUT: float = 60.0
 
     def __init__(self, main_engine=None):
         self.main_engine = main_engine
@@ -81,42 +85,46 @@ class QmtDailyBarPreheater:
         return start.strftime("%Y%m%d")
 
     def _download_batch(self, batch: list[str], start_time: str) -> bool:
-        """下载一批日线，返回是否成功。带超时保护（防止个别标阻塞全局）。
+        """下载一批日线到独立子进程，返回是否成功。
 
-        download_history_data2 是异步 API（返回空 dict {}），但极端情况下
-        个别标的可能触发同步等待。用线程隔离 + join(timeout) 兜底。
+        fresh-subprocess-per-batch：每批 Popen 一个子进程跑 _worker_main，超时则 kill 硬杀。
+        进程隔离保证个别标的触发 download_history_data2 同步阻塞（曾实测卡 1450s）时不会
+        拖垮预热线程——线程版 join(timeout) 在子线程独占 GIL 时兜底失效，进程级 kill
+        （Windows TerminateProcess）不受 GIL 限制，超时必然生效。失败批次不重试，
+        下次启动由 download_history_data2 原生增量下载自动补齐。
         """
-        result: dict = {"ok": True, "error": None}
-
-        def _do() -> None:
+        cmd = [
+            sys.executable, "-u", os.path.abspath(__file__), "--worker",
+            ",".join(batch), self.PERIOD, start_time,
+        ]
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except Exception as e:
+            self._log(f"启动下载子进程失败（{len(batch)}只）: {e}")
+            return False
+        try:
+            out, err = proc.communicate(timeout=self.BATCH_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            proc.kill()
             try:
-                xtdata.download_history_data2(
-                    stock_list=batch,
-                    period="1d",
-                    start_time=start_time,
-                    callback=lambda: None,
-                )
-            except Exception as e:
-                result["ok"] = False
-                result["error"] = e
-
-        t = threading.Thread(target=_do, daemon=True)
-        t.start()
-        t.join(timeout=self.BATCH_TIMEOUT)
-
-        # 超时竞态（TOCTOU）设计取舍：真实形态是"误判超时"而非"读错结果"——
-        # is_alive()==True 直接 return False 不读 result；仅 is_alive()==False（线程已结束、
-        # result 必已写完）才读 result。理论窗口是 join 到期判定瞬间线程恰好跑完，此时已走
-        # 超时分支，丢失的仅是一个本可成功的批次（下次启动增量补，后果轻微）。
-        # Python 无法安全强制终止线程，daemon=True 进程退出时回收即可，不强 kill（KISS）。
-        if t.is_alive():
+                proc.communicate()  # 回收已 kill 的子进程，避免僵尸/管道残留
+            except Exception:
+                pass
             self._log(
-                f"批次下载超时 {self.BATCH_TIMEOUT}s，"
+                f"批次下载超时 {self.BATCH_TIMEOUT}s，硬杀子进程，"
                 f"跳过 {len(batch)} 只（下次启动增量补）"
             )
             return False
-        if not result["ok"]:
-            self._log(f"批次下载失败（{len(batch)}只）: {result['error']}")
+
+        parsed = _parse_worker_json(out)
+        if parsed is None:
+            self._log(
+                f"批次子进程输出无法解析（{len(batch)}只）: "
+                f"stdout={out[:200]!r} stderr={err[:200]!r}"
+            )
+            return False
+        if not parsed.get("ok"):
+            self._log(f"批次下载失败（{len(batch)}只）: {parsed.get('error')}")
             return False
         return True
 
@@ -162,3 +170,52 @@ class QmtDailyBarPreheater:
         """秒数格式化为 NmNs（机器友好）。"""
         s = int(seconds)
         return f"{s // 60}m{s % 60}s"
+
+
+def _parse_worker_json(stdout: bytes) -> dict | None:
+    """解析子进程 stdout，取最后一行 JSON（跳过 banner/非 JSON 行）。无则 None。"""
+    try:
+        text = stdout.decode("utf-8", "ignore")
+    except Exception:
+        return None
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                return json.loads(line)
+            except Exception:
+                continue
+    return None
+
+
+def _worker_main(argv: list[str] | None = None) -> None:
+    """子进程入口：下载一批日线，输出一行 JSON {ok, error, elapsed} 到 stdout。
+
+    argv: ["--worker", "<symbols 逗号分隔>", "<period>", "<start_time>"]。
+    父进程 Popen 调 `python qmt_preheater.py --worker ...` 触发本函数。
+    任何异常都捕获并写入 JSON（ok=false），保证父进程总能解析到结果。
+    """
+    argv = sys.argv[1:] if argv is None else argv
+    symbols = argv[1].split(",") if len(argv) > 1 and argv[1] else []
+    period = argv[2] if len(argv) > 2 else "1d"
+    start_time = argv[3] if len(argv) > 3 else ""
+
+    result: dict = {"ok": True, "error": None, "elapsed": 0.0}
+    t0 = time.time()
+    try:
+        xtdata.enable_hello = False  # 静默 banner，保持 stdout 纯 JSON
+        xtdata.connect()
+        xtdata.download_history_data2(symbols, period, start_time)
+    except Exception as e:
+        result["ok"] = False
+        result["error"] = repr(e)
+    result["elapsed"] = round(time.time() - t0, 2)
+
+    sys.stdout.write(json.dumps(result) + "\n")
+    sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    # 子进程入口：python qmt_preheater.py --worker <symbols> <period> <start_time>
+    if len(sys.argv) > 1 and sys.argv[1] == "--worker":
+        _worker_main()
