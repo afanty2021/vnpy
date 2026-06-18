@@ -339,7 +339,10 @@ class ConfigManager:
         import logging
 
         logger = logging.getLogger(__name__)
-        config_file = self._config_path / f"global_{self._environment.value}.yaml"
+        # 优先单环境 config.yaml；回退到 global_{env}.yaml（向后兼容旧多环境配置）
+        config_file = self._config_path / "config.yaml"
+        if not config_file.exists():
+            config_file = self._config_path / f"global_{self._environment.value}.yaml"
 
         if config_file.exists():
             try:
@@ -352,27 +355,15 @@ class ConfigManager:
                     f"配置文件路径: {config_file.absolute()}"
                 )
         else:
-            # 回退到 config.yaml
-            config_file_alt = self._config_path / "config.yaml"
-            if config_file_alt.exists():
-                try:
-                    config = GlobalConfig.from_file(config_file_alt)
-                    logger.info(f"使用 config.yaml (global_{self._environment.value}.yaml 不存在)")
-                except Exception as e:
-                    raise ValueError(
-                        f"配置文件 {config_file_alt} 验证失败:\n{e}\n\n"
-                        f"请检查配置文件格式和必填字段。\n"
-                        f"配置文件路径: {config_file_alt.absolute()}"
-                    )
-            else:
-                # 创建默认配置并保存
-                config = GlobalConfig()
-                config.environment = self._environment
-                config.to_file(config_file)
-                logger.warning(
-                    f"配置文件不存在，已创建默认配置: {config_file}\n"
-                    f"请根据需要修改配置。"
-                )
+            # 配置文件不存在，创建默认配置并保存到 config.yaml
+            default_file = self._config_path / "config.yaml"
+            config = GlobalConfig()
+            config.environment = self._environment
+            config.to_file(default_file)
+            logger.warning(
+                f"配置文件不存在，已创建默认配置: {default_file}\n"
+                f"请根据需要修改配置。"
+            )
 
         self._configs["global"] = config
         return config
@@ -473,17 +464,24 @@ class ConfigManager:
         if not force_reload and module_name in self._configs:
             return self._configs[module_name]  # type: ignore
 
-        if filename is None:
-            filename = f"{module_name}_{self._environment.value}.yaml"
+        # 显式 filename 优先；否则优先单环境 {module}.yaml，回退 {module}_{env}.yaml
+        candidates = [filename] if filename is not None else [
+            f"{module_name}.yaml",
+            f"{module_name}_{self._environment.value}.yaml",
+        ]
 
-        config_file = self._config_path / filename
+        config_file = next(
+            (self._config_path / name for name in candidates
+             if (self._config_path / name).exists()),
+            None,
+        )
 
-        if config_file.exists():
+        if config_file is not None:
             config = config_class.from_file(config_file)
         else:
-            # 创建默认配置并保存
+            # 配置文件不存在，创建默认配置并保存（用首个候选名）
             config = config_class()
-            config.to_file(config_file)
+            config.to_file(self._config_path / candidates[0])
 
         self._configs[module_name] = config
         return config

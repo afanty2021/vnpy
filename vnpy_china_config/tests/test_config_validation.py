@@ -56,7 +56,7 @@ class TestQmtConfigValidation:
     def test_qmt_config_enabled_requires_all_fields(self):
         """测试启用QMT时所有必填字段验证"""
         # 启用QMT但所有必填字段都为空
-        with pytest.raises(ValueError, match="QMT配置错误"):
+        with pytest.raises(ValueError, match="account_id 在启用QMT时不能为空"):
             QmtConfig(
                 enabled=True,
                 account_id="",
@@ -459,8 +459,8 @@ database:
             manager.set_config_path(config_path)
             manager.set_environment(Environment.DEVELOPMENT)
 
-            # 配置文件不存在，应该创建默认配置
-            config_file = config_path / "global_development.yaml"
+            # 配置文件不存在，应该创建默认配置（单环境收敛后默认创建到 config.yaml）
+            config_file = config_path / "config.yaml"
             assert not config_file.exists()
 
             # 加载配置会创建默认配置文件
@@ -494,7 +494,7 @@ class TestOtherConfigValidation:
         assert config.max_bytes == 1024
 
         # 无效值 - 必须>0
-        with pytest.raises(ValueError, match="max_bytes 必须大于0"):
+        with pytest.raises(ValueError, match="max_bytes 必须大于 0"):
             LoggingConfig(max_bytes=0)
 
     def test_logging_config_backup_count_validation(self):
@@ -514,7 +514,7 @@ class TestOtherConfigValidation:
         assert config.timeout == 5000
 
         # 无效值 - 必须>0
-        with pytest.raises(ValueError, match="timeout 必须大于0"):
+        with pytest.raises(ValueError, match="timeout 必须大于 0"):
             RpcConfig(timeout=0)
 
     def test_risk_config_ratio_validation(self):

@@ -317,10 +317,10 @@ class TestConfigManager(unittest.TestCase):
         self.assertEqual(self.manager.config_path, temp_path)
 
     def test_load_global_config(self):
-        """测试加载全局配置"""
+        """测试加载全局配置（单环境收敛后优先 config.yaml，environment 固定为 development）"""
         config = self.manager.load_global_config()
         self.assertIsInstance(config, GlobalConfig)
-        self.assertEqual(config.environment, self.manager.environment)
+        self.assertEqual(config.environment, Environment.DEVELOPMENT)
 
     def test_get_config(self):
         """测试获取配置"""
