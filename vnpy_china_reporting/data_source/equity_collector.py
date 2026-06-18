@@ -60,13 +60,22 @@ class EquitySnapshotCollector:
             account_id = (
                 getattr(acc, "vt_accountid", None) or getattr(acc, "accountid", "")
             )
+            # A股 QMT 网关将真实可用现金/持仓市值放入 extra（见 patches/td.py:on_stock_asset）；
+            # vnpy 原生 available=balance-frozen 在A股下≈总资产，不可直接用作可用现金。
+            extra = getattr(acc, "extra", None) or {}
+            available_cash = float(extra.get("cash", getattr(acc, "available", 0.0)))
+            market_value = float(extra.get("market_value", 0.0))
+            if "cash" not in extra:
+                logger.warning(
+                    "账户 %s 缺少 extra['cash']，可用现金回退到 available（A股下可能不准）",
+                    account_id,
+                )
             self.store.save_snapshot(
                 snapshot_date=snapshot_date,
                 account_id=account_id,
                 total_equity=float(getattr(acc, "balance", 0.0)),
-                available_cash=float(getattr(acc, "available", 0.0)),
-                # vnpy AccountData 不含持仓市值，report 侧从持仓累加，此处记 0
-                market_value=0.0,
+                available_cash=available_cash,
+                market_value=market_value,
             )
             count += 1
 

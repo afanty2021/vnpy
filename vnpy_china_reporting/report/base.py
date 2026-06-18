@@ -150,10 +150,13 @@ class BaseReportGenerator(ABC):
         positions = self.get_positions()
         market_value = sum(p.market_value for p in positions)
         total_pnl = sum(p.unrealized_pnl for p in positions)
+        # A股 QMT 网关将真实可用现金放入 extra['cash']（见 patches/td.py）；
+        # 原生 available=balance-frozen 在A股下≈总资产，不可用作可用现金。
+        extra = getattr(acc, "extra", None) or {}
 
         return AccountData(
             total_equity=acc.balance,
-            available_cash=acc.available,
+            available_cash=extra.get("cash", acc.available),
             market_value=market_value,
             total_pnl=total_pnl,
             total_pnl_ratio=0.0,  # 权益变化法下当期收益率由 calculate_pnl_ratio 计算
