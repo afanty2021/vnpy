@@ -97,6 +97,13 @@ def main():
     # 加载配置
     QMT_SETTING, RPC_SETTING = load_config()
 
+    # 初始化日志（须在 EventEngine/MainEngine 之前，统一读取 config.yaml 的 logging 配置）
+    if HAS_CONFIG:
+        from vnpy_china_config.logging_config import setup_logging_from_config
+        _cm = ConfigManager()
+        _cm.set_config_path(Path(__file__).parent.parent.parent / ".vntrader_china/config")
+        setup_logging_from_config(_cm.load_config(force_reload=True))
+
     if HAS_CONFIG:
         manager = ConfigManager()
         print(f"\n配置环境: {manager.environment.value}")

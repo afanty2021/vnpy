@@ -71,6 +71,35 @@ def setup_logging(
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
 
+    # 防御：至少保留一个 handler，避免 console_enabled=False 且 log_file=None 时日志静默丢失
+    if not root_logger.handlers:
+        fallback = logging.StreamHandler(sys.stdout)
+        fallback.setLevel(level)
+        fallback.setFormatter(formatter)
+        root_logger.addHandler(fallback)
+
+
+def setup_logging_from_config(config: Any) -> None:
+    """从 GlobalConfig 应用日志配置（统一入口）
+
+    读取 config.logging 字段并调用 setup_logging，供 client/server 启动时一行接入。
+    须在 EventEngine / MainEngine 创建前调用。
+
+    Args:
+        config: vnpy_china_config.GlobalConfig 实例（需含 logging 字段）
+    """
+    log_cfg = config.logging
+    level = getattr(logging, log_cfg.level, logging.INFO)
+    log_file = str(log_cfg.file_path) if log_cfg.file_enabled else None
+    setup_logging(
+        level=level,
+        log_file=log_file,
+        console_enabled=log_cfg.console_enabled,
+        max_bytes=log_cfg.max_bytes,
+        backup_count=log_cfg.backup_count,
+        detailed_format=("%(filename)s" in log_cfg.format or "%(lineno)d" in log_cfg.format),
+    )
+
 
 def get_logger(name: str) -> logging.Logger:
     """

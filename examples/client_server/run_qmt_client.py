@@ -318,6 +318,13 @@ def restore_submitted_layout(main_window) -> None:
 
 def start_gui_with_rpc():
     """启动带RPC的GUI界面"""
+    # 初始化日志（须在 EventEngine/MainEngine 之前，统一读取 config.yaml 的 logging 配置）
+    ConfigManager.reset_instance()
+    _cm = ConfigManager()
+    _cm.set_config_path(Path(__file__).parent.parent.parent / ".vntrader_china/config")
+    from vnpy_china_config.logging_config import setup_logging_from_config
+    setup_logging_from_config(_cm.load_config(force_reload=True))
+
     # 加载RPC配置
     RPC_SETTING = load_rpc_config()
 
