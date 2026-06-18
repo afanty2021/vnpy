@@ -106,12 +106,16 @@ class QmtGateway(BaseGateway):
     def process_timer_event(self, event) -> None:
         if not self.td.inited:
             return
-        if self.count == -1:
-            self.query_trade()
         self.count += 1
 
         if self.count % 5 == 0:
             self.query_order()
+
+        # 周期查询成交：原仅首帧查一次，盘中服务端重启会漏推新成交。
+        # 配合 td.on_stock_trade 的 vt_tradeid 去重，避免重复推送。
+        # count 初值 -1，首帧自增为 0，0%11==0 即命中首次查询。
+        if self.count % 11 == 0:
+            self.query_trade()
 
         if self.count % 7 == 0:
             self.query_account()

@@ -212,6 +212,13 @@ class TD(XtQuantTraderCallback):
             direction=trd_typ
         )
 
+        # vt_tradeid 去重：避免周期 query_trade 重复推送相同成交
+        vt_tradeid = trade_.vt_tradeid
+        old_trade = self.traders.get(vt_tradeid)
+        if old_trade == trade_:
+            return
+        self.traders[vt_tradeid] = trade_
+
         self.gateway.on_trade(trade_)
 
     def on_cancel_error(self, cancel_error: XtCancelError):
