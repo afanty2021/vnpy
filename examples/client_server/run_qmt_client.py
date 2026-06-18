@@ -125,6 +125,99 @@ def _update_old_row(self, data):
 
 AccountMonitor.update_old_row = _update_old_row
 
+# === 委托/成交表：去 委托号/交易所/开平，增 股票名称（复用持仓表的合约查名逻辑）===
+# OrderData/TradeData 与 PositionData 一样自身不带 name 字段，股票名称需从
+# ContractData.name 实时查询，来源同 vnpy 原生 PositionMonitor._get_position_name。
+from vnpy.trader.ui.widget import OrderMonitor, TradeMonitor
+
+
+def _resolve_contract_name(monitor, data: Any) -> str:
+    """股票名称取自合约信息。
+
+    OrderData/TradeData 自身不带名称，通过 vt_symbol 查 ContractData.name 补全，
+    与持仓列表的 _get_position_name 同一来源。
+    """
+    try:
+        vt_symbol: str = f"{data.symbol}.{data.exchange.value}"
+        contract = monitor.main_engine.get_contract(vt_symbol)
+        if contract and contract.name:
+            return contract.name
+    except Exception:
+        pass
+    return ""
+
+
+def _insert_new_row_with_name(self, data: Any) -> None:
+    """插入新行 - name 列走合约查名，其余列复用 BaseMonitor._get_attr 安全取值。"""
+    self.insertRow(0)
+
+    row_cells: dict = {}
+    for column, header in enumerate(self.headers.keys()):
+        setting: dict = self.headers[header]
+
+        if header == "name":
+            content = _resolve_contract_name(self, data)
+        else:
+            content = self._get_attr(data, header, "")
+
+        cell = setting["cell"](content, data)
+        self.setItem(0, column, cell)
+
+        if setting["update"]:
+            row_cells[header] = cell
+
+    if self.data_key:
+        key = self._get_attr(data, self.data_key, "")
+        self.cells[key] = row_cells
+
+
+def _update_old_row_with_name(self, data: Any) -> None:
+    """更新旧行 - name 列走合约查名。"""
+    key = self._get_attr(data, self.data_key, "")
+    row_cells = self.cells.get(key)
+    if row_cells is None:
+        return
+
+    for header, cell in row_cells.items():
+        if header == "name":
+            content = _resolve_contract_name(self, data)
+        else:
+            content = self._get_attr(data, header, "")
+        cell.set_content(content, data)
+
+
+# 委托表：去 委托号(orderid)/交易所(exchange)/开平(offset)，增 名称
+# 活动委托表 ActiveOrderMonitor 继承自 OrderMonitor，自动生效
+OrderMonitor.headers = {
+    "reference": {"display": "来源", "cell": widget.BaseCell, "update": False},
+    "symbol": {"display": "代码", "cell": widget.BaseCell, "update": False},
+    "name": {"display": "名称", "cell": widget.BaseCell, "update": False},
+    "type": {"display": "类型", "cell": widget.EnumCell, "update": False},
+    "direction": {"display": "方向", "cell": widget.DirectionCell, "update": False},
+    "price": {"display": "价格", "cell": widget.BaseCell, "update": False},
+    "volume": {"display": "总数量", "cell": widget.BaseCell, "update": True},
+    "traded": {"display": "已成交", "cell": widget.BaseCell, "update": True},
+    "status": {"display": "状态", "cell": widget.EnumCell, "update": True},
+    "datetime": {"display": "时间", "cell": widget.TimeCell, "update": True},
+    "gateway_name": {"display": "接口", "cell": widget.BaseCell, "update": False},
+}
+OrderMonitor.insert_new_row = _insert_new_row_with_name
+OrderMonitor.update_old_row = _update_old_row_with_name
+
+# 成交表：去 委托号(orderid)/交易所(exchange)/开平(offset)，增 名称
+TradeMonitor.headers = {
+    "tradeid": {"display": "成交号", "cell": widget.BaseCell, "update": False},
+    "symbol": {"display": "代码", "cell": widget.BaseCell, "update": False},
+    "name": {"display": "名称", "cell": widget.BaseCell, "update": False},
+    "direction": {"display": "方向", "cell": widget.DirectionCell, "update": False},
+    "price": {"display": "价格", "cell": widget.BaseCell, "update": False},
+    "volume": {"display": "数量", "cell": widget.BaseCell, "update": False},
+    "datetime": {"display": "时间", "cell": widget.TimeCell, "update": False},
+    "gateway_name": {"display": "接口", "cell": widget.BaseCell, "update": False},
+}
+TradeMonitor.insert_new_row = _insert_new_row_with_name
+TradeMonitor.update_old_row = _update_old_row_with_name
+
 from vnpy.event import EventEngine
 from vnpy.trader.engine import MainEngine
 from vnpy.trader.ui import MainWindow, create_qapp
@@ -275,6 +368,21 @@ def start_gui_with_rpc():
 
     # 创建主窗口
     main_window = MainWindow(main_engine, event_engine)
+
+    # 回补委托/成交快照（RPC 模式时序修复）
+    # RpcGateway.connect 的 query_all 在 MainWindow 创建前执行，此时
+    # OrderMonitor/TradeMonitor 尚未注册，委托/成交快照事件被 EventEngine 丢弃。
+    # 而 QMT 网关对“已稳定委托”有状态去重（td.py on_stock_order）、对成交仅首帧
+    # 查询一次（qmt_gateway.process_timer_event），收盘后重连无法靠实时事件补回。
+    # 此处 Monitor 已就绪（MainWindow.__init__ 内已 register_event），用 main_engine
+    # 缓存重新推送即可显示。（connect 时 RpcGateway.on_order/on_trade 已把快照写入
+    # 客户端 main_engine.orders/trades 缓存，与持仓/资金同一来源。）
+    from vnpy.event import Event
+    from vnpy.trader.event import EVENT_ORDER, EVENT_TRADE
+    for order in main_engine.get_all_orders():
+        event_engine.put(Event(EVENT_ORDER, order))
+    for trade in main_engine.get_all_trades():
+        event_engine.put(Event(EVENT_TRADE, trade))
 
     # 加载之前保存的窗口布局
     main_window.load_window_setting("custom")
