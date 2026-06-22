@@ -45,23 +45,128 @@ def _new_set_content(self, content: Any, data: Any) -> None:
 # 应用修改
 BaseCell.set_content = _new_set_content
 
-# 修改PositionMonitor - 修改显示名称
+# === PositionMonitor 扩展：新增「市值」列 + tick 驱动实时刷新 ===
+# PositionData 无最新价字段（price 是成本价），市值须由 EVENT_TICK 的 last_price × volume 驱动；
+# 故子类化 PositionMonitor，在持仓事件之外额外监听 tick，按 vt_symbol 反查持仓行刷新市值。
+from PySide6 import QtCore
+from vnpy.event import Event
+from vnpy.trader.event import EVENT_TICK
+from vnpy.trader.object import PositionData, TickData
 from vnpy.trader.ui.widget import PositionMonitor
 
-# 直接修改类属性来改变显示名称
-PositionMonitor.headers = {
-    "symbol": {"display": "代码", "cell": widget.BaseCell, "update": False},
-    "name": {"display": "名称", "cell": widget.BaseCell, "update": False},
-    "volume": {"display": "数量", "cell": widget.BaseCell, "update": True},
-    "yd_volume": {"display": "昨仓", "cell": widget.BaseCell, "update": True},
-    "price": {"display": "成本价", "cell": widget.BaseCell, "update": True},
-    "pnl": {"display": "盈亏", "cell": widget.PnlCell, "update": True},
-    "gateway_name": {"display": "接口", "cell": widget.BaseCell, "update": False},
-}
+
+class PositionMonitorMV(PositionMonitor):
+    """持仓监控（含市值列，tick 事件驱动实时刷新）。"""
+
+    # Qt Signal 须在类级声明（描述符），用于跨线程安全地转发 tick 事件
+    tick_signal: QtCore.Signal = QtCore.Signal(Event)
+
+    headers: dict = {
+        "symbol": {"display": "代码", "cell": widget.BaseCell, "update": False},
+        "name": {"display": "名称", "cell": widget.BaseCell, "update": False},
+        "volume": {"display": "数量", "cell": widget.BaseCell, "update": True},
+        "yd_volume": {"display": "昨仓", "cell": widget.BaseCell, "update": True},
+        "price": {"display": "成本价", "cell": widget.BaseCell, "update": True},
+        "market_value": {"display": "市值", "cell": widget.BaseCell, "update": True},
+        "pnl": {"display": "盈亏", "cell": widget.PnlCell, "update": True},
+        "gateway_name": {"display": "接口", "cell": widget.BaseCell, "update": False},
+    }
+
+    def __init__(self, main_engine, event_engine) -> None:
+        # 反向映射 + 持仓缓存：在 super().__init__（内含 register_event）前就绪
+        self._symbol_positionids: dict[str, list[str]] = {}  # vt_symbol -> [vt_positionid]
+        self._positions: dict[str, PositionData] = {}        # vt_positionid -> 最新持仓
+        super().__init__(main_engine, event_engine)
+
+    def register_event(self) -> None:
+        """注册持仓事件（基类）+ tick 事件（本类驱动市值刷新）。"""
+        super().register_event()
+        self.tick_signal.connect(self.process_tick_event)
+        self.event_engine.register(EVENT_TICK, self.tick_signal.emit)
+
+    def insert_new_row(self, data: PositionData) -> None:
+        """插入新行 —— 仅此处登记 vt_symbol 反向映射，保证每个 vt_positionid 只登记一次。"""
+        self.insertRow(0)
+
+        self._positions[data.vt_positionid] = data
+        pids = self._symbol_positionids.setdefault(data.vt_symbol, [])
+        if data.vt_positionid not in pids:
+            pids.append(data.vt_positionid)
+
+        row_cells: dict = {}
+        for column, header in enumerate(self.headers.keys()):
+            setting: dict = self.headers[header]
+            if header == "name":
+                content = self._get_position_name(data)
+            elif header == "market_value":
+                content = self._calc_market_value(data)
+            else:
+                content = self._get_attr(data, header, "")
+            cell = setting["cell"](content, data)
+            self.setItem(0, column, cell)
+            if setting["update"]:
+                row_cells[header] = cell
+
+        if self.data_key:
+            key: str = data.__getattribute__(self.data_key)
+            self.cells[key] = row_cells
+
+    def update_old_row(self, data: PositionData) -> None:
+        """更新已存在行 —— 只刷新持仓缓存与各列，绝不再动 _symbol_positionids。
+
+        否则每次持仓事件（A 股每笔成交都触发）会对同一 vt_positionid 重复 append，
+        列表无限膨胀，每个 tick 都遍历含大量重复项的列表并对同一 cell 反复 set_content
+        （见 spec P1）。
+        """
+        key: str = data.__getattribute__(self.data_key)
+        row_cells = self.cells.get(key)
+        if row_cells is None:
+            return
+
+        self._positions[data.vt_positionid] = data
+        for header, cell in row_cells.items():
+            if header == "name":
+                content = self._get_position_name(data)
+            elif header == "market_value":
+                content = self._calc_market_value(data)
+            else:
+                content = self._get_attr(data, header, "")
+            cell.set_content(content, data)
+
+    def process_tick_event(self, event: Event) -> None:
+        """tick 到达 -> 按 vt_symbol 定位持仓行，刷新市值列。"""
+        tick: TickData = event.data
+        pids = self._symbol_positionids.get(tick.vt_symbol)
+        if not pids:
+            return
+        for pid in pids:
+            pos = self._positions.get(pid)
+            if pos is None:
+                continue
+            row_cells = self.cells.get(pid)
+            if not row_cells:
+                continue
+            cell = row_cells.get("market_value")
+            if cell is None:
+                continue
+            cell.set_content(tick.last_price * pos.volume, pos)
+
+    def _calc_market_value(self, pos: PositionData) -> float:
+        """市值 = 最新价 × 持仓数量；无 tick 时返回 0.0（float，确保格式化与排序一致，见 spec P2）。"""
+        tick = self.main_engine.get_tick(pos.vt_symbol)
+        if tick:
+            return tick.last_price * pos.volume
+        return 0.0
+
+
+# 注入：让 MainWindow（mainwindow.py:90 引用 PositionMonitor 创建 dock）实际用的是带市值列的子类。
+# 须在 MainWindow(...) 构造前完成 patch（start_gui_with_rpc 内构造晚于本模块导入）。
+from vnpy.trader.ui import mainwindow as _mainwindow
+_mainwindow.PositionMonitor = PositionMonitorMV
 
 # 修改AccountMonitor - 添加可用现金字段
 from vnpy.trader.ui.widget import AccountMonitor
-from vnpy.trader.object import AccountData
+from vnpy.trader.object import AccountData, SubscribeRequest
 
 AccountMonitor.headers = {
     "accountid": {"display": "账号", "cell": widget.BaseCell, "update": False},
@@ -340,6 +445,24 @@ def start_gui_with_rpc():
     main_engine.connect(RPC_SETTING, "RPC")
     print("✓ 已连接到Windows QMT服务端")
 
+    # === 持仓自动订阅行情（市值列实时刷新的前提）===
+    # RpcGateway.connect 内 query_all 同步完成，持仓已缓存到 main_engine.positions；
+    # 立即订阅全部持仓 + 10s 定时器补订盘中新成交产生的新持仓，去重集合避免重复订阅。
+    _subscribed: set[str] = set()
+
+    def subscribe_positions() -> None:
+        for pos in main_engine.get_all_positions():
+            if pos.vt_symbol in _subscribed:
+                continue
+            main_engine.subscribe(SubscribeRequest(pos.symbol, pos.exchange), "RPC")
+            _subscribed.add(pos.vt_symbol)
+
+    subscribe_positions()
+
+    sub_timer = QtCore.QTimer()
+    sub_timer.timeout.connect(subscribe_positions)
+    sub_timer.start(10_000)
+
     # 添加A股增强模块
     print("\n正在加载A股增强模块...")
     main_engine.add_app(ChinaStrategyApp)
@@ -416,9 +539,10 @@ def start_gui_with_rpc():
 
     qapp.exec()
 
-    # 主窗口关闭后停止报表定时任务（scheduler 为 daemon 线程，此处优雅退出）
+    # 主窗口关闭后停止定时任务（daemon 线程与持仓订阅定时器，此处优雅退出）
     if reporting_svc:
         reporting_svc.stop()
+    sub_timer.stop()
 
 
 if __name__ == "__main__":
