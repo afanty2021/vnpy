@@ -188,10 +188,10 @@ def _insert_new_row(self, data):
         # 特殊处理 cash 字段 - 从 extra 中获取
         if header == "cash":
             extra = getattr(data, 'extra', None) or {}
-            content = extra.get('cash', 0)
+            content = extra.get('cash', 0.0)
         else:
             # 安全获取属性，使用 getattr 而不是 __getattribute__
-            content = getattr(data, header, 0)
+            content = getattr(data, header, 0.0)
 
         cell = setting["cell"](content, data)
         self.setItem(0, column, cell)
@@ -222,10 +222,10 @@ def _update_old_row(self, data):
         # 特殊处理 cash 字段 - 从 extra 中获取
         if header == "cash":
             extra = getattr(data, 'extra', None) or {}
-            content = extra.get('cash', 0)
+            content = extra.get('cash', 0.0)
         else:
             # 安全获取属性，使用 getattr 而不是 __getattribute__
-            content = getattr(data, header, 0)
+            content = getattr(data, header, 0.0)
         cell.set_content(content, data)
 
 AccountMonitor.update_old_row = _update_old_row
@@ -322,6 +322,10 @@ TradeMonitor.headers = {
 }
 TradeMonitor.insert_new_row = _insert_new_row_with_name
 TradeMonitor.update_old_row = _update_old_row_with_name
+# 成交表按 vt_tradeid 去重：原 data_key="" 为追加式（每条事件都插新行），但本客户端在
+# MainWindow 创建后会从缓存重推历史成交（见 start_gui_with_rpc），追加式会令重推/竞态
+# 实时成交重复插行。vt_tradeid 单笔唯一，设为 data_key 后重收同一成交走 update_old_row。
+TradeMonitor.data_key = "vt_tradeid"
 
 from vnpy.event import EventEngine
 from vnpy.trader.engine import MainEngine
@@ -341,26 +345,30 @@ from vnpy_china_ml import ChinaMlApp
 from vnpy_china_config import ConfigManager, GlobalConfig
 
 
-def load_rpc_config() -> dict:
+def _load_global_config():
+    """加载全局配置（单例只 reset 一次、YAML 只读一次）。
+
+    start_gui_with_rpc 的日志/RPC/报表三处原本各自 reset_instance+force_reload，
+    既重复读盘又反复失效其它模块已持有的单例引用；统一在此加载一次，调用方共享返回对象。
+    """
+    ConfigManager.reset_instance()
+    cm = ConfigManager()
+    cm.set_config_path(Path(__file__).parent.parent.parent / ".vntrader_china/config")
+    return cm, cm.load_config(force_reload=True)
+
+
+def load_rpc_config(config=None) -> dict:
     """加载RPC配置
 
     优先级：
     1. 配置文件（client.yaml）
     2. 环境变量
     3. 默认值
+
+    传入已加载的 config 时直接复用，避免再次 reset 单例 / 重读磁盘。
     """
-    import os
-
-    # 重置单例以清除可能的缓存
-    ConfigManager.reset_instance()
-
-    # 设置配置文件路径（项目根目录/.vntrader_china/config）
-    config_dir = Path(__file__).parent.parent.parent / ".vntrader_china/config"
-    config_manager = ConfigManager()
-    config_manager.set_config_path(config_dir)
-
-    # 加载客户端配置
-    config = config_manager.load_config(force_reload=True)
+    if config is None:
+        _, config = _load_global_config()
 
     # 从配置获取RPC地址
     req_address = config.rpc.rep_address
@@ -423,15 +431,13 @@ def restore_submitted_layout(main_window) -> None:
 
 def start_gui_with_rpc():
     """启动带RPC的GUI界面"""
-    # 初始化日志（须在 EventEngine/MainEngine 之前，统一读取 config.yaml 的 logging 配置）
-    ConfigManager.reset_instance()
-    _cm = ConfigManager()
-    _cm.set_config_path(Path(__file__).parent.parent.parent / ".vntrader_china/config")
+    # 统一加载一次全局配置，供日志/RPC/报表三处复用（避免反复 reset 单例与重读磁盘）
+    _cm, _global_config = _load_global_config()
     from vnpy_china_config.logging_config import setup_logging_from_config
-    setup_logging_from_config(_cm.load_config(force_reload=True))
+    setup_logging_from_config(_global_config)
 
-    # 加载RPC配置
-    RPC_SETTING = load_rpc_config()
+    # 加载RPC配置（复用已加载配置，不再二次 reset）
+    RPC_SETTING = load_rpc_config(_global_config)
 
     qapp = create_qapp()
     event_engine = EventEngine()
@@ -451,11 +457,16 @@ def start_gui_with_rpc():
     _subscribed: set[str] = set()
 
     def subscribe_positions() -> None:
-        for pos in main_engine.get_all_positions():
-            if pos.vt_symbol in _subscribed:
-                continue
-            main_engine.subscribe(SubscribeRequest(pos.symbol, pos.exchange), "RPC")
-            _subscribed.add(pos.vt_symbol)
+        # 闭包须捕获所有异常：RPC 断线/网关弹窗/合约异常时 main_engine.subscribe 可能抛错，
+        # 任由异常逃逸进 Qt 事件循环，QTimer 会每 10s 重复同一失败调用且无日志、无退避。
+        try:
+            for pos in main_engine.get_all_positions():
+                if pos.vt_symbol in _subscribed:
+                    continue
+                main_engine.subscribe(SubscribeRequest(pos.symbol, pos.exchange), "RPC")
+                _subscribed.add(pos.vt_symbol)
+        except Exception as e:
+            print(f"⚠ 持仓订阅失败（10s 后重试）: {e}")
 
     subscribe_positions()
 
@@ -485,10 +496,7 @@ def start_gui_with_rpc():
     reporting_svc = None
     try:
         from vnpy_china_reporting.data_source import ReportingDataService
-        ConfigManager.reset_instance()
-        _cm = ConfigManager()
-        _cm.set_config_path(Path(__file__).parent.parent.parent / ".vntrader_china/config")
-        _global_config = _cm.load_config(force_reload=True)
+        # 复用启动时已加载的 _global_config，不再重复 reset 单例
         reporting_svc = ReportingDataService(main_engine=main_engine, config=_global_config)
         reporting_svc.setup()
         reporting_svc.start_daily_equity("18:30")
