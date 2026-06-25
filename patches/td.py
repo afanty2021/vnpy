@@ -127,8 +127,13 @@ class TD(XtQuantTraderCallback):
         # 通过 extra 字段传递可用现金给客户端（BaseData.extra 默认 None，需先初始化）
         if account.extra is None:
             account.extra = {}
-        account.extra["cash"] = cash if cash is not None else asset.total_asset
-        account.extra["market_value"] = getattr(asset, 'market_value', 0)
+        if cash is not None:
+            account.extra["cash"] = cash
+        else:
+            # 三个候选字段都缺失时回退总资产并告警，避免可用资金列静默显示错误值
+            self.write_log("可用现金字段缺失（cash/available_cash/buying_power 均无），回退为 total_asset")
+            account.extra["cash"] = asset.total_asset
+        account.extra["market_value"] = getattr(asset, 'market_value', 0) or 0
 
         self.gateway.on_account(account)
 
@@ -171,40 +176,42 @@ class TD(XtQuantTraderCallback):
     def on_stock_position(self, position: XtPosition):
         try:
             symbol, exchange = to_vn_contract(position.stock_code)
-        except Exception as e:
-            print(f"on_stock_position 无法解析的代码： {position.stock_code}")
-            return
-        # TODO ETF相关字段处理
-        position_ = PositionData(
-            gateway_name=self.gateway.gateway_name,
-            symbol=symbol,
-            exchange=exchange,
-            direction=Direction.LONG,
-            volume=position.volume,
-            yd_volume=position.yesterday_volume,
-            price=position.open_price,
-            pnl=position.market_value - position.volume * position.open_price
-        )
-        contract = self.gateway.get_contract(position_.vt_symbol)
-        if contract:
-            position_.product = contract.product
-            position_.__post_init__()
+            # market_value 缺失（退市/新股/特殊账户）时降级为 0，避免 None 参与运算抛
+            # TypeError；on_stock_positions_callback 无 per-item try，单坏行会中断整批。
+            market_value = position.market_value or 0
+            position_ = PositionData(
+                gateway_name=self.gateway.gateway_name,
+                symbol=symbol,
+                exchange=exchange,
+                direction=Direction.LONG,
+                volume=position.volume,
+                yd_volume=position.yesterday_volume,
+                price=position.open_price,
+                pnl=market_value - position.volume * position.open_price
+            )
+            contract = self.gateway.get_contract(position_.vt_symbol)
+            if contract:
+                position_.product = contract.product
+                position_.__post_init__()
             self.gateway.on_position(position_)
+        except Exception as e:
+            self.write_log(f"持仓解析失败 {getattr(position, 'stock_code', '?')}: {e}")
 
     def on_stock_trade(self, trade: XtTrade):
-        symbol, exchange = to_vn_contract(trade.stock_code)
+        try:
+            symbol, exchange = to_vn_contract(trade.stock_code)
+        except Exception as e:
+            self.write_log(f"成交代码解析失败: {trade.stock_code} {e}")
+            return
         vn_oid = trade.order_remark
-        if vn_oid is None:
-            return
-        order = self.orders.get(vn_oid)
-        if order is None:
-            return
         trd_typ = TO_VN_Trade_Type[trade.order_type]
         trade_ = TradeData(
             gateway_name=self.gateway.gateway_name,
             symbol=symbol,
             exchange=exchange,
-            orderid=vn_oid,
+            # order_remark 缺失（QMT 终端手动下单/其它策略实例/跨会话委托）时回退 traded_id，
+            # 仅影响"成交→委托"的关联展示；不再因此丢弃成交推送。
+            orderid=vn_oid if vn_oid else trade.traded_id,
             tradeid=trade.traded_id,
             price=trade.traded_price,
             datetime=timestamp_to_datetime(trade.traded_time),
@@ -212,10 +219,10 @@ class TD(XtQuantTraderCallback):
             direction=trd_typ
         )
 
-        # vt_tradeid 去重：避免周期 query_trade 重复推送相同成交
+        # vt_tradeid 去重：仅按 tradeid 判定同一笔成交（修改单/重发致 price/volume 变化时
+        # 不再被误判为新成交而双计），避免周期 query_trade 或 broker 重发重复推送。
         vt_tradeid = trade_.vt_tradeid
-        old_trade = self.traders.get(vt_tradeid)
-        if old_trade == trade_:
+        if vt_tradeid in self.traders:
             return
         self.traders[vt_tradeid] = trade_
 
