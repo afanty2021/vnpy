@@ -104,6 +104,21 @@ def main():
     else:
         print(f"[OK] 批量重复全部去重 (on_trade 仍={len(gw.trades)})")
 
+    # 5) 外部/手动/跨策略委托的成交（order_remark=None，self.orders 无对应记录）：
+    #    回归 #1 —— 此类成交不应被丢弃，orderid 回退到 traded_id 仍正常推送
+    trade_ext = build_trade(code, None, "T003", 10.50, 100, buy_type, 1718000002)
+    td.on_stock_trade(trade_ext)
+    if len(gw.trades) != 3:
+        failures.append(f"[5] 无缓存 order 的成交应正常推送，实际 on_trade={len(gw.trades)}（预期3）")
+    else:
+        print(f"[OK] 无缓存 order 的成交已推送 (on_trade={len(gw.trades)})")
+    # 5b) 重复同一外部成交：应按 traded_id 去重
+    td.on_stock_trade(trade_ext)
+    if len(gw.trades) != 3:
+        failures.append(f"[5b] 重复外部成交应去重，实际 on_trade={len(gw.trades)}（预期3）")
+    else:
+        print(f"[OK] 重复外部成交已去重 (on_trade 仍={len(gw.trades)})")
+
     print("\n" + "=" * 50)
     if failures:
         print("[FAIL] 去重逻辑存在问题：")
