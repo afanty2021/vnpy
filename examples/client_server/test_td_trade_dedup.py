@@ -7,6 +7,7 @@
 用法：python examples/client_server/test_td_trade_dedup.py
 """
 import sys
+import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,8 +16,18 @@ sys.path.insert(0, str(project_root))
 
 from vnpy.trader.constant import Direction, Exchange, Status, OrderType, Offset
 from vnpy.trader.object import OrderData
-from vnpy_qmt.td import TD
 from vnpy_qmt.utils import From_VN_Trade_Type, From_VN_Exchange_map
+
+# 按文件路径直接加载本分支 patches/td.py 的 TD，而非 site-packages 的 vnpy_qmt.td。
+# 原因：patches/ 的修复须用 deploy_vnpy_qmt_fix.py 部署到 site-packages 才在运行时生效
+# （见 spec §6/§7）。沙箱未部署时 `from vnpy_qmt.td import TD` 测的是旧版，用例 [5] 会
+# 假性失败（旧版有 order_remark=None 早退门）。这里精确加载提交的 td.py，确保测的是本分支修复。
+_td_path = project_root / "patches" / "td.py"
+_spec = importlib.util.spec_from_file_location("patches_td", _td_path)
+_td_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_td_mod)
+TD = _td_mod.TD
+print(f"测试目标 TD 加载来源: {_td_mod.__file__}")
 
 
 class FakeGateway:

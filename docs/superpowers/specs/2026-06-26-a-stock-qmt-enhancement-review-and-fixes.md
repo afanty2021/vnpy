@@ -77,7 +77,7 @@
 
 **已完成（macOS）：**
 - ✅ 5 文件 `python -m py_compile` 全通过
-- ✅ 沙箱单测（stub `xtquant` + `vnpy_qmt.utils`，直接导入 `patches/td.py`）6/6 通过：无缓存 order 推送、重复/改单去重、带 remark 推送、`market_value=None` 不崩
+- ✅ 沙箱单测（`test_td_trade_dedup.py` 用 `importlib` 按文件路径直接加载 `patches/td.py`，依赖已安装的 `xtquant` 与上游 `vnpy_qmt.utils`；不依赖 site-packages 部署）6/6 通过：无缓存 order 推送、重复/改单去重、带 remark 推送、`market_value=None` 不崩
 - ✅ `grep` 确认 `md.py` 内已无残留 inline `import time/traceback`
 
 **Windows 待做（用户）：**
