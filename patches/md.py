@@ -22,8 +22,19 @@ from vnpy.trader.utility import ZoneInfo
 from typing import List, Optional
 from datetime import datetime as dt
 import datetime
+import time
+import traceback
 
 ZONE_INFO = ZoneInfo("Asia/Shanghai")
+
+# query_history 的 period 字符串 → Interval 枚举：RPC/dict 入参的 interval 可能是字符串，
+# 直接塞进 BarData.interval 会破坏 Interval|None 类型契约与下游枚举分发，这里统一规范化。
+_PERIOD_TO_INTERVAL = {
+    "1m": Interval.MINUTE, "5m": Interval.MINUTE, "15m": Interval.MINUTE, "30m": Interval.MINUTE,
+    "1h": Interval.HOUR, "60m": Interval.HOUR,
+    "1d": Interval.DAILY, "d": Interval.DAILY,
+    "1w": Interval.WEEKLY,
+}
 
 
 class MD:
@@ -109,62 +120,81 @@ class MD:
 
     def on_tick(self, datas):
         for code, data_list in datas.items():
-            symbol, suffix = code.rsplit('.')
-            exchange = TO_VN_Exchange_map[suffix]
+            try:
+                symbol, suffix = code.rsplit('.')
+                exchange = TO_VN_Exchange_map[suffix]
+            except (ValueError, KeyError) as e:
+                # 单个 code 解析失败不应中断同批其它标的的 tick 推送
+                self.write_log(f"tick code 解析失败 {code}: {e}")
+                continue
             for data in data_list:
-                ask_price = data['askPrice']
-                ask_vol = data['askVol']
-                bid_price = data['bidPrice']
-                bid_vol = data['bidVol']
-                dt = timestamp_to_datetime(data['time'])
-                dt = dt.replace(tzinfo=ZONE_INFO)
-                tick = TickData(
-                    gateway_name=self.gateway.gateway_name,
-                    symbol=symbol,
-                    exchange=exchange,
-                    datetime=dt,
-                    last_price=data['lastPrice'],
-                    volume=data['volume'],
-                    open_price=data['open'],
-                    high_price=data['high'],
-                    low_price=data['low'],
-                    pre_close=data['lastClose'],
-                    limit_down=0,
-                    limit_up=0,
-                    ask_price_1=ask_price[0],
-                    ask_price_2=ask_price[1],
-                    ask_price_3=ask_price[2],
-                    ask_price_4=ask_price[3],
-                    ask_price_5=ask_price[4],
-
-                    ask_volume_1=ask_vol[0],
-                    ask_volume_2=ask_vol[1],
-                    ask_volume_3=ask_vol[2],
-                    ask_volume_4=ask_vol[3],
-                    ask_volume_5=ask_vol[4],
-
-                    bid_price_1=bid_price[0],
-                    bid_price_2=bid_price[1],
-                    bid_price_3=bid_price[2],
-                    bid_price_4=bid_price[3],
-                    bid_price_5=bid_price[4],
-
-                    bid_volume_1=bid_vol[0],
-                    bid_volume_2=bid_vol[1],
-                    bid_volume_3=bid_vol[2],
-                    bid_volume_4=bid_vol[3],
-                    bid_volume_5=bid_vol[4],
-                )
-                contract = self.gateway.get_contract(tick.vt_symbol)
-                if contract:
-                    tick.name = contract.name
-                tick.limit_up = self.limit_ups.get(tick.vt_symbol, None)
-                tick.limit_down = self.limit_downs.get(tick.vt_symbol, None)
-
-                # 填充 A 股增强字段到 extra（TickMonitor 显示成交额/量比/涨幅/分时均价）
-                self._fill_tick_extra(tick, data, symbol, exchange, dt)
-
+                try:
+                    tick = self._build_tick(symbol, exchange, data)
+                except (IndexError, KeyError, TypeError) as e:
+                    # 五档不足/字段缺失等单点异常只跳过本条，不影响同批其余 tick
+                    self.write_log(f"tick 数据异常 {code}: {e}")
+                    continue
                 self.gateway.on_tick(tick)
+
+    def _build_tick(self, symbol, exchange, data) -> TickData:
+        """由单条 xtdata tick dict 构造 TickData（含涨跌停与 A 股增强字段）。
+
+        抽离以便 on_tick 对单条异常做隔离（集合竞价/停牌/残缺快照的五档不足、字段缺失
+        不再中断整批）。五档索引、字段取值在此抛 IndexError/KeyError 由调用方捕获。
+        """
+        ask_price = data['askPrice']
+        ask_vol = data['askVol']
+        bid_price = data['bidPrice']
+        bid_vol = data['bidVol']
+        dt = timestamp_to_datetime(data['time'])
+        dt = dt.replace(tzinfo=ZONE_INFO)
+        tick = TickData(
+            gateway_name=self.gateway.gateway_name,
+            symbol=symbol,
+            exchange=exchange,
+            datetime=dt,
+            last_price=data['lastPrice'],
+            volume=data['volume'],
+            open_price=data['open'],
+            high_price=data['high'],
+            low_price=data['low'],
+            pre_close=data['lastClose'],
+            limit_down=0,
+            limit_up=0,
+            ask_price_1=ask_price[0],
+            ask_price_2=ask_price[1],
+            ask_price_3=ask_price[2],
+            ask_price_4=ask_price[3],
+            ask_price_5=ask_price[4],
+
+            ask_volume_1=ask_vol[0],
+            ask_volume_2=ask_vol[1],
+            ask_volume_3=ask_vol[2],
+            ask_volume_4=ask_vol[3],
+            ask_volume_5=ask_vol[4],
+
+            bid_price_1=bid_price[0],
+            bid_price_2=bid_price[1],
+            bid_price_3=bid_price[2],
+            bid_price_4=bid_price[3],
+            bid_price_5=bid_price[4],
+
+            bid_volume_1=bid_vol[0],
+            bid_volume_2=bid_vol[1],
+            bid_volume_3=bid_vol[2],
+            bid_volume_4=bid_vol[3],
+            bid_volume_5=bid_vol[4],
+        )
+        contract = self.gateway.get_contract(tick.vt_symbol)
+        if contract:
+            tick.name = contract.name
+        # 未在 limit_ups 池中的标的保持默认 0（而非 None），避免下游涨跌停算术 TypeError
+        tick.limit_up = self.limit_ups.get(tick.vt_symbol, 0)
+        tick.limit_down = self.limit_downs.get(tick.vt_symbol, 0)
+
+        # 填充 A 股增强字段到 extra（TickMonitor 显示成交额/量比/涨幅/分时均价）
+        self._fill_tick_extra(tick, data, symbol, exchange, dt)
+        return tick
 
     def _fill_tick_extra(self, tick, data, symbol, exchange, dt) -> None:
         """计算 A 股增强字段，供 TickMonitor 显示成交额/量比/涨幅/分时均价。
@@ -313,6 +343,11 @@ class MD:
             # 获取 period 值：优先使用枚举，其次使用字符串值
             period = period_map.get(interval, period_map.get(interval_value, '1d'))
 
+            # 规范化 interval 为 Interval 枚举：RPC/dict 入参的 interval 可能是字符串（'5m' 等），
+            # 直接赋给 BarData.interval 会破坏 Interval|None 类型契约与下游枚举分发。
+            if not isinstance(interval, Interval):
+                interval = _PERIOD_TO_INTERVAL.get(period, Interval.DAILY)
+
             # 转换日期格式为 YYYYMMDD
             if hasattr(start, 'strftime'):
                 start_time = start.strftime('%Y%m%d')
@@ -345,11 +380,9 @@ class MD:
                     )
                     self.write_log(f'QMT download_history_data2 返回: {result}')
                     # 等待下载完成（异步操作需要等待）
-                    import time
                     time.sleep(2)  # 增加等待时间
                 except Exception as e:
                     self.write_log(f'QMT 数据下载失败: {e}')
-                    import traceback
                     self.write_log(f'详细错误: {traceback.format_exc()}')
             elif hasattr(xtquant.xtdata, 'download_history_data'):
                 self.write_log(f'QMT 正在下载数据(单股): {qmt_code}...')
@@ -361,11 +394,9 @@ class MD:
                         end_time=end_time
                     )
                     self.write_log(f'QMT download_history_data 返回: {result}')
-                    import time
                     time.sleep(2)
                 except Exception as e:
                     self.write_log(f'QMT 数据下载失败: {e}')
-                    import traceback
                     self.write_log(f'详细错误: {traceback.format_exc()}')
 
             # 从本地存储读取数据

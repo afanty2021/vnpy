@@ -7,6 +7,7 @@
 用法：python examples/client_server/test_td_trade_dedup.py
 """
 import sys
+import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,8 +16,18 @@ sys.path.insert(0, str(project_root))
 
 from vnpy.trader.constant import Direction, Exchange, Status, OrderType, Offset
 from vnpy.trader.object import OrderData
-from vnpy_qmt.td import TD
 from vnpy_qmt.utils import From_VN_Trade_Type, From_VN_Exchange_map
+
+# 按文件路径直接加载本分支 patches/td.py 的 TD，而非 site-packages 的 vnpy_qmt.td。
+# 原因：patches/ 的修复须用 deploy_vnpy_qmt_fix.py 部署到 site-packages 才在运行时生效
+# （见 spec §6/§7）。沙箱未部署时 `from vnpy_qmt.td import TD` 测的是旧版，用例 [5] 会
+# 假性失败（旧版有 order_remark=None 早退门）。这里精确加载提交的 td.py，确保测的是本分支修复。
+_td_path = project_root / "patches" / "td.py"
+_spec = importlib.util.spec_from_file_location("patches_td", _td_path)
+_td_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_td_mod)
+TD = _td_mod.TD
+print(f"测试目标 TD 加载来源: {_td_mod.__file__}")
 
 
 class FakeGateway:
@@ -103,6 +114,21 @@ def main():
         failures.append(f"[4] 批量重复应全去重，实际 on_trade={len(gw.trades)}（预期2）")
     else:
         print(f"[OK] 批量重复全部去重 (on_trade 仍={len(gw.trades)})")
+
+    # 5) 外部/手动/跨策略委托的成交（order_remark=None，self.orders 无对应记录）：
+    #    回归 #1 —— 此类成交不应被丢弃，orderid 回退到 traded_id 仍正常推送
+    trade_ext = build_trade(code, None, "T003", 10.50, 100, buy_type, 1718000002)
+    td.on_stock_trade(trade_ext)
+    if len(gw.trades) != 3:
+        failures.append(f"[5] 无缓存 order 的成交应正常推送，实际 on_trade={len(gw.trades)}（预期3）")
+    else:
+        print(f"[OK] 无缓存 order 的成交已推送 (on_trade={len(gw.trades)})")
+    # 5b) 重复同一外部成交：应按 traded_id 去重
+    td.on_stock_trade(trade_ext)
+    if len(gw.trades) != 3:
+        failures.append(f"[5b] 重复外部成交应去重，实际 on_trade={len(gw.trades)}（预期3）")
+    else:
+        print(f"[OK] 重复外部成交已去重 (on_trade 仍={len(gw.trades)})")
 
     print("\n" + "=" * 50)
     if failures:
