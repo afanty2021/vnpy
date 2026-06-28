@@ -59,3 +59,6 @@ worktrees
 *.yaml
 !*.yaml.example
 !config_templates/
+
+# Patches - 部署备份产物（每次部署自动生成，无需版本化）
+patches/backups/
