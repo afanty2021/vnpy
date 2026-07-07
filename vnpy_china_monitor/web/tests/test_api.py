@@ -21,23 +21,28 @@ def mock_rpc_client():
 
 @pytest.fixture
 def test_app(mock_rpc_client):
-    """测试应用实例"""
+    """测试应用实例（启动 lifespan 初始化 app.state，并注入测试用户）"""
     from vnpy_china_monitor.web.server import app
-    from fastapi.testclient import TestClient
 
-    client = TestClient(app)
-    return client
+    # 用 with 触发 lifespan，使 server.lifespan 初始化 app.state.auth_manager 等服务
+    with TestClient(app) as client:
+        # SimpleUserStore 已移除硬编码 admin/admin123，测试需显式注入测试用户
+        auth_manager = getattr(app.state, "auth_manager", None)
+        if auth_manager is not None and hasattr(auth_manager, "user_store"):
+            auth_manager.user_store.add_user("admin", "admin123")
+        yield client
 
 
 @pytest.fixture
 def auth_token(test_app):
-    """获取认证令牌"""
+    """获取认证令牌（成功返回 access_token，失败返回 None）"""
     response = test_app.post(
         "/api/auth/login",
-        data={"username": "admin", "password": "admin123"}
+        json={"username": "admin", "password": "admin123"},
     )
     if response.status_code == 200:
-        data = response.json()
+        # login 返回 ApiResponse，access_token 在 data 字段内
+        data = response.json().get("data") or {}
         return data.get("access_token")
     return None
 
@@ -49,18 +54,19 @@ class TestAuthAPI:
         """测试成功登录"""
         response = test_app.post(
             "/api/auth/login",
-            data={"username": "admin", "password": "admin123"}
+            json={"username": "admin", "password": "admin123"},
         )
         assert response.status_code == 200
-        data = response.json()
-        assert "access_token" in data
-        assert "refresh_token" in data
+        body = response.json()
+        assert body["success"] is True
+        # login 返回 ApiResponse，access_token 在 data；不再签发 refresh_token
+        assert "access_token" in body["data"]
 
     def test_login_invalid_credentials(self, test_app):
         """测试无效凭据登录"""
         response = test_app.post(
             "/api/auth/login",
-            data={"username": "wrong", "password": "wrong"}
+            json={"username": "wrong", "password": "wrong"},
         )
         assert response.status_code == 401
 
@@ -71,11 +77,12 @@ class TestAuthAPI:
 
         response = test_app.get(
             "/api/auth/me",
-            headers={"Authorization": f"Bearer {auth_token}"}
+            headers={"Authorization": f"Bearer {auth_token}"},
         )
         assert response.status_code == 200
-        data = response.json()
-        assert "username" in data
+        # /api/auth/me 返回 ApiResponse，username 在 data 内
+        data = response.json().get("data") or {}
+        assert data.get("username") == "admin"
 
     def test_logout(self, test_app, auth_token):
         """测试登出"""
