@@ -183,6 +183,7 @@ class AlertDeduplicator:
         with self._lock:
             self._alert_fingerprints.clear()
             self._cooldown_fingerprints.clear()
+            self._cooldown_end_times.clear()
             logger.info("去重记录已清空")
 
     def _schedule_cooldown_end(self, fingerprint: str, end_time: datetime) -> None:

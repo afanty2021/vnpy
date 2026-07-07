@@ -177,7 +177,7 @@ class AlertService:
             return getattr(alert, key, default)
 
         return {
-            "alert_id": _val("alert_id"),
+            "alert_id": _val("alert_id") or _val("id"),
             "title": _val("title"),
             "message": _val("message"),
             "severity": _val("severity"),

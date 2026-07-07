@@ -118,7 +118,8 @@ async def lifespan(app: FastAPI):
     _market_service = MarketService(_rpc_client)
     _trade_service = TradeService(_rpc_client)
     _strategy_service = StrategyService(_rpc_client)
-    _alert_service = AlertService()
+    # AlertService 依赖 AlertEngine(main_engine, event_engine)，web 进程仅有 RpcClient 无法就地实例化；
+    # 不注入 app.state.alert_service，使 /api/alerts 显式返回 503 而非伪装成空响应
 
     # 注册RPC事件订阅
     _register_rpc_events()
@@ -130,7 +131,6 @@ async def lifespan(app: FastAPI):
     app.state.market_service = _market_service
     app.state.trade_service = _trade_service
     app.state.strategy_service = _strategy_service
-    app.state.alert_service = _alert_service
 
     logger.info("VeighNa Web Monitor started successfully")
 
@@ -138,6 +138,9 @@ async def lifespan(app: FastAPI):
 
     # 关闭时清理
     logger.info("Shutting down VeighNa Web Monitor...")
+    # 清除主循环引用：迟到的 RPC 回调会据 _main_loop is not None 提交协程，
+    # 若仍指向已关闭的 loop 会抛 RuntimeError；置 None 让回调跳过提交
+    _main_loop = None
 
     # 停止心跳
     if _connection_manager:
@@ -300,10 +303,11 @@ def create_web_app(config: Optional[WebMonitorConfig] = None) -> FastAPI:
     app.include_router(strategy_router)
     app.include_router(alert_router)
 
-    # 注册 ML API（如果可用）
-    if ML_API_AVAILABLE and ml_router:
-        app.include_router(ml_router)
-        logger.info("ML API 路由已注册")
+    # ML API 暂不注册：ml_monitor_service/online_learning_service 从未注入 app.state，
+    # 注册路由只会让所有 /api/ml/* 端点返回 503 误导调用方。待服务真正 wiring 后再启用。
+    # if ML_API_AVAILABLE and ml_router:
+    #     app.include_router(ml_router)
+    #     logger.info("ML API 路由已注册")
 
     # WebSocket端点
     @app.websocket("/ws/{client_id}")

@@ -258,10 +258,15 @@ class TestStrategyAPI:
 
 
 class TestAlertAPI:
-    """告警API测试"""
+    """告警API测试
 
-    def test_get_alerts(self, test_app, auth_token):
-        """测试获取告警列表"""
+    web 进程未注入 AlertEngine（仅有 RpcClient，无 main_engine/event_engine），
+    AlertService 不再被空实例化注入 app.state，故所有 /api/alerts 端点显式返回 503。
+    待 AlertEngine 真正 wiring 后，再改回 200 断言。
+    """
+
+    def test_get_alerts_returns_503_when_not_initialized(self, test_app, auth_token):
+        """未注入告警服务时 /api/alerts 返回 503（而非伪装的空 200）"""
         if not auth_token:
             pytest.skip("需要有效的认证令牌")
 
@@ -269,12 +274,10 @@ class TestAlertAPI:
             "/api/alerts",
             headers={"Authorization": f"Bearer {auth_token}"}
         )
-        assert response.status_code == 200
-        data = response.json()
-        assert "alerts" in data
+        assert response.status_code == 503
 
-    def test_get_alert_stats(self, test_app, auth_token):
-        """测试获取告警统计"""
+    def test_get_alert_stats_returns_503_when_not_initialized(self, test_app, auth_token):
+        """未注入告警服务时 /api/alerts/stats 返回 503"""
         if not auth_token:
             pytest.skip("需要有效的认证令牌")
 
@@ -282,12 +285,10 @@ class TestAlertAPI:
             "/api/alerts/stats",
             headers={"Authorization": f"Bearer {auth_token}"}
         )
-        assert response.status_code == 200
-        data = response.json()
-        assert "stats" in data
+        assert response.status_code == 503
 
-    def test_acknowledge_alert(self, test_app, auth_token):
-        """测试确认告警"""
+    def test_acknowledge_alert_returns_503_when_not_initialized(self, test_app, auth_token):
+        """未注入告警服务时 acknowledge 返回 503"""
         if not auth_token:
             pytest.skip("需要有效的认证令牌")
 
@@ -296,7 +297,7 @@ class TestAlertAPI:
             json={"comment": "已处理"},
             headers={"Authorization": f"Bearer {auth_token}"}
         )
-        assert response.status_code == 200
+        assert response.status_code == 503
 
 
 @pytest.mark.asyncio

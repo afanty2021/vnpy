@@ -278,7 +278,11 @@ class AlertEngine:
 
             # 提交到后台线程池：channel.send 可能是同步 SMTP/HTTP（部分通道无超时），
             # 在调用线程（可能是 EventEngine 回调）内同步发送会阻塞整个事件分发。
-            self._channel_executor.submit(self._send_to_one_channel, channel, message)
+            # stop() 关闭线程池后再提交会抛 RuntimeError，吞掉避免上抛打断 send_alert 后续状态写入
+            try:
+                self._channel_executor.submit(self._send_to_one_channel, channel, message)
+            except RuntimeError:
+                logger.warning("告警通道线程池已关闭，跳过本次发送")
 
     def _send_to_one_channel(self, channel: AlertChannel, message: AlertMessage) -> None:
         """在后台线程发送单个通道告警（隔离慢通道，避免阻塞事件引擎）"""

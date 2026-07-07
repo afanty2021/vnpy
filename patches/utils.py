@@ -95,4 +95,8 @@ def timestamp_to_datetime(tint):
     if st != 10:
         p = st - 10
         tint = tint / 10**p
-    return datetime.datetime.fromtimestamp(tint, tz=_SHANGHAI_TZ)
+    # 用 Asia/Shanghai 解释时间戳得到正确的 UTC+8 时刻，再去掉 tz 标签返回 naive：
+    # 既修正了非 UTC+8 宿主用本地时区解释的偏移，又保持 naive 输出向后兼容
+    # （md.py 的 tick 会再 .replace(tzinfo=ZONE_INFO) 标记为 aware；td.py 的 order/trade 保持 naive，
+    # 避免与 vnpy 核心假定 naive datetime 的代码混用时抛 TypeError）
+    return datetime.datetime.fromtimestamp(tint, tz=_SHANGHAI_TZ).replace(tzinfo=None)

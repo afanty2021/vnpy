@@ -5,6 +5,7 @@
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import replace
 from typing import List, Dict, Any, Callable, Optional
 from datetime import datetime
 import numpy as np
@@ -111,7 +112,7 @@ class BaseOptimizer(ABC):
                 )
             )
 
-        # 排序结果
+        # 排序结果（按内部比较分数：evaluate 对 minimize 取负以统一用 max，reverse=True 选最优）
         sorted_results = sorted(
             self.results,
             key=lambda x: x.score,
@@ -120,18 +121,33 @@ class BaseOptimizer(ABC):
 
         best = sorted_results[0]
 
-        # 最小化模式下 evaluate 已对目标值取负以便统一用 max 比较，
-        # 汇总展示时需还原符号为真实目标值
+        # 最小化模式下 evaluate 返回 -objective，记录的 metrics.return_value/sharpe_ratio 均为负。
+        # 汇总展示需统一还原为真实目标值：best/worst/avg 直接乘 sign，all_results 与 best_metrics
+        # 用 dataclasses.replace 重建，避免标量已还原但列表/指标仍带负号的不一致
         sign = -1.0 if not self.maximize else 1.0
+
+        def _to_display(r: OptimizationResult) -> OptimizationResult:
+            if sign == 1.0:
+                return r
+            restored = replace(
+                r.metrics,
+                return_value=r.metrics.return_value * sign,
+                sharpe_ratio=r.metrics.sharpe_ratio * sign,
+            )
+            return replace(r, metrics=restored)
+
+        display_results = [_to_display(r) for r in self.results]
+        best_d = _to_display(best)
+        worst_d = _to_display(sorted_results[-1])
 
         return OptimizationSummary(
             total_evaluations=self.evaluation_count,
-            best_score=best.score * sign,
-            worst_score=sorted_results[-1].score * sign,
-            avg_score=sum(r.score for r in self.results) / len(self.results) * sign,
+            best_score=best_d.score,
+            worst_score=worst_d.score,
+            avg_score=sum(r.score for r in display_results) / len(display_results),
             best_params=best.params,
-            best_metrics=best.metrics,
-            all_results=self.results
+            best_metrics=best_d.metrics,
+            all_results=display_results,
         )
 
     def _params_to_array(self, params: Dict[str, Any]) -> np.ndarray:

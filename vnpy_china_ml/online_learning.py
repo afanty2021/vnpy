@@ -85,9 +85,11 @@ class OnlineLearner:
         # 训练样本缓冲区
         self._sample_buffer: deque = deque(maxlen=self.config.max_samples)
 
-        # 更新计数器
+        # 更新计数器（update_model 成功次数，供 get_buffer_info 展示）
         self._update_count = 0
-        # 上次更新时的样本数（should_update 据此判断累积量，避免 predicate 副作用）
+        # 累计已投喂样本数（单调递增）：should_update 据此判定自上次更新以来的新样本量
+        self._total_samples_seen = 0
+        # 上次更新完成时的 _total_samples_seen 快照
         self._samples_at_last_update = 0
 
         # 性能跟踪
@@ -123,6 +125,7 @@ class OnlineLearner:
         )
 
         self._sample_buffer.append(sample)
+        self._total_samples_seen += 1
 
     def add_samples(self, samples: List[TrainingSample]) -> None:
         """批量添加训练样本
@@ -132,6 +135,7 @@ class OnlineLearner:
         """
         for sample in samples:
             self._sample_buffer.append(sample)
+            self._total_samples_seen += 1
 
     def should_update(self) -> bool:
         """判断是否应该更新模型（纯查询，无副作用）
@@ -143,8 +147,9 @@ class OnlineLearner:
             return False
 
         # 自上次更新以来累积 update_interval 个新样本即触发
-        # （不再每次调用自增计数器，避免 predicate 副作用在轮询场景误触发）
-        if len(self._sample_buffer) - self._samples_at_last_update >= self.config.update_interval:
+        # 用单调计数器 _total_samples_seen 而非 len(buffer)：_sample_buffer 是 deque(maxlen)，
+        # 饱和后 len 不再增长，用 len 差值会让 interval 触发永久失效（保持纯查询无副作用）
+        if self._total_samples_seen - self._samples_at_last_update >= self.config.update_interval:
             return True
 
         # 检查性能衰减
@@ -189,7 +194,8 @@ class OnlineLearner:
                 result = self._full_retrain(X, y, weights)
 
             self._last_update_time = datetime.now()
-            self._samples_at_last_update = len(self._sample_buffer)
+            self._samples_at_last_update = self._total_samples_seen
+            self._update_count += 1
             return result
 
         except Exception as e:
@@ -356,6 +362,8 @@ class OnlineLearner:
     def clear_buffer(self) -> None:
         """清空样本缓冲区"""
         self._sample_buffer.clear()
+        self._total_samples_seen = 0
+        self._samples_at_last_update = 0
         self._update_count = 0
 
 

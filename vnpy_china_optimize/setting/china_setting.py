@@ -8,13 +8,19 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass
 from vnpy.trader.optimize import OptimizationSetting
 
+# A 股默认费率单一真值源：dataclass 字段与下游函数默认参数统一引用以下常量，
+# 避免费率调整时多处字面量漏改（如 2023-08-28 印花税 0.001→0.0005）
+_DEFAULT_COMMISSION_RATE: float = 0.0003   # 万3佣金
+_DEFAULT_MIN_COMMISSION: float = 5.0        # 最低5元
+_DEFAULT_STAMP_DUTY: float = 0.0005         # 印花税0.05%（仅卖出，自 2023-08-28 起）
+
 
 @dataclass
 class ChinaTradingCost:
     """A股交易成本配置"""
-    commission_rate: float = 0.0003      # 万3佣金
-    min_commission: float = 5.0           # 最低5元
-    stamp_duty: float = 0.0005            # 印花税0.05%（仅卖出，自 2023-08-28 起）
+    commission_rate: float = _DEFAULT_COMMISSION_RATE
+    min_commission: float = _DEFAULT_MIN_COMMISSION
+    stamp_duty: float = _DEFAULT_STAMP_DUTY
     transfer_fee: float = 0.00001         # 过户费0.001%
     handling_fee: float = 0.00000685      # 经手费0.000685%
     slippage: float = 0.0                 # 滑点（可配置）
@@ -118,9 +124,9 @@ class ChinaOptimizerSetting(OptimizationSetting):
 
     def set_trading_cost(
         self,
-        commission_rate: float = 0.0003,
-        min_commission: float = 5.0,
-        stamp_duty: float = 0.0005,
+        commission_rate: float = _DEFAULT_COMMISSION_RATE,
+        min_commission: float = _DEFAULT_MIN_COMMISSION,
+        stamp_duty: float = _DEFAULT_STAMP_DUTY,
         slippage: float = 0.0
     ) -> None:
         """设置交易成本"""
@@ -158,8 +164,8 @@ def calculate_china_trading_cost(
     price: float,
     volume: int,
     is_buy: bool = True,
-    commission_rate: float = 0.0003,
-    stamp_duty: float = 0.0005
+    commission_rate: float = _DEFAULT_COMMISSION_RATE,
+    stamp_duty: float = _DEFAULT_STAMP_DUTY
 ) -> float:
     """
     便捷函数：计算A股交易成本

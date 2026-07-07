@@ -19,6 +19,7 @@ from vnpy.trader.event import EVENT_TRADE, EVENT_ORDER, EVENT_POSITION, EVENT_AC
 
 from vnpy_china_monitor.monitor.engine import MonitorEngine, MonitorType
 from vnpy_china_monitor.event import EVENT_MONITOR_DATA
+from vnpy_china_optimize.setting.china_setting import ChinaTradingCost
 
 
 class TradeMonitor:
@@ -56,6 +57,9 @@ class TradeMonitor:
         self._last_positions: Dict[str, PositionData] = {}
         self._last_account: Optional[AccountData] = None
         self._last_update_time: Optional[datetime] = None
+
+        # A 股费率配置（与 vnpy_china_optimize 共用 ChinaTradingCost 单一真值源，避免政策调整漏改）
+        self._trading_cost = ChinaTradingCost()
 
         # 运行状态
         self._running = False
@@ -292,14 +296,18 @@ class TradeMonitor:
                 else:
                     total_sell += trade.volume
                     sell_amount += trade.volume * trade.price
-                    # 卖出对应持仓成本：用当前持仓均价，无持仓记录则回退当前价（盈亏为0）
+                    # 卖出对应持仓成本：用当前持仓均价近似（监控层近似，非真实 FIFO 成本）
                     pos = self._last_positions.get(trade.vt_symbol)
-                    cost_price = pos.price if pos else trade.price
+                    if pos and pos.price > 0:
+                        cost_price = pos.price
+                    else:
+                        # 无持仓快照或均价异常（已平仓/快照未到达）：回退当前价，该笔 closed_pnl 记 0
+                        cost_price = trade.price
                     sell_cost += trade.volume * cost_price
 
-            # 手续费（万3 双边）+ 印花税（卖出单边万5，自 2023-08-28 起）
-            commission = (buy_amount + sell_amount) * 0.0003
-            stamp_duty = sell_amount * 0.0005
+            # 手续费/印花税统一取自 ChinaTradingCost（单一真值源，避免与 optimize/backtest 漂移）
+            commission = (buy_amount + sell_amount) * self._trading_cost.commission_rate
+            stamp_duty = sell_amount * self._trading_cost.stamp_duty
 
             # 持仓盈亏
             position_pnl = 0.0
@@ -404,7 +412,9 @@ class TradeMonitor:
         _today_trades / _today_order_count / _today_trade_count 在长期运行的
         监控器中若不重置，跨交易日后昨日计数会持续累积为"今日"数据。
         """
-        today = (dt or datetime.now()).date()
+        # 以系统当前日期判定跨日，而非事件 datetime：RPC 延迟/EventEngine 重放
+        # 会让旧 datetime 的事件在今日到达，用事件时间会误判跨日并清空今日计数器
+        today = datetime.now().date()
         if today != self._current_day:
             self._today_trades.clear()
             self._today_order_count.clear()

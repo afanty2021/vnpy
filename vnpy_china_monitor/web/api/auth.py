@@ -26,6 +26,17 @@ auth_router = APIRouter(
 security = HTTPBearer()
 
 
+def _require_auth_manager(request: Request) -> AuthManager:
+    """从 app.state 取 auth_manager，未初始化时抛 503（统一三处端点获取逻辑，消除重复）"""
+    auth_manager = getattr(request.app.state, "auth_manager", None)
+    if auth_manager is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="认证服务未初始化",
+        )
+    return auth_manager
+
+
 # 依赖注入：获取当前用户
 async def get_current_user(
     request: Request,
@@ -43,12 +54,7 @@ async def get_current_user(
     Raises:
         HTTPException: 认证失败
     """
-    auth_manager = getattr(request.app.state, "auth_manager", None)
-    if auth_manager is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="认证服务未初始化",
-        )
+    auth_manager = _require_auth_manager(request)
     payload = auth_manager.verify_token(credentials.credentials)
     if payload is None:
         raise HTTPException(
@@ -72,12 +78,7 @@ async def login(
     Returns:
         API响应
     """
-    auth_manager = getattr(request.app.state, "auth_manager", None)
-    if auth_manager is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="认证服务未初始化",
-        )
+    auth_manager = _require_auth_manager(request)
     token = auth_manager.authenticate(login_req.username, login_req.password)
     if token is None:
         raise HTTPException(
@@ -127,12 +128,7 @@ async def refresh_token(
     Returns:
         API响应
     """
-    auth_manager = getattr(request.app.state, "auth_manager", None)
-    if auth_manager is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="认证服务未初始化",
-        )
+    auth_manager = _require_auth_manager(request)
     token = auth_manager.jwt_manager.create_access_token(
         {"sub": current_user.get("sub")}
     )

@@ -405,9 +405,10 @@ class ChinaMetrics:
             包含所有评估指标的字典
         """
         metrics = {
-            "total_return": float(np.prod(1 + np.asarray(returns)) - 1),
-            "annual_return": float(np.mean(returns) * 252),
-            "volatility": float(np.std(returns) * np.sqrt(252)),
+            # 收益序列可能含 NaN（停牌/缺失）：用 nan 版统计量避免单个 NaN 让整份报告传播为 NaN
+            "total_return": float(np.nanprod(1.0 + np.asarray(returns, dtype=float)) - 1.0),
+            "annual_return": float(np.nanmean(returns) * 252),
+            "volatility": float(np.nanstd(returns) * np.sqrt(252)),
             "sharpe_ratio": self.calculate_sharpe_ratio(returns),
             "max_drawdown": self.calculate_max_drawdown(returns),
             "calmar_ratio": self.calculate_calmar_ratio(returns),

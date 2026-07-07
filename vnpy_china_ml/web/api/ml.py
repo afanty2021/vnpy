@@ -48,22 +48,20 @@ class TrainingSampleRequest(BaseModel):
 
 # ==================== API 端点 ====================
 
-# 全局服务实例（实际应用中应该从应用状态中获取）
-_ml_monitor_service = None
-_online_learning_service = None
+# 全局服务实例已移除：统一从 app.state 获取，未注入时端点显式返回 503
 
 
 def get_ml_monitor_service(request: Request):
-    """获取ML监控服务实例（优先 app.state，回退全局变量）"""
-    service = getattr(request.app.state, "ml_monitor_service", None) or _ml_monitor_service
+    """获取ML监控服务实例（从 app.state 读取；未注入时 503）"""
+    service = getattr(request.app.state, "ml_monitor_service", None)
     if service is None:
         raise HTTPException(status_code=503, detail="ML监控服务未初始化")
     return service
 
 
 def get_online_learning_service(request: Request):
-    """获取在线学习服务实例（优先 app.state，回退全局变量）"""
-    service = getattr(request.app.state, "online_learning_service", None) or _online_learning_service
+    """获取在线学习服务实例（从 app.state 读取；未注入时 503）"""
+    service = getattr(request.app.state, "online_learning_service", None)
     if service is None:
         raise HTTPException(status_code=503, detail="在线学习服务未初始化")
     return service
@@ -402,17 +400,4 @@ async def record_prediction_result(
 
 # ==================== 辅助函数 ====================
 
-def init_ml_api(monitor_service, online_learning_service):
-    """初始化ML API服务
-
-    Args:
-        monitor_service: ML监控服务实例
-        online_learning_service: 在线学习服务实例
-    """
-    global _ml_monitor_service, _online_learning_service
-    _ml_monitor_service = monitor_service
-    _online_learning_service = online_learning_service
-    logger.info("ML API 服务已初始化")
-
-
-__all__ = ["ml_router", "init_ml_api"]
+__all__ = ["ml_router"]
