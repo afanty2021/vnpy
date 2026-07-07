@@ -15,9 +15,9 @@
 ## 🖥️ 本地环境配置
 
 ### Conda 环境
-- **环境名称**: Quant-3.11
+- **环境名称**: quant-3.11（conda 实际注册为小写；`conda run -n Quant-3.11` 大写 Q 偶发 plugin 异常）
 - **Python 版本**: 3.11.15
-- **Windows路径**: `D:\scoop\apps\miniconda\25.11.1-1\envs\Quant-3.11` ⚠️ **位于 25.11.1-1 版本目录下，非 current 指针（current→26.1.1-1 不含此环境）**
+- **Windows路径**: `D:\Scoop\apps\miniconda3\current\envs\quant-3.11`（位于 current 指针目录下，current→26.3.2-2）
 - **macOS路径**: `/opt/homebrew/caskroom/miniconda/base`
 
 ### 已安装的包
@@ -34,11 +34,11 @@
 
 ### 启动命令
 ```bash
-# 启动 QMT 交易客户端（直接用 Quant-3.11 的 python，该环境仅在 25.11.1-1 下注册，conda run 找不到）
-"D:/scoop/apps/miniconda/25.11.1-1/envs/Quant-3.11/python.exe" examples/veighna_trader/run_qmt.py
+# 启动 QMT 交易客户端（环境在 current 下，conda run -n quant-3.11 可用；大写 Q 偶发 plugin 异常时改用下方绝对路径）
+"D:/Scoop/apps/miniconda3/current/envs/quant-3.11/python.exe" examples/veighna_trader/run_qmt.py
 
 # 启动演示应用
-"D:/scoop/apps/miniconda/25.11.1-1/envs/Quant-3.11/python.exe" demo_app.py
+"D:/Scoop/apps/miniconda3/current/envs/quant-3.11/python.exe" demo_app.py
 ```
 
 ## 💡 项目愿景
