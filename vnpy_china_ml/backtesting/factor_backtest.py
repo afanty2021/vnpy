@@ -433,8 +433,8 @@ class FactorBacktester:
 
         # 添加分层收益差异
         if len(layer_results) >= 2:
-            # 多空收益 = 最上层收益 - 最下层收益
-            long_short = layer_results[0].total_return - layer_results[-1].total_return
+            # 多空收益 = 做多（最高分位 layer_results[-1]）- 做空（最低分位 layer_results[0]）
+            long_short = layer_results[-1].total_return - layer_results[0].total_return
             summary["long_short_return"] = long_short
 
         return summary

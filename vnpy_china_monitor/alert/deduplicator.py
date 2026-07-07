@@ -43,6 +43,8 @@ class AlertDeduplicator:
 
         # 冷却中的指纹集合
         self._cooldown_fingerprints: Set[str] = set()
+        # 冷却结束时间 {fingerprint: end_time}，供 cleanup_expired 判定解除冷却
+        self._cooldown_end_times: Dict[str, datetime] = {}
 
         # 锁
         self._lock = threading.Lock()
@@ -190,9 +192,9 @@ class AlertDeduplicator:
             fingerprint: 指纹
             end_time: 冷却结束时间
         """
-        # 注意：在实际实现中可以使用调度器，这里简化为定时清理
-        # 实际使用时可以在外部定期调用 _cleanup_cooldowns
-        pass
+        # 记录冷却结束时间，cleanup_expired 据此解除冷却
+        # （外部需定期调用 cleanup_expired，否则指纹会永久滞留冷却集合）
+        self._cooldown_end_times[fingerprint] = end_time
 
     def cleanup_expired(self) -> int:
         """清理过期的指纹记录
@@ -218,10 +220,13 @@ class AlertDeduplicator:
                 else:
                     self._alert_fingerprints[fingerprint] = valid
 
-            # 清理冷却结束的指纹
+            # 清理冷却结束的指纹（根据 _cooldown_end_times 判定）
             for fingerprint in list(self._cooldown_fingerprints):
-                # 这里简化处理，实际需要根据冷却结束时间判断
-                pass
+                end_time = self._cooldown_end_times.get(fingerprint)
+                if end_time is None or now >= end_time:
+                    self._cooldown_fingerprints.discard(fingerprint)
+                    self._cooldown_end_times.pop(fingerprint, None)
+                    cleaned += 1
 
             return cleaned
 

@@ -51,8 +51,12 @@ class AlertPriorityQueue:
 
         # 检查队列大小限制
         if self._maxsize > 0 and len(self._heap) >= self._maxsize:
-            # 移除优先级最低的
-            self.pop()
+            # 移除优先级最低的：heap 为最小堆，priority 字段 = -alert.priority.value，
+            # alert 优先级最低对应最大的 priority 字段值（即堆中最大的项）
+            lowest = max(self._heap, key=lambda x: x.priority)
+            self._heap.remove(lowest)
+            heapq.heapify(self._heap)
+            self._alert_ids.discard(lowest.alert.id)
 
         # 添加到堆
         item = QueueItem(

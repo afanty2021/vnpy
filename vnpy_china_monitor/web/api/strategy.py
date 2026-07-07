@@ -7,7 +7,7 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from vnpy_china_monitor.web.models.request import StrategyControlRequest, ParamUpdateRequest
 from vnpy_china_monitor.web.models.response import ApiResponse, StrategyData
@@ -23,12 +23,12 @@ strategy_router = APIRouter(
 
 
 # 依赖注入：获取策略服务
-async def get_strategy_service() -> StrategyService:
-    """获取策略服务实例
-
-    实际应用中应该从应用状态中获取
-    """
-    raise HTTPException(status_code=501, detail="服务未初始化")
+async def get_strategy_service(request: Request) -> StrategyService:
+    """获取策略服务实例（从 app.state 读取）"""
+    service = getattr(request.app.state, "strategy_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="策略服务未初始化")
+    return service
 
 
 @strategy_router.get("", response_model=ApiResponse)

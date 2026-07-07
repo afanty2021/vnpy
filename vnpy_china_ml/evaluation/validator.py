@@ -440,9 +440,9 @@ class ModelValidator:
         mean_score = np.mean(scores_array)
         std_score = np.std(scores_array, ddof=1)
 
-        # 变异系数
+        # 变异系数（取绝对值：mean 为负时 cv 不应被误判为负数而 < threshold）
         if mean_score != 0:
-            cv = std_score / mean_score
+            cv = std_score / abs(mean_score)
         else:
             cv = float('inf')
 

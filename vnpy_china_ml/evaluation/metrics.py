@@ -405,7 +405,7 @@ class ChinaMetrics:
             包含所有评估指标的字典
         """
         metrics = {
-            "total_return": float(np.sum(returns)),
+            "total_return": float(np.prod(1 + np.asarray(returns)) - 1),
             "annual_return": float(np.mean(returns) * 252),
             "volatility": float(np.std(returns) * np.sqrt(252)),
             "sharpe_ratio": self.calculate_sharpe_ratio(returns),

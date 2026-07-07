@@ -13,6 +13,7 @@ from loguru import logger
 
 from vnpy.event import EventEngine, Event
 from vnpy.trader.engine import MainEngine
+from vnpy.trader.constant import Direction
 from vnpy.trader.object import TradeData, OrderData, AccountData, PositionData
 from vnpy.trader.event import EVENT_TRADE, EVENT_ORDER, EVENT_POSITION, EVENT_ACCOUNT
 
@@ -273,25 +274,32 @@ class TradeMonitor:
             total_sell = 0
             buy_amount = 0.0
             sell_amount = 0.0
+            sell_cost = 0.0  # 卖出对应的持仓成本（监控层用持仓均价近似）
 
             for trade in today_trades:
-                if trade.direction.value == "long":
+                # 用枚举比较，避免依赖 direction.value 的字符串（vnpy Direction.LONG.value 为"多"）
+                if trade.direction == Direction.LONG:
                     total_buy += trade.volume
                     buy_amount += trade.volume * trade.price
                 else:
                     total_sell += trade.volume
                     sell_amount += trade.volume * trade.price
+                    # 卖出对应持仓成本：用当前持仓均价，无持仓记录则回退当前价（盈亏为0）
+                    pos = self._last_positions.get(trade.vt_symbol)
+                    cost_price = pos.price if pos else trade.price
+                    sell_cost += trade.volume * cost_price
 
-            # 计算手续费 (假设万三)
+            # 手续费（万3 双边）+ 印花税（卖出单边万5，自 2023-08-28 起）
             commission = (buy_amount + sell_amount) * 0.0003
+            stamp_duty = sell_amount * 0.0005
 
             # 持仓盈亏
             position_pnl = 0.0
             for pos in self._last_positions.values():
                 position_pnl += pos.pnl
 
-            # 平仓盈亏
-            closed_pnl = sell_amount - buy_amount - commission
+            # 平仓盈亏：卖出收入 - 卖出对应持仓成本 - 手续费 - 印花税
+            closed_pnl = sell_amount - sell_cost - commission - stamp_duty
 
             return {
                 "date": datetime.now().date().isoformat(),
@@ -302,6 +310,7 @@ class TradeMonitor:
                 "buy_amount": buy_amount,
                 "sell_amount": sell_amount,
                 "commission": commission,
+                "stamp_duty": stamp_duty,
                 "closed_pnl": closed_pnl,
                 "position_pnl": position_pnl,
                 "total_pnl": closed_pnl + position_pnl,

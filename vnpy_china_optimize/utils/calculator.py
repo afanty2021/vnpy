@@ -89,8 +89,12 @@ def calculate_calmar_ratio(
     if max_drawdown == 0:
         return 0.0
 
+    # periods 为回测总周期数，年化应乘 252/periods（原 periods/252 方向反了）
+    if periods <= 0:
+        periods = 252
+
     # 年化收益率
-    annual_return = total_return * (periods / 252)
+    annual_return = total_return * (252 / periods)
 
     return annual_return / abs(max_drawdown)
 

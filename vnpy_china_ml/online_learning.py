@@ -293,17 +293,21 @@ class OnlineLearner:
         if not samples:
             return weights
 
-        # 按时间排序
-        sorted_samples = sorted(samples, key=lambda s: s.timestamp or datetime.min)
-        n = len(sorted_samples)
+        n = len(samples)
+        # 每个样本在时间序中的排名（0=最早），保持与 weights/samples 原序对齐，
+        # 避免排序后 decay_factors 与 weights（原序）错位相乘
+        times = [s.timestamp or datetime.min for s in samples]
+        order = sorted(range(n), key=lambda i: times[i])  # 时间从早到晚的样本下标
+        rank = [0] * n
+        for position, idx in enumerate(order):
+            rank[idx] = position
 
-        # 计算衰减权重
+        # 越新（rank 越大）衰减因子越接近 1（decay_factor^(n-1-rank)）
         decay_factors = np.array([
-            self.config.decay_factor ** (n - i - 1)
-            for i in range(n)
+            self.config.decay_factor ** (n - 1 - rank[i]) for i in range(n)
         ])
 
-        return weights * decay_factors
+        return np.asarray(weights) * decay_factors
 
     def _calculate_recent_performance(self) -> float:
         """计算最近的预测性能

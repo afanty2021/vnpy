@@ -7,7 +7,7 @@
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from vnpy_china_monitor.web.models.request import OrderRequest, CancelRequest
 from vnpy_china_monitor.web.models.response import (
@@ -29,12 +29,12 @@ trade_router = APIRouter(
 
 
 # 依赖注入：获取交易服务
-async def get_trade_service() -> TradeService:
-    """获取交易服务实例
-
-    实际应用中应该从应用状态中获取
-    """
-    raise HTTPException(status_code=501, detail="服务未初始化")
+async def get_trade_service(request: Request) -> TradeService:
+    """获取交易服务实例（从 app.state 读取）"""
+    service = getattr(request.app.state, "trade_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="交易服务未初始化")
+    return service
 
 
 @trade_router.get("/account", response_model=ApiResponse)

@@ -4,6 +4,7 @@ FastAPI Web服务器
 VeighNa Web监控系统的主服务器
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -24,6 +25,7 @@ from vnpy_china_monitor.web.services.market_service import MarketService
 from vnpy_china_monitor.web.services.trade_service import TradeService
 from vnpy_china_monitor.web.services.strategy_service import StrategyService
 from vnpy_china_monitor.web.services.alert_service import AlertService
+from vnpy_china_monitor.web.security import AuthManager, JWTManager
 from vnpy_china_monitor.web.api import (
     auth_router,
     market_router,
@@ -50,6 +52,9 @@ _market_service: Optional[MarketService] = None
 _trade_service: Optional[TradeService] = None
 _strategy_service: Optional[StrategyService] = None
 _alert_service: Optional[AlertService] = None
+# 主事件循环：RPC 回调在其内部线程触发，需经 run_coroutine_threadsafe 跨线程提交协程
+_main_loop: Optional[asyncio.AbstractEventLoop] = None
+_auth_manager: Optional[AuthManager] = None
 
 
 @asynccontextmanager
@@ -64,8 +69,23 @@ async def lifespan(app: FastAPI):
     """
     global _rpc_client, _connection_manager
     global _market_service, _trade_service, _strategy_service, _alert_service
+    global _main_loop, _auth_manager
 
     config = get_config()
+
+    # 捕获主事件循环：RPC 回调线程无事件循环，直接 asyncio.create_task 会抛
+    # RuntimeError('no running event loop')；改用 run_coroutine_threadsafe 提交到主循环
+    _main_loop = asyncio.get_running_loop()
+
+    # 初始化认证管理器（JWT + 用户存储），供 /api/auth 与受保护端点使用
+    _auth_manager = AuthManager(
+        jwt_manager=JWTManager(
+            secret_key=config.auth.secret_key,
+            algorithm=config.auth.algorithm,
+            access_token_expire_minutes=config.auth.access_token_expire_minutes,
+            refresh_token_expire_days=config.auth.refresh_token_expire_days,
+        )
+    )
 
     # 启动时初始化
     logger.info("Starting VeighNa Web Monitor...")
@@ -106,6 +126,7 @@ async def lifespan(app: FastAPI):
     # 将服务添加到应用状态
     app.state.rpc_client = _rpc_client
     app.state.connection_manager = _connection_manager
+    app.state.auth_manager = _auth_manager
     app.state.market_service = _market_service
     app.state.trade_service = _trade_service
     app.state.strategy_service = _strategy_service
@@ -155,86 +176,86 @@ def _on_tick_event(data: dict):
     if _market_service:
         _market_service.update_tick(data)
 
-    # 通过WebSocket广播
-    if _connection_manager:
-        import asyncio
-        asyncio.create_task(
+    # 通过WebSocket广播（RPC 回调线程 → 经主循环跨线程提交）
+    if _connection_manager and _main_loop is not None:
+        asyncio.run_coroutine_threadsafe(
             _connection_manager.broadcast(
                 "tick",
                 WebSocketEvent(type=EventType.MARKET_TICK, data=data),
-            )
+            ),
+            _main_loop,
         )
 
 
 def _on_bar_event(data: dict):
     """处理K线事件"""
-    if _connection_manager:
-        import asyncio
-        asyncio.create_task(
+    if _connection_manager and _main_loop is not None:
+        asyncio.run_coroutine_threadsafe(
             _connection_manager.broadcast(
                 "bar",
                 WebSocketEvent(type=EventType.MARKET_BAR, data=data),
-            )
+            ),
+            _main_loop,
         )
 
 
 def _on_order_event(data: dict):
     """处理委托事件"""
-    if _connection_manager:
-        import asyncio
-        asyncio.create_task(
+    if _connection_manager and _main_loop is not None:
+        asyncio.run_coroutine_threadsafe(
             _connection_manager.broadcast(
                 "order",
                 WebSocketEvent(type=EventType.TRADE_ORDER, data=data),
-            )
+            ),
+            _main_loop,
         )
 
 
 def _on_trade_event(data: dict):
     """处理成交事件"""
-    if _connection_manager:
-        import asyncio
-        asyncio.create_task(
+    if _connection_manager and _main_loop is not None:
+        asyncio.run_coroutine_threadsafe(
             _connection_manager.broadcast(
                 "trade",
                 WebSocketEvent(type=EventType.TRADE_TRADE, data=data),
-            )
+            ),
+            _main_loop,
         )
 
 
 def _on_position_event(data: dict):
     """处理持仓事件"""
-    if _connection_manager:
-        import asyncio
-        asyncio.create_task(
+    if _connection_manager and _main_loop is not None:
+        asyncio.run_coroutine_threadsafe(
             _connection_manager.broadcast(
                 "position",
                 WebSocketEvent(type=EventType.TRADE_POSITION, data=data),
-            )
+            ),
+            _main_loop,
         )
 
 
 def _on_account_event(data: dict):
     """处理账户事件"""
-    if _connection_manager:
-        import asyncio
-        asyncio.create_task(
+    if _connection_manager and _main_loop is not None:
+        asyncio.run_coroutine_threadsafe(
             _connection_manager.broadcast(
                 "account",
                 WebSocketEvent(type=EventType.TRADE_ACCOUNT, data=data),
-            )
+            ),
+            _main_loop,
         )
 
 
 def _on_strategy_event(data: dict):
     """处理策略事件"""
-    if _connection_manager:
-        import asyncio
-        asyncio.create_task(
+    if _connection_manager and _main_loop is not None:
+        asyncio.run_coroutine_threadsafe(
             _connection_manager.broadcast(
                 "strategy",
                 WebSocketEvent(type=EventType.STRATEGY_STATUS, data=data),
-            )
+            ),
+            _main_loop,
         )
 
 

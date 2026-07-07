@@ -7,7 +7,7 @@
 import logging
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from vnpy_china_monitor.web.models.response import ApiResponse, TickData, BarData
 from vnpy_china_monitor.web.services.market_service import MarketService
@@ -22,13 +22,12 @@ market_router = APIRouter(
 
 
 # 依赖注入：获取行情服务
-async def get_market_service() -> MarketService:
-    """获取行情服务实例
-
-    实际应用中应该从应用状态中获取
-    """
-    # 暂时返回None，实际使用时从app.state获取
-    raise HTTPException(status_code=501, detail="服务未初始化")
+async def get_market_service(request: Request) -> MarketService:
+    """获取行情服务实例（从 app.state 读取）"""
+    service = getattr(request.app.state, "market_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="行情服务未初始化")
+    return service
 
 
 @market_router.get("/tick/{vt_symbol}", response_model=ApiResponse)

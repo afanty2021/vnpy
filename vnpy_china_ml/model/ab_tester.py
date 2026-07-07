@@ -303,9 +303,10 @@ class ModelABTester:
             ric, _ = stats.spearmanr(y_pred, y_true)
             return float(ric)
         else:
-            # 简单的秩相关
-            from scipy.stats import rankdata
-            return float(np.corrcoef(rankdata(y_pred), rankdata(y_true))[0, 1])
+            # 纯 numpy 秩计算（scipy 不可用时的 fallback，不得再 import scipy）
+            def _rank(a):
+                return np.argsort(np.argsort(a)).astype(float)
+            return float(np.corrcoef(_rank(y_pred), _rank(y_true))[0, 1])
 
     def _calculate_mse(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
         """计算均方误差"""

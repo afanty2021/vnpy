@@ -140,7 +140,7 @@ class FactorCombiner:
             if self.config.winsorize:
                 result = result.with_columns([
                     pl.col(factor_name)
-                    .map_elements(lambda x: self._winsorize(x, self.config.winsorize_method), return_dtype=pl.Float64)
+                    .map_batches(lambda s: pl.Series(self._winsorize(s.to_numpy(), self.config.winsorize_method)), return_dtype=pl.Float64)
                     .over(["symbol"])
                     .alias(f"{factor_name}_clean")
                 ])
@@ -150,7 +150,7 @@ class FactorCombiner:
             if self.config.normalize:
                 result = result.with_columns([
                     pl.col(factor_name)
-                    .map_elements(lambda x: self._zscore(x), return_dtype=pl.Float64)
+                    .map_batches(lambda s: pl.Series(self._zscore(s.to_numpy())), return_dtype=pl.Float64)
                     .over(["symbol"])
                     .alias(f"{factor_name}_norm")
                 ])

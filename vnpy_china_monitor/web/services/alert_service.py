@@ -159,23 +159,31 @@ class AlertService:
             logger.error(f"Failed to get alert stats: {e}")
             return {}
 
-    def format_alert(self, alert: Dict) -> Dict:
-        """格式化告警给前端
+    def format_alert(self, alert) -> Dict:
+        """格式化告警给前端（兼容 dict 与 AlertEvent dataclass）
+
+        AlertEngine.get_active_alerts 返回 AlertEvent dataclass，本方法同时支持
+        dict 与 dataclass，避免在 dataclass 上调用 .get 抛 AttributeError。
 
         Args:
-            alert: 告警数据
+            alert: 告警数据（dict 或 AlertEvent）
 
         Returns:
             格式化后的数据
         """
+        def _val(key, default=None):
+            if isinstance(alert, dict):
+                return alert.get(key, default)
+            return getattr(alert, key, default)
+
         return {
-            "alert_id": alert.get("alert_id"),
-            "title": alert.get("title"),
-            "message": alert.get("message"),
-            "severity": alert.get("severity"),
-            "priority": alert.get("priority"),
-            "source": alert.get("source"),
-            "timestamp": alert.get("timestamp", datetime.now().isoformat()),
-            "acknowledged": alert.get("acknowledged", False),
-            "acknowledged_by": alert.get("acknowledged_by"),
+            "alert_id": _val("alert_id"),
+            "title": _val("title"),
+            "message": _val("message"),
+            "severity": _val("severity"),
+            "priority": _val("priority"),
+            "source": _val("source"),
+            "timestamp": _val("timestamp", datetime.now().isoformat()),
+            "acknowledged": _val("acknowledged", False),
+            "acknowledged_by": _val("acknowledged_by"),
         }

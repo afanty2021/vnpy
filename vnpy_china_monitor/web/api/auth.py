@@ -7,7 +7,7 @@
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from vnpy_china_monitor.web.models.request import LoginRequest
@@ -28,11 +28,13 @@ security = HTTPBearer()
 
 # 依赖注入：获取当前用户
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> dict[str, Any]:
-    """获取当前用户
+    """获取当前用户（校验 JWT 签名与有效期）
 
     Args:
+        request: 请求对象（取 app.state.auth_manager）
         credentials: HTTP认证凭据
 
     Returns:
@@ -41,30 +43,52 @@ async def get_current_user(
     Raises:
         HTTPException: 认证失败
     """
-    # 这里需要从应用状态中获取jwt_manager
-    # 暂时返回模拟数据
-    return {"sub": "admin"}
+    auth_manager = getattr(request.app.state, "auth_manager", None)
+    if auth_manager is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="认证服务未初始化",
+        )
+    payload = auth_manager.verify_token(credentials.credentials)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="无效或过期的访问令牌",
+        )
+    return {"sub": payload.get("sub")}
 
 
 @auth_router.post("/login", response_model=ApiResponse)
 async def login(
-    request: LoginRequest,
+    request: Request,
+    login_req: LoginRequest,
 ) -> ApiResponse:
-    """用户登录
+    """用户登录（校验用户名/密码，签发 JWT）
 
     Args:
-        request: 登录请求
+        request: 请求对象（取 app.state.auth_manager）
+        login_req: 登录请求（username/password）
 
     Returns:
         API响应
     """
-    # 这里需要从应用状态中获取auth_manager
-    # 暂时返回模拟响应
+    auth_manager = getattr(request.app.state, "auth_manager", None)
+    if auth_manager is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="认证服务未初始化",
+        )
+    token = auth_manager.authenticate(login_req.username, login_req.password)
+    if token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="用户名或密码错误",
+        )
     return ApiResponse(
         success=True,
         message="登录成功",
         data={
-            "access_token": "mock_token",
+            "access_token": token,
             "token_type": "bearer",
             "expires_in": 3600,
         },
@@ -91,20 +115,31 @@ async def logout(
 
 @auth_router.post("/refresh", response_model=ApiResponse)
 async def refresh_token(
+    request: Request,
     current_user: dict = Depends(get_current_user),
 ) -> ApiResponse:
-    """刷新令牌
+    """刷新令牌（凭有效 access token 重新签发）
 
     Args:
-        current_user: 当前用户
+        request: 请求对象（取 app.state.auth_manager）
+        current_user: 当前用户（已由 get_current_user 校验）
 
     Returns:
         API响应
     """
+    auth_manager = getattr(request.app.state, "auth_manager", None)
+    if auth_manager is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="认证服务未初始化",
+        )
+    token = auth_manager.jwt_manager.create_access_token(
+        {"sub": current_user.get("sub")}
+    )
     return ApiResponse(
         success=True,
         data={
-            "access_token": "new_mock_token",
+            "access_token": token,
             "token_type": "bearer",
             "expires_in": 3600,
         },

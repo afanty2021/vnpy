@@ -7,7 +7,7 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from vnpy_china_monitor.web.models.response import ApiResponse, AlertData
 from vnpy_china_monitor.web.services.alert_service import AlertService
@@ -22,12 +22,12 @@ alert_router = APIRouter(
 
 
 # 依赖注入：获取告警服务
-async def get_alert_service() -> AlertService:
-    """获取告警服务实例
-
-    实际应用中应该从应用状态中获取
-    """
-    raise HTTPException(status_code=501, detail="服务未初始化")
+async def get_alert_service(request: Request) -> AlertService:
+    """获取告警服务实例（从 app.state 读取）"""
+    service = getattr(request.app.state, "alert_service", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="告警服务未初始化")
+    return service
 
 
 @alert_router.get("", response_model=ApiResponse)

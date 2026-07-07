@@ -6,6 +6,7 @@
 
 from datetime import datetime
 from typing import List, Callable, Dict, Optional, Any
+from concurrent.futures import ThreadPoolExecutor
 import uuid
 
 from loguru import logger
@@ -52,6 +53,11 @@ class AlertEngine:
 
         # 通知通道列表
         self._channels: List[AlertChannel] = []
+
+        # 通道发送线程池：channel.send 可能是同步 SMTP/HTTP，放后台线程避免阻塞事件引擎
+        self._channel_executor = ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="alert-channel"
+        )
 
         # 告警回调列表
         self._callbacks: List[Callable[[AlertEvent], None]] = []
@@ -255,12 +261,18 @@ class AlertEngine:
             if not channel.enabled:
                 continue
 
-            try:
-                success = channel.send(message)
-                if not success:
-                    logger.warning(f"告警发送失败: {channel.__class__.__name__}")
-            except Exception as e:
-                logger.error(f"告警通道发送异常: {channel.__class__.__name__}: {e}")
+            # 提交到后台线程池：channel.send 可能是同步 SMTP/HTTP（部分通道无超时），
+            # 在调用线程（可能是 EventEngine 回调）内同步发送会阻塞整个事件分发。
+            self._channel_executor.submit(self._send_to_one_channel, channel, message)
+
+    def _send_to_one_channel(self, channel: AlertChannel, message: AlertMessage) -> None:
+        """在后台线程发送单个通道告警（隔离慢通道，避免阻塞事件引擎）"""
+        try:
+            success = channel.send(message)
+            if not success:
+                logger.warning(f"告警发送失败: {channel.__class__.__name__}")
+        except Exception as e:
+            logger.error(f"告警通道发送异常: {channel.__class__.__name__}: {e}")
 
     def _trigger_callbacks(self, alert: AlertEvent) -> None:
         """触发告警回调
@@ -335,6 +347,8 @@ class AlertEngine:
             return
 
         self._running = False
+        # 关闭通道发送线程池（不等待在途发送，避免 stop 被慢通道卡住）
+        self._channel_executor.shutdown(wait=False)
         logger.info("告警引擎已停止")
 
     def is_running(self) -> bool:
