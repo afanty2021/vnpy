@@ -49,6 +49,8 @@ class TradeMonitor:
         self._today_trades: List[TradeData] = []
         self._today_order_count: Dict[str, int] = defaultdict(int)
         self._today_trade_count: Dict[str, int] = defaultdict(int)
+        # 当日日期标记：事件回调检测跨日时重置 _today_* 计数器
+        self._current_day = datetime.now().date()
 
         # 最后更新的持仓和资金快照
         self._last_positions: Dict[str, PositionData] = {}
@@ -81,6 +83,9 @@ class TradeMonitor:
         trade: TradeData = event.data
 
         with self._lock:
+            # 跨日重置当日计数器（_today_* 不应跨日累积）
+            self._maybe_reset_daily(trade.datetime)
+
             # 添加到历史记录
             self._trade_history.append(trade)
             if len(self._trade_history) > self._max_trade_history:
@@ -108,6 +113,9 @@ class TradeMonitor:
         order: OrderData = event.data
 
         with self._lock:
+            # 跨日重置当日计数器
+            self._maybe_reset_daily(order.datetime)
+
             # 添加到历史记录
             self._order_history.append(order)
             if len(self._order_history) > self._max_order_history:
@@ -389,6 +397,19 @@ class TradeMonitor:
         """
         with self._lock:
             return self._order_history[-limit:]
+
+    def _maybe_reset_daily(self, dt: Optional[datetime]) -> None:
+        """检测跨日并重置当日计数器
+
+        _today_trades / _today_order_count / _today_trade_count 在长期运行的
+        监控器中若不重置，跨交易日后昨日计数会持续累积为"今日"数据。
+        """
+        today = (dt or datetime.now()).date()
+        if today != self._current_day:
+            self._today_trades.clear()
+            self._today_order_count.clear()
+            self._today_trade_count.clear()
+            self._current_day = today
 
     def _is_today(self, dt: Optional[datetime]) -> bool:
         """判断是否当日

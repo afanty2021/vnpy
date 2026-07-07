@@ -7,6 +7,7 @@
 import datetime
 from vnpy.trader.object import OrderRequest
 from vnpy.trader.constant import Exchange, Product, OrderType, Direction, Status
+from vnpy.trader.utility import ZoneInfo
 from xtquant import xtconstant
 
 From_VN_Exchange_map = {
@@ -84,9 +85,14 @@ def to_qmt_code(symbol, exchange):
     return f'{symbol}.{suffix}'
 
 
+# A股交易时间统一按 Asia/Shanghai（UTC+8）。fromtimestamp 不带 tz 会取宿主机本地时区，
+# 部署到非 UTC+8 主机会让 tick/order/trade 时间整体偏移。
+_SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
+
+
 def timestamp_to_datetime(tint):
     st = len(str(tint))
     if st != 10:
         p = st - 10
         tint = tint / 10**p
-    return datetime.datetime.fromtimestamp(tint)
+    return datetime.datetime.fromtimestamp(tint, tz=_SHANGHAI_TZ)

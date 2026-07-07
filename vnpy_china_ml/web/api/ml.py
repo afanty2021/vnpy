@@ -7,7 +7,7 @@ import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from vnpy_china_monitor.web.models.response import ApiResponse
@@ -53,20 +53,20 @@ _ml_monitor_service = None
 _online_learning_service = None
 
 
-def get_ml_monitor_service():
-    """获取ML监控服务实例"""
-    global _ml_monitor_service
-    if _ml_monitor_service is None:
-        raise HTTPException(status_code=501, detail="ML监控服务未初始化")
-    return _ml_monitor_service
+def get_ml_monitor_service(request: Request):
+    """获取ML监控服务实例（优先 app.state，回退全局变量）"""
+    service = getattr(request.app.state, "ml_monitor_service", None) or _ml_monitor_service
+    if service is None:
+        raise HTTPException(status_code=503, detail="ML监控服务未初始化")
+    return service
 
 
-def get_online_learning_service():
-    """获取在线学习服务实例"""
-    global _online_learning_service
-    if _online_learning_service is None:
-        raise HTTPException(status_code=501, detail="在线学习服务未初始化")
-    return _online_learning_service
+def get_online_learning_service(request: Request):
+    """获取在线学习服务实例（优先 app.state，回退全局变量）"""
+    service = getattr(request.app.state, "online_learning_service", None) or _online_learning_service
+    if service is None:
+        raise HTTPException(status_code=503, detail="在线学习服务未初始化")
+    return service
 
 
 @ml_router.get("/models", response_model=ApiResponse)
