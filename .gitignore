@@ -62,3 +62,32 @@ worktrees
 
 # Patches - 部署备份产物（每次部署自动生成，无需版本化）
 patches/backups/
+
+# === 工具产物（IDE/MCP 生成，勿跟踪）===
+.qoder/
+.playwright-mcp/
+.serena/
+
+# === 临时数据 ===
+dump.rdb
+
+# === 根目录临时开发脚本（散落的调试/检查/初始化脚本，非包内代码）===
+/test_*.py
+/backtest_*.py
+/check_*.py
+/init_*.py
+/setup_*.py
+/simple_*.py
+/edit_*.py
+/verify_*.py
+/qmt_*.py
+/auto_*.py
+/start_*.py
+/update_*.py
+/add_missing_fields.py
+/final_environment_check.py
+
+# === 临时报告与产物 ===
+environment_ready_report.md
+mysql_init_guide.md
+test_backtest_report.csv
