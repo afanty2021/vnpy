@@ -347,9 +347,14 @@ class FactorBacktester:
             volatility = float(np.std(returns))
             sharpe_ratio = total_return / volatility if volatility > 0 else 0.0
 
-            # 计算最大回撤（简化版）
-            cum_returns = np.cumsum(returns)
-            max_drawdown = float(np.max(cum_returns) - np.min(cum_returns))
+            # 最大回撤：按 datetime 排序后基于累计权益曲线的 peak-to-trough
+            # （原 cumsum(无序跨日跨股 returns) 的 max-min 非真实回撤，数值无意义）
+            dates = layer_df["datetime"].to_numpy()
+            sort_idx = np.argsort(dates)
+            cum_returns = np.cumsum(returns[sort_idx])
+            running_max = np.maximum.accumulate(cum_returns)
+            drawdowns = cum_returns - running_max
+            max_drawdown = float(abs(drawdowns.min())) if drawdowns.size > 0 else 0.0
 
             # 计算胜率
             win_rate = float(np.mean(returns > 0))

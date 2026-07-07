@@ -120,11 +120,15 @@ class BaseOptimizer(ABC):
 
         best = sorted_results[0]
 
+        # 最小化模式下 evaluate 已对目标值取负以便统一用 max 比较，
+        # 汇总展示时需还原符号为真实目标值
+        sign = -1.0 if not self.maximize else 1.0
+
         return OptimizationSummary(
             total_evaluations=self.evaluation_count,
-            best_score=best.score,
-            worst_score=sorted_results[-1].score,
-            avg_score=sum(r.score for r in self.results) / len(self.results),
+            best_score=best.score * sign,
+            worst_score=sorted_results[-1].score * sign,
+            avg_score=sum(r.score for r in self.results) / len(self.results) * sign,
             best_params=best.params,
             best_metrics=best.metrics,
             all_results=self.results

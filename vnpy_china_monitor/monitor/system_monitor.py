@@ -185,7 +185,9 @@ class SystemMonitor:
 
         try:
             # 获取CPU使用率 (interval=1 表示等待1秒获取准确值)
-            percent = psutil.cpu_percent(interval=1) / 100.0
+            # 状态判定与展示复用同一采样值，避免两次 cpu_percent 调用数值不一致
+            cpu_percent_value = psutil.cpu_percent(interval=1)
+            percent = cpu_percent_value / 100.0
 
             if percent >= self.cpu_critical:
                 status = "critical"
@@ -195,9 +197,9 @@ class SystemMonitor:
                 status = "normal"
 
             result = {
-                "percent": psutil.cpu_percent(interval=0),
+                "percent": cpu_percent_value,
                 "status": status,
-                "message": f"CPU使用率: {psutil.cpu_percent(interval=0):.1f}%",
+                "message": f"CPU使用率: {cpu_percent_value:.1f}%",
                 "cpu_count": psutil.cpu_count(),
             }
 

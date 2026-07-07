@@ -87,6 +87,8 @@ class OnlineLearner:
 
         # 更新计数器
         self._update_count = 0
+        # 上次更新时的样本数（should_update 据此判断累积量，避免 predicate 副作用）
+        self._samples_at_last_update = 0
 
         # 性能跟踪
         self._recent_predictions: deque = deque(maxlen=100)
@@ -132,7 +134,7 @@ class OnlineLearner:
             self._sample_buffer.append(sample)
 
     def should_update(self) -> bool:
-        """判断是否应该更新模型
+        """判断是否应该更新模型（纯查询，无副作用）
 
         Returns:
             是否应该更新
@@ -140,11 +142,9 @@ class OnlineLearner:
         if len(self._sample_buffer) < self.config.min_samples:
             return False
 
-        self._update_count += 1
-
-        # 检查更新间隔
-        if self._update_count >= self.config.update_interval:
-            self._update_count = 0
+        # 自上次更新以来累积 update_interval 个新样本即触发
+        # （不再每次调用自增计数器，避免 predicate 副作用在轮询场景误触发）
+        if len(self._sample_buffer) - self._samples_at_last_update >= self.config.update_interval:
             return True
 
         # 检查性能衰减
@@ -189,6 +189,7 @@ class OnlineLearner:
                 result = self._full_retrain(X, y, weights)
 
             self._last_update_time = datetime.now()
+            self._samples_at_last_update = len(self._sample_buffer)
             return result
 
         except Exception as e:

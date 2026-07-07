@@ -5,12 +5,15 @@
 检测参数优化是否存在过拟合问题。
 """
 
+import logging
 from typing import Dict, Any, List, Callable, Tuple, Optional
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 import numpy as np
 
 from ..base.result import OptimizationMetrics
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -297,6 +300,13 @@ class OverfitDetector:
         """运行回测"""
         # 调用回测函数
         result = self.backtest_func(params, start_date, end_date)
+
+        # backtest_func 可能返回 None（回测失败/异常），避免 None.get 崩溃
+        if result is None:
+            logger.warning(f"backtest_func 返回 None: params={params}, {start_date}~{end_date}")
+            return OptimizationMetrics(
+                return_value=0.0, sharpe_ratio=0.0, max_drawdown=0.0
+            )
 
         # 转换为OptimizationMetrics
         if isinstance(result, tuple):

@@ -127,10 +127,9 @@ class PSOOptimizer(BaseOptimizer):
                 # 边界处理
                 self._clip_particle(i)
 
-                # 评估适应度
+                # 评估适应度（evaluate 内部已自增 evaluation_count，无需重复计数）
                 params_dict = self._array_to_params(self.particles[i])
                 score = self.evaluate(params_dict)
-                self.evaluation_count += 1
 
                 # 更新个体最优
                 if score > self.pbest_scores[i]:
@@ -177,16 +176,20 @@ class PSOOptimizer(BaseOptimizer):
         self.gbest_position = np.zeros(n_params)
         self.gbest_score = -np.inf
 
-        # 初始评估
+        # 初始评估（evaluate 内部已自增 evaluation_count）
         for i in range(self.population_size):
             params_dict = self._array_to_params(self.particles[i])
             score = self.evaluate(params_dict)
-            self.evaluation_count += 1
             self.pbest_scores[i] = score
 
             if score > self.gbest_score:
                 self.gbest_score = score
                 self.gbest_position = self.particles[i].copy()
+
+        # 记录初始全局最优（避免主循环无改进时 get_summary 返回空汇总，但 gbest 实有值）
+        if self.gbest_score > -np.inf:
+            best_params = self._array_to_params(self.gbest_position)
+            self._record_result(best_params, self.gbest_score)
 
     def _clip_particle(self, idx: int) -> None:
         """将粒子限制在边界内"""

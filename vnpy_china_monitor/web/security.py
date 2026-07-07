@@ -194,9 +194,14 @@ class SimpleUserStore:
         # 用户名 -> (哈希密码, 盐值)
         self._users: Dict[str, tuple[str, str]] = {}
 
-        # 默认用户: admin / admin123
-        pwd_hash, salt = hash_password("admin123")
-        self._users["admin"] = (pwd_hash, salt)
+        # 默认管理员从环境变量读取（MONITOR_ADMIN_USER / MONITOR_ADMIN_PASSWORD），
+        # 避免硬编码弱密码 admin/admin123；未设置则不创建默认用户（需显式 add_user）
+        import os
+        admin_user = os.getenv("MONITOR_ADMIN_USER")
+        admin_pwd = os.getenv("MONITOR_ADMIN_PASSWORD")
+        if admin_user and admin_pwd:
+            self.add_user(admin_user, admin_pwd)
+            logger.info("Default admin user loaded from env")
 
     def add_user(self, username: str, password: str) -> None:
         """添加用户

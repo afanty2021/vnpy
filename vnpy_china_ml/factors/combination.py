@@ -239,23 +239,26 @@ class FactorCombiner:
         """
         result = df.clone()
 
-        # 获取第一个因子作为基准
+        # 第一个因子作为首个正交基
         base_factor = factors[0]
         orthogonalized = [base_factor]
 
         for i, factor in enumerate(factors[1:], 1):
-            # 获取数据
-            base_data = result[base_factor].to_numpy()
-            current_data = result[factor].to_numpy()
-
-            # 计算投影
-            projection = np.dot(base_data, current_data) / np.dot(base_data, base_data)
-            orthogonal = current_data - projection * base_data
+            current_data = result[factor].to_numpy().astype(float)
+            # 迭代 Gram-Schmidt：减去与所有已正交化向量的投影
+            # （原实现仅对 factors[0] 投影一次，结果列间仍高度相关，非正交基）
+            ortho = current_data.copy()
+            for prev_name in orthogonalized:
+                prev_data = result[prev_name].to_numpy().astype(float)
+                denom = np.dot(prev_data, prev_data)
+                if denom != 0:
+                    proj = np.dot(prev_data, ortho) / denom
+                    ortho = ortho - proj * prev_data
 
             # 添加新列
             ortho_name = f"{factor}_ortho"
             result = result.with_columns([
-                pl.Series(ortho_name, orthogonal)
+                pl.Series(ortho_name, ortho)
             ])
             orthogonalized.append(ortho_name)
 

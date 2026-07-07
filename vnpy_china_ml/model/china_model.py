@@ -270,6 +270,18 @@ class ChinaAlphaModel:
         if len(X) == 0:
             raise ValueError("预测数据不能为空")
 
+        # 校验特征维度与训练时一致（避免顺序/数量不匹配致静默错误预测）
+        if (
+            self.model_type != ModelType.LSTM
+            and len(X.shape) > 1
+            and self.feature_names
+            and X.shape[1] != len(self.feature_names)
+        ):
+            raise ValueError(
+                f"特征数量 {X.shape[1]} 与训练时 {len(self.feature_names)} 不一致，"
+                f"请按训练特征顺序传入"
+            )
+
         if self.model_type == ModelType.LSTM:
             return self._predict_lstm(X)
         else:

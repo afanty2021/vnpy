@@ -14,7 +14,7 @@ class ChinaTradingCost:
     """A股交易成本配置"""
     commission_rate: float = 0.0003      # 万3佣金
     min_commission: float = 5.0           # 最低5元
-    stamp_duty: float = 0.001             # 印花税0.1%（仅卖出）
+    stamp_duty: float = 0.0005            # 印花税0.05%（仅卖出，自 2023-08-28 起）
     transfer_fee: float = 0.00001         # 过户费0.001%
     handling_fee: float = 0.00000685      # 经手费0.000685%
     slippage: float = 0.0                 # 滑点（可配置）
@@ -120,7 +120,7 @@ class ChinaOptimizerSetting(OptimizationSetting):
         self,
         commission_rate: float = 0.0003,
         min_commission: float = 5.0,
-        stamp_duty: float = 0.001,
+        stamp_duty: float = 0.0005,
         slippage: float = 0.0
     ) -> None:
         """设置交易成本"""
@@ -159,7 +159,7 @@ def calculate_china_trading_cost(
     volume: int,
     is_buy: bool = True,
     commission_rate: float = 0.0003,
-    stamp_duty: float = 0.001
+    stamp_duty: float = 0.0005
 ) -> float:
     """
     便捷函数：计算A股交易成本

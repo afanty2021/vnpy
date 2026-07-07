@@ -62,6 +62,9 @@ class AlertEngine:
         # 告警回调列表
         self._callbacks: List[Callable[[AlertEvent], None]] = []
 
+        # 风控管理器引用（由 connect_risk_manager 注入，供 RiskConnector 集成）
+        self._risk_manager: Optional[Any] = None
+
         # 运行状态
         self._running = False
 
@@ -201,7 +204,19 @@ class AlertEngine:
         Returns:
             告警历史列表
         """
+        # limit<=0 时 [-0:] 等价于 [0:] 会返回全部，应返回空列表
+        if limit <= 0:
+            return []
         return self._alert_history[-limit:]
+
+    def connect_risk_manager(self, risk_manager: Any) -> None:
+        """连接风控管理器（供 RiskConnector.connect 调用）
+
+        Args:
+            risk_manager: 风控管理器实例
+        """
+        self._risk_manager = risk_manager
+        logger.info("风控管理器已连接到告警引擎")
 
     def register_channel(self, channel: AlertChannel) -> None:
         """注册通知通道
