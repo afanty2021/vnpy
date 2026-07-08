@@ -4,7 +4,7 @@
 @Time      :2022/11/8 16:49
 @Author    :fsksf
 """
-from typing import Dict, List
+from typing import Dict, List, Union
 from vnpy.event import Event, EventEngine
 from vnpy.trader.event import (
     EVENT_TIMER,
@@ -62,8 +62,17 @@ class QmtGateway(BaseGateway):
     def close(self) -> None:
         self.md.close()
 
-    def subscribe(self, req: SubscribeRequest) -> None:
-        return self.md.subscribe(req)
+    def subscribe(self, req: Union[SubscribeRequest, List[SubscribeRequest]]) -> None:
+        """订阅行情数据。
+
+        兼容单个 SubscribeRequest（vnpy 4.4.0 契约）与 list[SubscribeRequest]
+        （vnpy 3.x 旧风格），便于上层代码平滑迁移，避免误传 list 时抛 AttributeError。
+        """
+        if isinstance(req, list):
+            for r in req:
+                self.md.subscribe(r)
+        else:
+            self.md.subscribe(req)
 
     def send_order(self, req: OrderRequest) -> str:
         return self.td.send_order(req)
