@@ -59,8 +59,10 @@ class AlertService:
 
         try:
             # 转换字符串为枚举
-            severity_enum = AlertSeverity(severity.upper())
-            priority_enum = AlertPriority(priority.upper())
+            # AlertSeverity 的 value 是小写 str（info/warning/critical），按 value 查找需小写
+            severity_enum = AlertSeverity(severity.lower())
+            # AlertPriority 是 IntEnum（value 为 int），按 name 查找用 []
+            priority_enum = AlertPriority[priority.upper()]
 
             alert_id = self.alert_engine.send_alert(
                 title=title,

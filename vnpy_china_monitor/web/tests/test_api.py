@@ -12,18 +12,28 @@ import json
 
 @pytest.fixture
 def mock_rpc_client():
-    """模拟RPC客户端"""
-    with patch('vnpy_china_monitor.web.rpc.client.RpcClient') as mock:
+    """模拟RPC客户端（配置常用方法默认返回，避免端点序列化/迭代 Mock）"""
+    with patch('vnpy_china_monitor.web.server.RpcClientWrapper') as mock:
         client = Mock()
         mock.return_value = client
+        # 默认返回合理值，覆盖 TradeService/StrategyService 的 rpc 调用（MarketService 用本地缓存）
+        client.get_account.return_value = {"accountid": "test", "balance": 100000.0, "available": 80000.0}
+        client.get_position.return_value = [{"vt_symbol": "000001.SZSE", "direction": "多", "volume": 100, "price": 10.5}]
+        client.get_all_strategies.return_value = [{"name": "test_strategy", "status": "running", "vt_symbol": "000001.SZSE"}]
+        client.send_order.return_value = "test_orderid"
+        client.cancel_order.return_value = True
+        client.start_strategy.return_value = True
+        client.stop_strategy.return_value = True
         yield client
 
 
 @pytest.fixture
 def test_app(mock_rpc_client):
     """测试应用实例（启动 lifespan 初始化 app.state，并注入测试用户）"""
-    from vnpy_china_monitor.web.server import app
+    from vnpy_china_monitor.web.server import create_web_app
 
+    # server.py 用工厂模式（无模块级 app），这里构造一个测试 app
+    app = create_web_app()
     # 用 with 触发 lifespan，使 server.lifespan 初始化 app.state.auth_manager 等服务
     with TestClient(app) as client:
         # SimpleUserStore 已移除硬编码 admin/admin123，测试需显式注入测试用户
@@ -104,16 +114,14 @@ class TestMarketAPI:
         if not auth_token:
             pytest.skip("需要有效的认证令牌")
 
-        # 模拟RPC响应
-        mock_rpc_client.get_tick.return_value = {
-            "vt_symbol": "000001.SZSE",
-            "last_price": 10.50,
-            "volume": 1000000
-        }
+        # MarketService.get_tick 从本地缓存取，先通过 app.state 注入 tick
+        test_app.app.state.market_service.update_tick(
+            {"vt_symbol": "000001.SZSE", "last_price": 10.50, "volume": 1000000}
+        )
 
         response = test_app.get(
             "/api/market/tick/000001.SZSE",
-            headers={"Authorization": f"Bearer {auth_token}"}
+            headers={"Authorization": f"Bearer {auth_token}"},
         )
         assert response.status_code == 200
         data = response.json()
@@ -130,17 +138,19 @@ class TestMarketAPI:
         )
         assert response.status_code == 200
         data = response.json()
-        assert "ticks" in data
+        # ApiResponse 结构：{success, message, data:{ticks:[...]}, ...}
+        assert "ticks" in data["data"]
 
     def test_subscribe_symbol(self, test_app, auth_token):
         """测试订阅合约"""
         if not auth_token:
             pytest.skip("需要有效的认证令牌")
 
+        # 端点 vt_symbol 是 query param（非 body）
         response = test_app.post(
             "/api/market/subscribe",
-            json={"vt_symbol": "000001.SZSE"},
-            headers={"Authorization": f"Bearer {auth_token}"}
+            params={"vt_symbol": "000001.SZSE"},
+            headers={"Authorization": f"Bearer {auth_token}"},
         )
         assert response.status_code == 200
 
@@ -170,7 +180,7 @@ class TestTradeAPI:
         )
         assert response.status_code == 200
         data = response.json()
-        assert "account" in data
+        assert "accountid" in data["data"]
 
     def test_get_positions(self, test_app, auth_token):
         """测试获取持仓列表"""
@@ -183,7 +193,7 @@ class TestTradeAPI:
         )
         assert response.status_code == 200
         data = response.json()
-        assert "positions" in data
+        assert "positions" in data["data"]
 
     def test_send_order(self, test_app, auth_token):
         """测试发送委托"""
@@ -192,8 +202,8 @@ class TestTradeAPI:
 
         order_request = {
             "vt_symbol": "000001.SZSE",
-            "direction": "多",
-            "type": "限价",
+            "direction": "long",
+            "order_type": "limit",
             "volume": 100,
             "price": 10.50
         }
@@ -232,7 +242,7 @@ class TestStrategyAPI:
         )
         assert response.status_code == 200
         data = response.json()
-        assert "strategies" in data
+        assert "strategies" in data["data"]
 
     def test_start_strategy(self, test_app, auth_token):
         """测试启动策略"""
@@ -300,19 +310,16 @@ class TestAlertAPI:
         assert response.status_code == 503
 
 
-@pytest.mark.asyncio
 class TestWebSocket:
     """WebSocket测试"""
 
-    async def test_websocket_connection(self, test_app):
-        """测试WebSocket连接"""
-        # 这里需要使用异步WebSocket客户端进行测试
-        # 示例代码，实际实现可能需要调整
-        pass
+    def test_websocket_connection(self, test_app):
+        """测试WebSocket连接（占位：需异步 WS 客户端驱动，此处仅保证不阻塞）"""
+        assert test_app is not None
 
-    async def test_websocket_subscription(self, test_app):
-        """测试WebSocket订阅"""
-        pass
+    def test_websocket_subscription(self, test_app):
+        """测试WebSocket订阅（占位）"""
+        assert test_app is not None
 
 
 @pytest.mark.performance

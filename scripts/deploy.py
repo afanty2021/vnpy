@@ -43,6 +43,10 @@ EXTRA_PACKAGES = [
     "dbutils",
     "redis",
     "qdarkstyle",
+    # Web 监控（vnpy_china_monitor.web）依赖：FastAPI + JWT + TestClient
+    "fastapi",
+    "python-jose[cryptography]",
+    "httpx",
 ]
 
 

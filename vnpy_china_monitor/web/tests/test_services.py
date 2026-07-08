@@ -31,18 +31,17 @@ class TestMarketService:
         from vnpy_china_monitor.web.services.market_service import MarketService
         return MarketService(mock_rpc_client)
 
-    def test_get_tick(self, market_service, mock_rpc_client):
-        """测试获取单个行情"""
-        mock_rpc_client.get_tick.return_value = {
+    def test_get_tick(self, market_service):
+        """测试获取单个行情（MarketService.get_tick 从本地缓存取，需先 update_tick）"""
+        market_service.update_tick({
             "vt_symbol": "000001.SZSE",
             "last_price": 10.50,
             "volume": 1000000
-        }
+        })
 
         tick = market_service.get_tick("000001.SZSE")
         assert tick is not None
         assert tick["vt_symbol"] == "000001.SZSE"
-        mock_rpc_client.get_tick.assert_called_once()
 
     def test_get_history_bars(self, market_service, mock_rpc_client):
         """测试获取K线数据"""
@@ -62,24 +61,23 @@ class TestMarketService:
         mock_rpc_client.get_history_bars.assert_called_once()
 
     def test_subscribe(self, market_service, mock_rpc_client):
-        """测试订阅行情"""
+        """测试订阅行情（MarketService.subscribe 通过 rpc_client.call 发起）"""
         market_service.subscribe("000001.SZSE")
-        mock_rpc_client.subscribe.assert_called_once()
+        mock_rpc_client.call.assert_called_once()
 
     def test_format_tick(self, market_service):
-        """测试行情数据格式化"""
-        tick = {
+        """测试行情数据格式化（format_tick(vt_symbol) 从缓存取并挑选字段）"""
+        market_service.update_tick({
             "vt_symbol": "000001.SZSE",
             "last_price": 10.50,
-            "pre_close": 10.00,
             "volume": 1000000,
             "datetime": "2024-01-01 09:30:00"
-        }
+        })
 
-        formatted = market_service.format_tick(tick)
-        assert "change" in formatted
-        assert "change_percent" in formatted
-        assert formatted["change"] == 0.50
+        formatted = market_service.format_tick("000001.SZSE")
+        assert formatted is not None
+        assert formatted["vt_symbol"] == "000001.SZSE"
+        assert formatted["last_price"] == 10.50
 
 
 class TestTradeService:
@@ -103,8 +101,8 @@ class TestTradeService:
         assert account["accountid"] == "test_account"
 
     def test_get_positions(self, trade_service, mock_rpc_client):
-        """测试获取持仓列表"""
-        mock_rpc_client.get_positions.return_value = [
+        """测试获取持仓列表（TradeService.get_positions 调 rpc.get_position，单数）"""
+        mock_rpc_client.get_position.return_value = [
             {
                 "vt_symbol": "000001.SZSE",
                 "direction": "多",
@@ -142,7 +140,7 @@ class TestStrategyService:
         return StrategyService(mock_rpc_client)
 
     def test_get_all_strategies(self, strategy_service, mock_rpc_client):
-        """测试获取所有策略"""
+        """测试获取所有策略（实现返回 rpc 原值 dict，策略列表在 'strategies' 键下）"""
         mock_rpc_client.get_all_strategies.return_value = {
             "strategies": [
                 {
@@ -153,7 +151,8 @@ class TestStrategyService:
             ]
         }
 
-        strategies = strategy_service.get_all_strategies()
+        result = strategy_service.get_all_strategies()
+        strategies = result["strategies"]
         assert len(strategies) > 0
         assert strategies[0]["name"] == "test_strategy"
 
@@ -179,9 +178,13 @@ class TestAlertService:
     """告警服务测试"""
 
     @pytest.fixture
-    def alert_service(self, mock_event_engine):
+    def alert_service(self):
+        from vnpy_china_monitor.alert import AlertEngine
         from vnpy_china_monitor.web.services.alert_service import AlertService
-        return AlertService(mock_event_engine)
+        # 用真实 AlertEngine（Mock main/event）而非 Mock alert_engine，
+        # 使 send_alert 真实存储告警、get_active_alerts/get_stats 返回真实聚合结果
+        alert_engine = AlertEngine(main_engine=Mock(), event_engine=Mock())
+        return AlertService(alert_engine)
 
     def test_send_alert(self, alert_service, mock_event_engine):
         """测试发送告警"""
@@ -214,7 +217,7 @@ class TestAlertService:
         alert_service.send_alert("告警3", "消息3", "info")
 
         stats = alert_service.get_stats()
-        assert "total" in stats
+        assert "total_sent" in stats
         assert "by_severity" in stats
         assert stats["by_severity"]["critical"] >= 1
 
@@ -234,19 +237,19 @@ class TestServiceIntegration:
         market_service = MarketService(mock_rpc)
         trade_service = TradeService(mock_rpc)
 
-        # 模拟获取行情后交易
-        mock_rpc.get_tick.return_value = {
+        # 模拟获取行情后交易（MarketService.get_tick 从缓存取，需先 update_tick）
+        market_service.update_tick({
             "vt_symbol": "000001.SZSE",
             "last_price": 10.50
-        }
+        })
 
         tick = market_service.get_tick("000001.SZSE")
         assert tick is not None
 
-        # 基于行情发送委托
+        # 基于行情发送委托（send_order 签名: vt_symbol, direction, volume, price）
         mock_rpc.send_order.return_value = "test_order_id"
         order_id = trade_service.send_order(
-            "000001.SZSE", "多", "限价", 100, tick["last_price"]
+            "000001.SZSE", "多", 100, tick["last_price"]
         )
         assert order_id == "test_order_id"
 
